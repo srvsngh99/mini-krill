@@ -1,0 +1,14 @@
+name: review
+description: "Review code, text, or plans for issues and improvements"
+prompt_template: |
+  Review the following content carefully. Identify issues, suggest improvements,
+  and note what's done well.
+
+  Content to review:
+  {{.Input}}
+
+  Provide:
+  1. Issues found (if any)
+  2. Suggested improvements
+  3. What's good about it
+  4. Overall assessment

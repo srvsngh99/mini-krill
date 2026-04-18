@@ -1,0 +1,69 @@
+# Mini Krill - Default Configuration
+# By Sourav AI Labs
+# Override by placing config.yaml in ~/.mini-krill/
+
+agent:
+  name: krill
+  max_sub_krills: 3
+  plan_approval: true    # always show plan before executing
+
+llm:
+  provider: ollama       # ollama, openai, anthropic, google
+  model: llama3.2
+  temperature: 0.7
+  max_tokens: 2048
+  api_key: ""            # set via KRILL_LLM_API_KEY env var
+  base_url: ""           # custom API endpoint (optional)
+
+brain:
+  data_dir: ""           # defaults to ~/.mini-krill/brain
+  soul_file: ""          # custom soul YAML (optional)
+  max_memories: 1000
+  heartbeat_interval_sec: 30
+
+ollama:
+  host: "http://localhost:11434"
+  auto_install: true
+  auto_start: true
+  default_model: llama3.2
+
+telegram:
+  enabled: false
+  token: ""              # set via KRILL_TELEGRAM_TOKEN env var
+  allowed_ids: []        # empty = allow all
+
+discord:
+  enabled: false
+  token: ""              # set via KRILL_DISCORD_TOKEN env var
+  guild_id: ""
+  channel_id: ""
+
+plugins:
+  dir: ""                # defaults to ~/.mini-krill/skills
+  enabled: []
+
+mcp:
+  servers: {}
+  # Example:
+  # servers:
+  #   filesystem:
+  #     command: npx
+  #     args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+  #     enabled: true
+
+log:
+  level: info            # debug, info, warn, error
+  file: ""               # defaults to ~/.mini-krill/logs/krill.log
+  json: false
+
+doctor:
+  checks:
+    - ollama
+    - llm
+    - brain
+    - disk
+    - memory
+    - config
+
+tui:
+  theme: ocean           # ocean, deep, bioluminescent
