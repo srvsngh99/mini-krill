@@ -1,0 +1,44 @@
+version: 2
+
+builds:
+  - id: minikrill
+    main: ./cmd/minikrill
+    binary: minikrill
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/srvsngh99/mini-krill/internal/core.Version={{.Version}}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: "minikrill_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  github:
+    owner: srvsngh99
+    name: mini-krill
+  draft: false
+  prerelease: auto

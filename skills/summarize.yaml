@@ -1,0 +1,12 @@
+name: summarize
+description: "Summarize text, articles, or content into key points"
+prompt_template: |
+  Summarize the following content concisely. Extract the key points and present
+  them as a brief summary with bullet points for the main takeaways.
+
+  Content:
+  {{.Input}}
+
+  Provide:
+  1. A one-sentence summary
+  2. Key takeaways (3-5 bullet points)

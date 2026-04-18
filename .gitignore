@@ -1,0 +1,41 @@
+# Binaries
+minikrill
+mini-krill
+*.exe
+*.dll
+*.so
+*.dylib
+/dist/
+
+# Test
+*.test
+*.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/
+
+# Mini Krill runtime data (never commit)
+.mini-krill/
+brain/
+memories/
+logs/
+*.pid
+
+# Secrets
+.env
+.env.*
+credentials.*
+*.key
+*.pem

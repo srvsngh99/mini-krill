@@ -1,0 +1,34 @@
+services:
+  minikrill:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: minikrill
+    depends_on:
+      - ollama
+    volumes:
+      - ~/.mini-krill:/root/.mini-krill
+      - krill-data:/data
+    environment:
+      - KRILL_OLLAMA_HOST=http://ollama:11434
+      - KRILL_DATA_DIR=/root/.mini-krill
+    networks:
+      - krill-net
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: minikrill-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - krill-net
+
+volumes:
+  ollama-data:
+  krill-data:
+
+networks:
+  krill-net:
+    driver: bridge

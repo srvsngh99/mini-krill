@@ -1,0 +1,13 @@
+name: explain
+description: "Explain a concept or topic in simple terms"
+prompt_template: |
+  Explain the following topic in simple, clear terms. Use analogies where
+  helpful. Assume the reader is smart but unfamiliar with this specific topic.
+
+  Topic: {{.Input}}
+
+  Structure your explanation as:
+  1. What it is (one sentence)
+  2. How it works (2-3 sentences)
+  3. Why it matters (1-2 sentences)
+  4. A simple analogy (optional, if helpful)
