@@ -427,11 +427,7 @@ func (t *TelegramBot) handleCommand(chatID int64, msg *tgbotapi.Message) {
 
 	case "fact":
 		facts := core.KrillFacts
-		if len(facts) > 0 {
-			t.sendMessage(chatID, "Did you know? "+facts[rand.Intn(len(facts))])
-		} else {
-			t.sendMessage(chatID, "I seem to have forgotten all my krill facts. That's alarming.")
-		}
+		t.sendMessage(chatID, "Did you know? "+facts[rand.Intn(len(facts))])
 
 	case "plan":
 		t.sendMessage(chatID,

@@ -63,7 +63,7 @@ var personalityCreateCmd = &cobra.Command{
 
 		displayName := ask(scanner, cCyan+"  Display name: "+cReset)
 		if displayName == "" {
-			displayName = strings.Title(name)
+			displayName = strings.ToUpper(name[:1]) + name[1:]
 		}
 
 		style := ask(scanner, cCyan+"  Style (e.g. 'formal and precise', 'casual and fun'): "+cReset)

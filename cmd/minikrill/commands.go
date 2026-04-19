@@ -374,7 +374,7 @@ var tuiCmd = &cobra.Command{
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		_ = stack.hb.Start(ctx)
-		defer stack.hb.Stop()
+		defer func() { _ = stack.hb.Stop() }()
 
 		app := tui.NewApp(stack.agent, stack.brain, stack.hb, core.Version, stack.cfg.Log.File)
 		return app.Run()
