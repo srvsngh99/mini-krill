@@ -113,3 +113,42 @@ var ollamaStatusCmd = &cobra.Command{
 		return nil
 	},
 }
+
+var ollamaEnsureCmd = &cobra.Command{
+	Use:   "ensure",
+	Short: "Install, start, and pull the default model in one shot",
+	Long:  "Ensures Ollama is installed, running, and has the default model ready. Other bots can call this at startup.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		mgr, cfg := newOllamaManager()
+		ctx := context.Background()
+
+		// Install if missing
+		if !mgr.IsInstalled() {
+			fmt.Println(cDim + "Installing Ollama..." + cReset)
+			if err := mgr.Install(ctx); err != nil {
+				return fmt.Errorf("install failed: %w", err)
+			}
+			fmt.Println(cGreen + "Installed." + cReset)
+		}
+
+		// Start if stopped
+		if err := mgr.EnsureRunning(ctx); err != nil {
+			return fmt.Errorf("start failed: %w", err)
+		}
+
+		// Pull default model if not present
+		model := cfg.Ollama.DefaultModel
+		if model == "" {
+			model = "gemma4:e2b"
+		}
+		if !mgr.HasModel(ctx, model) {
+			fmt.Printf(cDim+"Pulling %s..."+cReset+"\n", model)
+			if err := mgr.Pull(ctx, model); err != nil {
+				return fmt.Errorf("pull failed: %w", err)
+			}
+		}
+
+		fmt.Println("ready")
+		return nil
+	},
+}
