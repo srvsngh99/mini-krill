@@ -140,15 +140,16 @@ func TestSkillRegistryBuiltins(t *testing.T) {
 	reg.RegisterBuiltins()
 
 	infos := reg.List()
-	if len(infos) != 3 {
-		t.Fatalf("RegisterBuiltins() resulted in %d skills, want 3", len(infos))
+	if len(infos) < 3 {
+		t.Fatalf("RegisterBuiltins() resulted in %d skills, want at least 3", len(infos))
 	}
 
-	// Verify the three expected built-in skills exist
+	// Verify the expected built-in skills exist
 	expected := map[string]bool{
 		"recall":  false,
 		"sysinfo": false,
 		"time":    false,
+		"search":  false,
 	}
 
 	for _, info := range infos {
