@@ -55,9 +55,10 @@ type BrainConfig struct {
 
 // TelegramConfig for the Telegram bot integration.
 type TelegramConfig struct {
-	Enabled    bool    `yaml:"enabled"`
-	Token      string  `yaml:"token"`
-	AllowedIDs []int64 `yaml:"allowed_ids"`
+	Enabled      bool    `yaml:"enabled"`
+	Token        string  `yaml:"token"`
+	AllowedIDs   []int64 `yaml:"allowed_ids"`
+	BotMaxTurns  int     `yaml:"bot_max_turns"`  // max bot-to-bot exchanges before waiting for human (0=unlimited, default 3)
 }
 
 // DiscordConfig for the Discord bot integration.
@@ -213,6 +214,9 @@ func fillDefaults(cfg *Config) {
 	}
 	if cfg.MCP.Servers == nil {
 		cfg.MCP.Servers = make(map[string]MCPServerConfig)
+	}
+	if cfg.Telegram.BotMaxTurns == 0 {
+		cfg.Telegram.BotMaxTurns = 3
 	}
 }
 
