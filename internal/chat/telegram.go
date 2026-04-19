@@ -134,7 +134,10 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 		return
 	}
 
-	// Regular message - send typing indicator, then process.
+	// Acknowledge with a reaction emoji so user knows we received it
+	t.react(chatID, msg.MessageID, "eyes")
+
+	// Send typing indicator while processing
 	typing := tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping)
 	if _, err := t.bot.Send(typing); err != nil {
 		log.Debug("failed to send typing action", "error", err)
@@ -155,6 +158,13 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 	}
 	if strings.TrimSpace(resp) == "" {
 		resp = "..."
+	}
+
+	// Swap reaction from eyes to checkmark on success, or warning on error
+	if err != nil {
+		t.react(chatID, msg.MessageID, "thumbs_down")
+	} else {
+		t.react(chatID, msg.MessageID, "thumbs_up")
 	}
 
 	t.sendLong(chatID, resp)
@@ -218,6 +228,40 @@ func (t *TelegramBot) isAllowed(userID int64) bool {
 		}
 	}
 	return false
+}
+
+// react sets an emoji reaction on a message via the Telegram Bot API.
+// Uses the setMessageReaction endpoint (Bot API 7.2+).
+func (t *TelegramBot) react(chatID int64, messageID int, emoji string) {
+	params := tgbotapi.Params{}
+	params.AddNonZero64("chat_id", chatID)
+	params.AddNonZero("message_id", messageID)
+	// Build the reaction JSON inline - the library doesn't have native support yet
+	reactionJSON := fmt.Sprintf(`[{"type":"emoji","emoji":"%s"}]`, emojiChar(emoji))
+	params["reaction"] = reactionJSON
+	if _, err := t.bot.MakeRequest("setMessageReaction", params); err != nil {
+		log.Debug("failed to set reaction", "emoji", emoji, "error", err)
+	}
+}
+
+// emojiChar maps short names to actual unicode emoji for reactions.
+func emojiChar(name string) string {
+	switch name {
+	case "eyes":
+		return "\U0001F440" // eyes
+	case "thumbs_up":
+		return "\U0001F44D" // thumbs up
+	case "thumbs_down":
+		return "\U0001F44E" // thumbs down
+	case "fire":
+		return "\U0001F525" // fire
+	case "check":
+		return "\u2705" // green check
+	case "thinking":
+		return "\U0001F914" // thinking face
+	default:
+		return "\U0001F44D" // default to thumbs up
+	}
 }
 
 // sendMessage sends a single text message to the given chat.
