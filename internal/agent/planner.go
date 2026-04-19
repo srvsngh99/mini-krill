@@ -1,8 +1,5 @@
 // Package agent - planner.go handles plan generation, formatting, and execution.
 // Plans are the krill's navigation chart - they plot the course before diving.
-//
-// Krill fact: krill migrate vertically 600 meters every day with precision.
-// Our planner charts the course just as carefully before any task begins.
 package agent
 
 import (

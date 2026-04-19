@@ -1,7 +1,6 @@
 // Package tui implements the Terminal UI for Mini Krill using Bubble Tea.
 // The ocean-themed interface is the showcase of the project - gorgeous,
 // functional, and full of crustaceous personality.
-// Krill fact: krill are bioluminescent - this TUI glows too.
 package tui
 
 import (

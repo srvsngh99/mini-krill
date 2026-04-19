@@ -1,7 +1,6 @@
 // Package chat provides platform-agnostic message handling and concrete
 // chat-bot integrations (Telegram, Discord). Every bot funnels messages
 // through ChatHandlerImpl so routing logic stays in one place.
-// Krill fact: krill swarms coordinate without a leader - this handler is the swarm brain.
 package chat
 
 import (

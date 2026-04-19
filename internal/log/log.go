@@ -1,6 +1,5 @@
 // Package log provides structured logging for Mini Krill using Go's stdlib slog.
 // Zero external dependencies. Logs to stderr and optionally to a file.
-// Krill fact: krill navigate the dark ocean depths - this logger lights the way.
 package log
 
 import (

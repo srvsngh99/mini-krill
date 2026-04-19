@@ -13,7 +13,6 @@ import (
 )
 
 // NewProvider creates the appropriate LLMProvider based on configuration.
-// Krill fact: krill swarms self-organize - this factory picks the right formation.
 func NewProvider(cfg config.LLMConfig, ollamaCfg config.OllamaConfig) (core.LLMProvider, error) {
 	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
 

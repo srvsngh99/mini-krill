@@ -1,0 +1,115 @@
+package main
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/spf13/cobra"
+)
+
+var ollamaCmd = &cobra.Command{
+	Use:   "ollama",
+	Short: "Manage local Ollama installation",
+}
+
+var ollamaInstallCmd = &cobra.Command{
+	Use:   "install",
+	Short: "Install Ollama",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		mgr, _ := newOllamaManager()
+		if mgr.IsInstalled() {
+			fmt.Println(cGreen + "Ollama is already installed!" + cReset)
+			return nil
+		}
+		fmt.Println(cDim + "Installing Ollama..." + cReset)
+		if err := mgr.Install(context.Background()); err != nil {
+			return fmt.Errorf("install failed: %w\nInstall manually: https://ollama.com", err)
+		}
+		fmt.Println(cGreen + "Ollama installed!" + cReset)
+		return nil
+	},
+}
+
+var ollamaStartCmd = &cobra.Command{
+	Use:   "start",
+	Short: "Start Ollama server",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		mgr, _ := newOllamaManager()
+		fmt.Println(cDim + "Starting Ollama..." + cReset)
+		if err := mgr.Start(context.Background()); err != nil {
+			return err
+		}
+		fmt.Println(cGreen + "Ollama is running!" + cReset)
+		return nil
+	},
+}
+
+var ollamaStopCmd = &cobra.Command{
+	Use:   "stop",
+	Short: "Stop Ollama server",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		mgr, _ := newOllamaManager()
+		if err := mgr.Stop(); err != nil {
+			return err
+		}
+		fmt.Println(cCyan + "Ollama stopped." + cReset)
+		return nil
+	},
+}
+
+var ollamaPullCmd = &cobra.Command{
+	Use:   "pull [model]",
+	Short: "Pull an Ollama model",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		mgr, _ := newOllamaManager()
+		model := args[0]
+		fmt.Printf(cDim+"Pulling %s..."+cReset+"\n", model)
+		if err := mgr.Pull(context.Background(), model); err != nil {
+			return err
+		}
+		fmt.Printf(cGreen+"Model %s is ready!"+cReset+"\n", model)
+		return nil
+	},
+}
+
+var ollamaListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List local Ollama models",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		mgr, _ := newOllamaManager()
+		models, err := mgr.ListModels(context.Background())
+		if err != nil {
+			return fmt.Errorf("could not list models: %w", err)
+		}
+		if len(models) == 0 {
+			fmt.Println("No models found.")
+			fmt.Println(cDim + "Pull one with: " + cReset + "minikrill ollama pull llama3.2")
+			return nil
+		}
+		fmt.Println(cBold + "Local models:" + cReset)
+		for _, m := range models {
+			fmt.Printf("  "+cCyan+"%-25s"+cReset+cDim+" %.1f GB\n"+cReset, m.Name, float64(m.Size)/(1024*1024*1024))
+		}
+		return nil
+	},
+}
+
+var ollamaStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Check Ollama status",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		mgr, _ := newOllamaManager()
+		status := mgr.Status(context.Background())
+		switch status {
+		case "running":
+			fmt.Println(cGreen + "Ollama: running" + cReset)
+		case "stopped":
+			fmt.Println(cYellow + "Ollama: stopped" + cReset)
+			fmt.Println(cDim + "Start with: " + cReset + "minikrill ollama start")
+		default:
+			fmt.Println(cRed + "Ollama: " + status + cReset)
+		}
+		return nil
+	},
+}

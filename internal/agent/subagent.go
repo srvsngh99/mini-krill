@@ -1,9 +1,6 @@
 // Package agent - subagent.go manages sub-krill spawning and lifecycle.
 // Sub-krills are lightweight, focused mini-agents that handle specific tasks
 // in parallel, like a krill swarm splitting to cover more ocean territory.
-//
-// Krill fact: a single krill swarm can contain over 2 million tons of biomass,
-// all moving in coordination. SubKrillManager orchestrates our own micro-swarm.
 package agent
 
 import (

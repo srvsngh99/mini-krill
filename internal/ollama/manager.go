@@ -1,7 +1,5 @@
 // Package ollama manages the lifecycle of a local Ollama installation:
 // detecting, installing, starting, stopping, and pulling models.
-// Krill fact: krill swarm coordinators ensure the colony is fed and moving -
-// OllamaManager does the same for the local inference engine.
 package ollama
 
 import (
@@ -343,7 +341,6 @@ func (m *OllamaManager) ListModels(ctx context.Context) ([]ModelInfo, error) {
 
 // Status returns the current state of the Ollama runtime:
 // "running", "stopped", or "not installed".
-// Krill fact: krill have compound eyes that scan 360 degrees - this checks all angles.
 func (m *OllamaManager) Status(ctx context.Context) string {
 	if !m.IsInstalled() {
 		return "not installed"
@@ -369,7 +366,7 @@ func (m *OllamaManager) isHealthy(ctx context.Context) bool {
 		return false
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	return resp.StatusCode == http.StatusOK
 }
