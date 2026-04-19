@@ -188,9 +188,33 @@ func (a *KrillAgent) handleTask(ctx context.Context, input string) (string, erro
 }
 
 // handleChat generates a conversational response using the LLM with brain enrichment.
+// If the user's question looks like it needs current information, the krill
+// automatically searches the web first and includes results in context.
 func (a *KrillAgent) handleChat(ctx context.Context) (string, error) {
-	// Enrich messages with personality, soul, and memory context
+	// Check if the latest user message needs web search
+	lastMsg := ""
+	if len(a.history) > 0 {
+		lastMsg = a.history[len(a.history)-1].Content
+	}
+
 	enriched := a.brain.EnrichMessages(a.history)
+
+	// If the question likely needs current info, search the web first
+	if a.shouldSearch(lastMsg) {
+		if searchSkill, ok := a.skills.Get("search"); ok {
+			log.Info("auto-searching web for context", "query", lastMsg)
+			searchResults, err := searchSkill.Execute(ctx, lastMsg, nil) // raw results, no LLM summary
+			if err == nil && searchResults != "" {
+				// Inject search results as context before the user message
+				searchCtx := core.Message{
+					Role:    "system",
+					Content: "Here are recent web search results relevant to the user's question. Use them to provide an informed answer:\n\n" + searchResults,
+				}
+				// Insert before the last user message
+				enriched = append(enriched[:len(enriched)-1], searchCtx, enriched[len(enriched)-1])
+			}
+		}
+	}
 
 	resp, err := a.llm.Chat(ctx, enriched)
 	if err != nil {
@@ -206,6 +230,24 @@ func (a *KrillAgent) handleChat(ctx context.Context) (string, error) {
 	)
 
 	return resp.Content, nil
+}
+
+// shouldSearch detects if a message likely needs current web information.
+// Krill have photoreceptors that detect light changes - this detects info needs.
+func (a *KrillAgent) shouldSearch(msg string) bool {
+	lower := strings.ToLower(msg)
+	searchTriggers := []string{
+		"search for", "look up", "find out", "what is the latest",
+		"current news", "recent", "today", "who is", "what happened",
+		"search the web", "google", "search online", "look online",
+		"what's new", "latest on", "news about", "find me",
+	}
+	for _, trigger := range searchTriggers {
+		if strings.Contains(lower, trigger) {
+			return true
+		}
+	}
+	return false
 }
 
 // classifyIntent sends the user input to the LLM for TASK vs CHAT classification.
