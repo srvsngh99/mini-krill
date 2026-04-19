@@ -72,7 +72,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "enable debug logging")
 
 	ollamaCmd.AddCommand(ollamaInstallCmd, ollamaStartCmd, ollamaStopCmd,
-		ollamaPullCmd, ollamaListCmd, ollamaStatusCmd)
+		ollamaPullCmd, ollamaListCmd, ollamaStatusCmd, ollamaEnsureCmd)
 	skillCmd.AddCommand(skillListCmd)
 	brainCmd.AddCommand(brainStatusCmd, brainRecallCmd, brainForgetCmd, brainSearchCmd)
 	personalityCmd.AddCommand(personalityListCmd, personalityCreateCmd, personalitySwitchCmd, personalityShowCmd)

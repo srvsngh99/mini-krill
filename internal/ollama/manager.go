@@ -32,8 +32,11 @@ type OllamaManager struct {
 	host   string
 	client *http.Client
 
-	mu   sync.Mutex
-	proc *os.Process // tracked "ollama serve" process, if we started it
+	mu          sync.Mutex
+	proc        *os.Process // tracked "ollama serve" process, if we started it
+	weStartedIt bool        // true only if Start() spawned the process
+
+	monitorCancel context.CancelFunc // stops the background health monitor
 }
 
 // NewManager creates an OllamaManager targeting the configured host.
@@ -134,12 +137,24 @@ func (m *OllamaManager) installViaScript(ctx context.Context) error {
 // Lifecycle
 // ---------------------------------------------------------------------------
 
+// EnsureRunning checks if Ollama is healthy and starts it if not.
+// Intended as the single entry point for "make sure Ollama is up".
+func (m *OllamaManager) EnsureRunning(ctx context.Context) error {
+	if m.isHealthy(ctx) {
+		log.Debug("ollama is already running")
+		// Don't reset weStartedIt — we may already own this process
+		return nil
+	}
+	return m.Start(ctx)
+}
+
 // Start launches "ollama serve" as a background process. If Ollama is already
 // running (health check passes), this is a no-op.
 func (m *OllamaManager) Start(ctx context.Context) error {
 	// Already running?
 	if m.isHealthy(ctx) {
 		log.Debug("ollama is already running")
+		// Don't reset weStartedIt — we may already own this process
 		return nil
 	}
 
@@ -161,6 +176,7 @@ func (m *OllamaManager) Start(ctx context.Context) error {
 
 	m.mu.Lock()
 	m.proc = cmd.Process
+	m.weStartedIt = true
 	m.mu.Unlock()
 
 	// Release the process so it doesn't become a zombie if we exit
@@ -369,4 +385,118 @@ func (m *OllamaManager) isHealthy(ctx context.Context) bool {
 	_, _ = io.Copy(io.Discard, resp.Body)
 
 	return resp.StatusCode == http.StatusOK
+}
+
+// HasModel checks if a model is available locally.
+func (m *OllamaManager) HasModel(ctx context.Context, model string) bool {
+	models, err := m.ListModels(ctx)
+	if err != nil {
+		return false
+	}
+	normalize := func(s string) string {
+		s = strings.ToLower(s)
+		if !strings.Contains(s, ":") {
+			s += ":latest"
+		}
+		return s
+	}
+	target := normalize(model)
+	for _, mi := range models {
+		if normalize(mi.Name) == target {
+			return true
+		}
+	}
+	return false
+}
+
+// ---------------------------------------------------------------------------
+// Health monitor
+// ---------------------------------------------------------------------------
+
+// StartHealthMonitor begins a background goroutine that probes Ollama every
+// 15 seconds. If Ollama dies and we started it, auto-restart with backoff.
+func (m *OllamaManager) StartHealthMonitor() {
+	ctx, cancel := context.WithCancel(context.Background())
+	m.mu.Lock()
+	m.monitorCancel = cancel
+	m.mu.Unlock()
+
+	go m.healthMonitorLoop(ctx)
+	log.Info("ollama health monitor started")
+}
+
+// StopHealthMonitor stops the background health monitor goroutine.
+func (m *OllamaManager) StopHealthMonitor() {
+	m.mu.Lock()
+	cancel := m.monitorCancel
+	m.monitorCancel = nil
+	m.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+		log.Info("ollama health monitor stopped")
+	}
+}
+
+func (m *OllamaManager) healthMonitorLoop(ctx context.Context) {
+	const probeInterval = 15 * time.Second
+	const maxCrashes = 5
+	backoff := 2 * time.Second
+	backoffMax := 60 * time.Second
+	consecutiveCrashes := 0
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(probeInterval):
+		}
+
+		if ctx.Err() != nil {
+			return
+		}
+
+		if m.isHealthy(ctx) {
+			if consecutiveCrashes > 0 {
+				log.Info("ollama recovered", "after_crashes", consecutiveCrashes)
+				consecutiveCrashes = 0
+				backoff = 2 * time.Second
+			}
+			continue
+		}
+
+		// Ollama is not healthy
+		m.mu.Lock()
+		weStarted := m.weStartedIt
+		m.mu.Unlock()
+
+		if !weStarted {
+			log.Warn("ollama is unreachable (not managed by us - will not restart)")
+			continue
+		}
+
+		consecutiveCrashes++
+		log.Warn("ollama crashed", "consecutive", consecutiveCrashes)
+
+		if consecutiveCrashes >= maxCrashes {
+			log.Error("ollama exceeded max consecutive crashes - giving up", "max", maxCrashes)
+			return
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+
+		log.Info("attempting ollama restart", "backoff", backoff)
+		if err := m.Start(ctx); err != nil {
+			log.Error("ollama restart failed", "error", err)
+		}
+
+		backoff = backoff * 2
+		if backoff > backoffMax {
+			backoff = backoffMax
+		}
+	}
 }
