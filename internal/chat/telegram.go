@@ -18,9 +18,10 @@ import (
 // telegramMaxLen is Telegram's hard limit for a single message.
 const telegramMaxLen = 4096
 
-// botCooldown prevents infinite bot-to-bot reply loops.
-// After replying to a bot, wait this long before replying to the same bot again.
-const botCooldown = 30 * time.Second
+// defaultBotMaxTurns is how many bot-to-bot exchanges are allowed
+// before the krill waits for a human to speak. Configurable via
+// telegram.bot_max_turns in config.yaml.
+const defaultBotMaxTurns = 3
 
 // LearnFunc is called to store group conversation insights to memory.
 type LearnFunc func(ctx context.Context, key, value string) error
@@ -32,8 +33,8 @@ type TelegramBot struct {
 	cfg          config.TelegramConfig
 	stopCh       chan struct{}
 	done         chan struct{}
-	botReplies   map[int64]time.Time // tracks last reply to each bot (by user ID)
-	botRepliesMu sync.Mutex
+	botTurns     map[int64]int // tracks consecutive bot-to-bot exchanges per chat
+	botTurnsMu   sync.Mutex
 	learnFn      LearnFunc // optional: store group learnings to memory
 }
 
@@ -52,12 +53,12 @@ func NewTelegramBot(cfg config.TelegramConfig, handler core.ChatHandler) (*Teleg
 	log.Info("telegram bot authenticated", "username", bot.Self.UserName)
 
 	return &TelegramBot{
-		bot:        bot,
-		handler:    handler,
-		cfg:        cfg,
-		stopCh:     make(chan struct{}),
-		done:       make(chan struct{}),
-		botReplies: make(map[int64]time.Time),
+		bot:      bot,
+		handler:  handler,
+		cfg:      cfg,
+		stopCh:   make(chan struct{}),
+		done:     make(chan struct{}),
+		botTurns: make(map[int64]int),
 	}, nil
 }
 
@@ -163,25 +164,34 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 			msg.ReplyToMessage.From != nil &&
 			msg.ReplyToMessage.From.UserName == botUsername
 
-		// Bot-to-bot loop prevention: cooldown after replying to same bot
-		if isFromBot && !t.canReplyToBot(msg.From.ID) {
-			log.Debug("skipping bot message (cooldown active)", "bot", msg.From.UserName)
-			return
+		// Human spoke -> reset bot turn counter for this chat.
+		// This is the key to preventing loops while allowing conversation:
+		// bots can exchange N turns, then wait for human input.
+		if !isFromBot {
+			t.resetBotTurns(chatID)
 		}
 
-		// In a group, krill is always listening and participates naturally.
-		// Mentioned/replied = always respond. Otherwise = respond to anything
-		// relevant (questions, bot messages, opinions, topics it knows about).
-		// This creates natural group dynamics where both bots and humans interact.
-		directlyAddressed := mentioned || isReplyToMe
-
-		if !directlyAddressed {
-			// Still respond to most messages - krill is an active group member.
-			// Only skip truly irrelevant noise (very short, no substance).
-			text := strings.TrimSpace(extractMessageText(msg))
-			if len(text) < 3 && !isFromBot {
-				return // too short to be meaningful
+		// Bot-to-bot: check turn limit
+		maxTurns := t.cfg.BotMaxTurns
+		if maxTurns == 0 {
+			maxTurns = defaultBotMaxTurns
+		}
+		if isFromBot && !mentioned && !isReplyToMe {
+			turns := t.getBotTurns(chatID)
+			if turns >= maxTurns {
+				log.Debug("bot turn limit reached, waiting for human",
+					"bot", msg.From.UserName,
+					"turns", turns,
+					"max", maxTurns,
+				)
+				return
 			}
+		}
+
+		// Skip very short noise
+		text := strings.TrimSpace(extractMessageText(msg))
+		if len(text) < 3 {
+			return
 		}
 
 		log.Info("group message, participating",
@@ -189,6 +199,7 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 			"mentioned", mentioned,
 			"reply_to_me", isReplyToMe,
 			"is_bot", isFromBot,
+			"bot_turns", t.getBotTurns(chatID),
 		)
 	}
 
@@ -257,9 +268,9 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 		resp = "..."
 	}
 
-	// Track bot reply for cooldown
+	// Track bot-to-bot turn
 	if isFromBot {
-		t.recordBotReply(msg.From.ID)
+		t.incrementBotTurns(chatID)
 	}
 
 	// Swap reaction
@@ -399,22 +410,25 @@ func stripMention(text, botUsername string) string {
 	return strings.TrimSpace(text)
 }
 
-// canReplyToBot checks if we can reply to a bot (cooldown not active).
-func (t *TelegramBot) canReplyToBot(botID int64) bool {
-	t.botRepliesMu.Lock()
-	defer t.botRepliesMu.Unlock()
-	last, ok := t.botReplies[botID]
-	if !ok {
-		return true
-	}
-	return time.Since(last) > botCooldown
+// getBotTurns returns the current bot-to-bot exchange count for a chat.
+func (t *TelegramBot) getBotTurns(chatID int64) int {
+	t.botTurnsMu.Lock()
+	defer t.botTurnsMu.Unlock()
+	return t.botTurns[chatID]
 }
 
-// recordBotReply records that we replied to a bot (starts cooldown).
-func (t *TelegramBot) recordBotReply(botID int64) {
-	t.botRepliesMu.Lock()
-	defer t.botRepliesMu.Unlock()
-	t.botReplies[botID] = time.Now()
+// incrementBotTurns adds one to the bot exchange counter for a chat.
+func (t *TelegramBot) incrementBotTurns(chatID int64) {
+	t.botTurnsMu.Lock()
+	defer t.botTurnsMu.Unlock()
+	t.botTurns[chatID]++
+}
+
+// resetBotTurns resets the bot exchange counter when a human speaks.
+func (t *TelegramBot) resetBotTurns(chatID int64) {
+	t.botTurnsMu.Lock()
+	defer t.botTurnsMu.Unlock()
+	t.botTurns[chatID] = 0
 }
 
 // replyLong sends a reply to a specific message, splitting if needed.
