@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math/rand"
 	"strings"
+	"sync"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
@@ -16,13 +18,19 @@ import (
 // telegramMaxLen is Telegram's hard limit for a single message.
 const telegramMaxLen = 4096
 
+// botCooldown prevents infinite bot-to-bot reply loops.
+// After replying to a bot, wait this long before replying to the same bot again.
+const botCooldown = 30 * time.Second
+
 // TelegramBot implements core.ChatBot for Telegram.
 type TelegramBot struct {
-	bot     *tgbotapi.BotAPI
-	handler core.ChatHandler
-	cfg     config.TelegramConfig
-	stopCh  chan struct{}
-	done    chan struct{}
+	bot          *tgbotapi.BotAPI
+	handler      core.ChatHandler
+	cfg          config.TelegramConfig
+	stopCh       chan struct{}
+	done         chan struct{}
+	botReplies   map[int64]time.Time // tracks last reply to each bot (by user ID)
+	botRepliesMu sync.Mutex
 }
 
 // NewTelegramBot creates a TelegramBot using the provided config and handler.
@@ -40,11 +48,12 @@ func NewTelegramBot(cfg config.TelegramConfig, handler core.ChatHandler) (*Teleg
 	log.Info("telegram bot authenticated", "username", bot.Self.UserName)
 
 	return &TelegramBot{
-		bot:     bot,
-		handler: handler,
-		cfg:     cfg,
-		stopCh:  make(chan struct{}),
-		done:    make(chan struct{}),
+		bot:        bot,
+		handler:    handler,
+		cfg:        cfg,
+		stopCh:     make(chan struct{}),
+		done:       make(chan struct{}),
+		botReplies: make(map[int64]time.Time),
 	}, nil
 }
 
@@ -118,9 +127,13 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 
 	msg := update.Message
 	chatID := msg.Chat.ID
+	isGroup := msg.Chat.IsGroup() || msg.Chat.IsSuperGroup()
+	isFromBot := msg.From != nil && msg.From.IsBot
+	botUsername := t.bot.Self.UserName
 
 	// Access control: if AllowedIDs is non-empty, only listed users may interact.
-	if len(t.cfg.AllowedIDs) > 0 && !t.isAllowed(msg.From.ID) {
+	// In groups, skip this check for bot-to-bot interactions.
+	if !isFromBot && len(t.cfg.AllowedIDs) > 0 && !t.isAllowed(msg.From.ID) {
 		log.Warn("telegram message from unauthorised user",
 			"user_id", msg.From.ID,
 			"username", msg.From.UserName,
@@ -128,24 +141,70 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 		return
 	}
 
-	// Handle commands.
+	// Handle commands (work in both DMs and groups).
 	if msg.IsCommand() {
 		t.handleCommand(chatID, msg)
 		return
 	}
 
-	// Extract text from all message types - krill understands everything
+	// --- Group chat logic ---
+	if isGroup {
+		mentioned := t.isMentioned(msg, botUsername)
+		isReply := msg.ReplyToMessage != nil &&
+			msg.ReplyToMessage.From != nil &&
+			msg.ReplyToMessage.From.UserName == botUsername
+
+		// In groups, only respond when:
+		// 1. Directly @mentioned
+		// 2. Replied to krill's message
+		// 3. From another bot (with cooldown to prevent loops)
+		if !mentioned && !isReply && !isFromBot {
+			return // not addressed to us, ignore silently
+		}
+
+		// Bot-to-bot: rate limit to prevent infinite loops
+		if isFromBot {
+			if !t.canReplyToBot(msg.From.ID) {
+				log.Debug("skipping bot message (cooldown active)",
+					"bot", msg.From.UserName,
+				)
+				return
+			}
+			// If not mentioned and not a reply to us, only respond 30% of the time
+			// to keep group chat natural
+			if !mentioned && !isReply && rand.Float64() > 0.3 {
+				return
+			}
+		}
+	}
+
+	// Extract text from all message types
 	messageText := extractMessageText(msg)
 	if strings.TrimSpace(messageText) == "" {
-		// Completely empty - nothing to process
 		t.react(chatID, msg.MessageID, "eyes")
 		return
 	}
 
-	// Acknowledge with a reaction emoji so user knows we received it
+	// Strip @mention from message text so the agent gets clean input
+	messageText = stripMention(messageText, botUsername)
+
+	// Add context about who's talking (useful in groups)
+	if isGroup && msg.From != nil {
+		senderName := msg.From.FirstName
+		if senderName == "" {
+			senderName = msg.From.UserName
+		}
+		if isFromBot {
+			messageText = fmt.Sprintf("[Message from bot @%s in group chat]: %s", msg.From.UserName, messageText)
+		} else {
+			messageText = fmt.Sprintf("[Message from %s in group chat]: %s", senderName, messageText)
+		}
+	}
+
+	// Acknowledge
 	t.react(chatID, msg.MessageID, "eyes")
 
-	// Send typing indicator while processing
+	// Typing indicator
 	typing := tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping)
 	if _, err := t.bot.Send(typing); err != nil {
 		log.Debug("failed to send typing action", "error", err)
@@ -168,14 +227,92 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 		resp = "..."
 	}
 
-	// Swap reaction from eyes to checkmark on success, or warning on error
+	// Track bot reply for cooldown
+	if isFromBot {
+		t.recordBotReply(msg.From.ID)
+	}
+
+	// Swap reaction
 	if err != nil {
 		t.react(chatID, msg.MessageID, "thumbs_down")
 	} else {
 		t.react(chatID, msg.MessageID, "thumbs_up")
 	}
 
-	t.sendLong(chatID, resp)
+	// In groups, reply to the original message for context
+	if isGroup {
+		t.replyLong(chatID, msg.MessageID, resp)
+	} else {
+		t.sendLong(chatID, resp)
+	}
+}
+
+// isMentioned checks if the bot is @mentioned in the message text or entities.
+func (t *TelegramBot) isMentioned(msg *tgbotapi.Message, botUsername string) bool {
+	// Check text for @mention
+	if strings.Contains(strings.ToLower(msg.Text), "@"+strings.ToLower(botUsername)) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(msg.Caption), "@"+strings.ToLower(botUsername)) {
+		return true
+	}
+	// Check entities for mention type
+	for _, e := range msg.Entities {
+		if e.Type == "mention" {
+			mention := msg.Text[e.Offset : e.Offset+e.Length]
+			if strings.EqualFold(mention, "@"+botUsername) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// stripMention removes @botusername from message text.
+func stripMention(text, botUsername string) string {
+	text = strings.ReplaceAll(text, "@"+botUsername, "")
+	text = strings.ReplaceAll(text, "@"+strings.ToLower(botUsername), "")
+	return strings.TrimSpace(text)
+}
+
+// canReplyToBot checks if we can reply to a bot (cooldown not active).
+func (t *TelegramBot) canReplyToBot(botID int64) bool {
+	t.botRepliesMu.Lock()
+	defer t.botRepliesMu.Unlock()
+	last, ok := t.botReplies[botID]
+	if !ok {
+		return true
+	}
+	return time.Since(last) > botCooldown
+}
+
+// recordBotReply records that we replied to a bot (starts cooldown).
+func (t *TelegramBot) recordBotReply(botID int64) {
+	t.botRepliesMu.Lock()
+	defer t.botRepliesMu.Unlock()
+	t.botReplies[botID] = time.Now()
+}
+
+// replyLong sends a reply to a specific message, splitting if needed.
+func (t *TelegramBot) replyLong(chatID int64, replyTo int, text string) {
+	chunks := chunkMessage(text, telegramMaxLen)
+	for i, chunk := range chunks {
+		if strings.TrimSpace(chunk) == "" {
+			continue
+		}
+		reply := tgbotapi.NewMessage(chatID, chunk)
+		reply.ParseMode = "Markdown"
+		if i == 0 {
+			reply.ReplyToMessageID = replyTo // only first chunk replies
+		}
+		if _, err := t.bot.Send(reply); err != nil {
+			// Retry without markdown
+			reply.ParseMode = ""
+			if _, err := t.bot.Send(reply); err != nil {
+				log.Error("failed to send reply", "chat_id", chatID, "error", err)
+			}
+		}
+	}
 }
 
 // handleCommand dispatches Telegram bot commands.
