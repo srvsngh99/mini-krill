@@ -1,6 +1,6 @@
-# Binaries
-minikrill
-mini-krill
+# Binaries (root only, not cmd/minikrill/ source dir)
+/minikrill
+/mini-krill
 *.exe
 *.dll
 *.so
