@@ -22,8 +22,22 @@ func init() {
 
 // Init configures the logger from config. Call once at startup.
 func Init(cfg config.LogConfig) error {
+	return initLogger(cfg, false)
+}
+
+// InitQuiet configures file-only logging (no stderr). Use for interactive modes
+// like chat and TUI where log spam ruins the experience.
+func InitQuiet(cfg config.LogConfig) error {
+	return initLogger(cfg, true)
+}
+
+func initLogger(cfg config.LogConfig, quiet bool) error {
 	level := parseLevel(cfg.Level)
-	writers := []io.Writer{os.Stderr}
+	var writers []io.Writer
+
+	if !quiet {
+		writers = append(writers, os.Stderr)
+	}
 
 	if cfg.File != "" {
 		dir := filepath.Dir(cfg.File)
@@ -35,6 +49,11 @@ func Init(cfg config.LogConfig) error {
 			return fmt.Errorf("open log file: %w", err)
 		}
 		writers = append(writers, f)
+	}
+
+	// If no writers at all (quiet + no file), write to discard
+	if len(writers) == 0 {
+		writers = append(writers, io.Discard)
 	}
 
 	w := io.MultiWriter(writers...)
