@@ -142,9 +142,7 @@ func (m *OllamaManager) installViaScript(ctx context.Context) error {
 func (m *OllamaManager) EnsureRunning(ctx context.Context) error {
 	if m.isHealthy(ctx) {
 		log.Debug("ollama is already running")
-		m.mu.Lock()
-		m.weStartedIt = false
-		m.mu.Unlock()
+		// Don't reset weStartedIt — we may already own this process
 		return nil
 	}
 	return m.Start(ctx)
@@ -156,9 +154,7 @@ func (m *OllamaManager) Start(ctx context.Context) error {
 	// Already running?
 	if m.isHealthy(ctx) {
 		log.Debug("ollama is already running")
-		m.mu.Lock()
-		m.weStartedIt = false
-		m.mu.Unlock()
+		// Don't reset weStartedIt — we may already own this process
 		return nil
 	}
 
@@ -397,9 +393,16 @@ func (m *OllamaManager) HasModel(ctx context.Context, model string) bool {
 	if err != nil {
 		return false
 	}
-	base := strings.Split(strings.ToLower(model), ":")[0]
+	normalize := func(s string) string {
+		s = strings.ToLower(s)
+		if !strings.Contains(s, ":") {
+			s += ":latest"
+		}
+		return s
+	}
+	target := normalize(model)
 	for _, mi := range models {
-		if strings.Split(strings.ToLower(mi.Name), ":")[0] == base {
+		if normalize(mi.Name) == target {
 			return true
 		}
 	}
@@ -447,6 +450,10 @@ func (m *OllamaManager) healthMonitorLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-time.After(probeInterval):
+		}
+
+		if ctx.Err() != nil {
+			return
 		}
 
 		if m.isHealthy(ctx) {

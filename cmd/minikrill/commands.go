@@ -257,6 +257,18 @@ var diveCmd = &cobra.Command{
 
 // diveDaemon re-execs the dive command as a detached background process.
 func diveDaemon() error {
+	// Check if a daemon is already running
+	pidFile := filepath.Join(config.DataDir(), "krill.pid")
+	if data, err := os.ReadFile(pidFile); err == nil {
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
+			if proc, err := os.FindProcess(pid); err == nil {
+				if proc.Signal(syscall.Signal(0)) == nil {
+					return fmt.Errorf("Mini Krill is already diving (PID %d). Run 'minikrill surface' first", pid)
+				}
+			}
+		}
+	}
+
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve executable: %w", err)
@@ -290,7 +302,6 @@ func diveDaemon() error {
 	// Detach - the parent does not wait for the child.
 	_ = child.Process.Release()
 
-	pidFile := filepath.Join(config.DataDir(), "krill.pid")
 	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(child.Process.Pid)), 0644)
 
 	printBanner()
