@@ -84,7 +84,7 @@ var ollamaListCmd = &cobra.Command{
 		}
 		if len(models) == 0 {
 			fmt.Println("No models found.")
-			fmt.Println(cDim + "Pull one with: " + cReset + "minikrill ollama pull llama3.2")
+			fmt.Println(cDim + "Pull one with: " + cReset + "minikrill ollama pull gemma4:e2b")
 			return nil
 		}
 		fmt.Println(cBold + "Local models:" + cReset)
