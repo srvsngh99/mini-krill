@@ -25,7 +25,7 @@ ollama:
   host: "http://localhost:11434"
   auto_install: true
   auto_start: true
-  default_model: llama3.2
+  default_model: gemma4:e2b
 
 telegram:
   enabled: false
