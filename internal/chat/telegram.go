@@ -300,63 +300,6 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 	}
 }
 
-// isRelevantGroupMessage decides if the krill should chime in on a group message
-// it wasn't directly mentioned in. Krill are social creatures - they don't just
-// wait to be called, they participate when they have something to add.
-func (t *TelegramBot) isRelevantGroupMessage(msg *tgbotapi.Message, botUsername string) bool {
-	text := strings.ToLower(extractMessageText(msg))
-	if text == "" {
-		return false
-	}
-
-	// Always respond to questions directed at the group
-	if strings.Contains(text, "?") && !strings.HasPrefix(text, "[the user sent") {
-		return true
-	}
-
-	// Respond if someone mentions "krill" by name
-	if strings.Contains(text, "krill") || strings.Contains(text, "mini krill") {
-		return true
-	}
-
-	// Respond to messages from other bots (they might be talking about something relevant)
-	if msg.From != nil && msg.From.IsBot {
-		return true
-	}
-
-	// Respond to opinions, debates, asks for help
-	opinionTriggers := []string{
-		"what do you think", "any thoughts", "opinions",
-		"help me", "can someone", "anyone know",
-		"agree", "disagree", "debate",
-		"interesting", "cool", "awesome", "amazing",
-		"wrong", "right", "correct", "incorrect",
-	}
-	for _, trigger := range opinionTriggers {
-		if strings.Contains(text, trigger) {
-			return true
-		}
-	}
-
-	// Respond to technical/AI topics the krill would have opinions on
-	techTriggers := []string{
-		"ai", "llm", "model", "agent", "bot",
-		"code", "programming", "deploy", "build",
-		"search", "data", "memory", "brain",
-	}
-	matchCount := 0
-	for _, trigger := range techTriggers {
-		if strings.Contains(text, trigger) {
-			matchCount++
-		}
-	}
-	if matchCount >= 2 {
-		return true
-	}
-
-	return false
-}
-
 func truncateLog(s string, n int) string {
 	if len(s) <= n {
 		return s
@@ -484,11 +427,7 @@ func (t *TelegramBot) handleCommand(chatID int64, msg *tgbotapi.Message) {
 
 	case "fact":
 		facts := core.KrillFacts
-		if len(facts) > 0 {
-			t.sendMessage(chatID, "Did you know? "+facts[rand.Intn(len(facts))])
-		} else {
-			t.sendMessage(chatID, "I seem to have forgotten all my krill facts. That's alarming.")
-		}
+		t.sendMessage(chatID, "Did you know? "+facts[rand.Intn(len(facts))])
 
 	case "plan":
 		t.sendMessage(chatID,
@@ -539,7 +478,7 @@ func extractMessageText(msg *tgbotapi.Message) string {
 	}
 
 	// Photo
-	if msg.Photo != nil && len(msg.Photo) > 0 {
+	if len(msg.Photo) > 0 {
 		return "[The user sent a photo. Acknowledge it warmly - you can't see images yet but respond naturally.]"
 	}
 

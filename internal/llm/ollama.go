@@ -16,20 +16,18 @@ import (
 )
 
 // OllamaProvider talks to a local Ollama instance over its REST API.
-// Krill fact: krill thrive in cold local waters - Ollama thrives on local GPUs.
 type OllamaProvider struct {
-	host        string
-	model       string
-	temperature float64
-	maxTokens   int
-	chatClient  *http.Client // 120s timeout for inference
+	host         string
+	model        string
+	temperature  float64
+	maxTokens    int
+	chatClient   *http.Client // 120s timeout for inference
 	healthClient *http.Client // 5s timeout for health checks
 }
 
 // NewOllamaProvider creates a provider targeting the given Ollama host and model.
 func NewOllamaProvider(host string, model string, defaultOpts config.LLMConfig) *OllamaProvider {
 	host = strings.TrimRight(host, "/")
-
 	temp := defaultOpts.Temperature
 	if temp <= 0 {
 		temp = 0.7
@@ -38,23 +36,18 @@ func NewOllamaProvider(host string, model string, defaultOpts config.LLMConfig) 
 	if maxTok <= 0 {
 		maxTok = 2048
 	}
-
 	return &OllamaProvider{
 		host:        host,
 		model:       model,
 		temperature: temp,
 		maxTokens:   maxTok,
-		chatClient: &http.Client{
-			Timeout: 120 * time.Second,
-		},
-		healthClient: &http.Client{
-			Timeout: 5 * time.Second,
-		},
+		chatClient:  &http.Client{Timeout: 120 * time.Second},
+		healthClient: &http.Client{Timeout: 5 * time.Second},
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Ollama request / response types (unexported, internal to this file)
+// Request/response types
 // ---------------------------------------------------------------------------
 
 type ollamaChatRequest struct {
@@ -75,24 +68,26 @@ type ollamaChatOptions struct {
 }
 
 type ollamaChatResponse struct {
-	Message        ollamaChatMsg `json:"message"`
-	Done           bool          `json:"done"`
-	EvalCount      int           `json:"eval_count"`
-	PromptEvalCount int          `json:"prompt_eval_count"`
-}
-
-type ollamaTagsResponse struct {
-	Models []struct {
-		Name string `json:"name"`
-	} `json:"models"`
+	Message         ollamaChatMsg `json:"message"`
+	Done            bool          `json:"done"`
+	EvalCount       int           `json:"eval_count"`
+	PromptEvalCount int           `json:"prompt_eval_count"`
 }
 
 // ---------------------------------------------------------------------------
-// LLMProvider interface implementation
+// Shared helpers
 // ---------------------------------------------------------------------------
 
-// Chat sends a non-streaming chat request to Ollama and returns the full response.
-func (o *OllamaProvider) Chat(ctx context.Context, messages []core.Message, opts ...core.ChatOption) (*core.Response, error) {
+// resolvedParams holds the resolved model/temp/maxTokens/messages for a request.
+type resolvedParams struct {
+	model    string
+	temp     float64
+	maxTok   int
+	messages []ollamaChatMsg
+}
+
+// resolve merges functional options with provider defaults and builds the message list.
+func (o *OllamaProvider) resolve(messages []core.Message, opts []core.ChatOption) resolvedParams {
 	options := core.ApplyOptions(opts)
 
 	model := o.model
@@ -108,7 +103,6 @@ func (o *OllamaProvider) Chat(ctx context.Context, messages []core.Message, opts
 		maxTok = options.MaxTokens
 	}
 
-	// Build message list, prepending system prompt if provided
 	ollamaMsgs := make([]ollamaChatMsg, 0, len(messages)+1)
 	if options.SystemPrompt != "" {
 		ollamaMsgs = append(ollamaMsgs, ollamaChatMsg{Role: "system", Content: options.SystemPrompt})
@@ -117,14 +111,19 @@ func (o *OllamaProvider) Chat(ctx context.Context, messages []core.Message, opts
 		ollamaMsgs = append(ollamaMsgs, ollamaChatMsg{Role: m.Role, Content: m.Content})
 	}
 
+	return resolvedParams{model: model, temp: temp, maxTok: maxTok, messages: ollamaMsgs}
+}
+
+// ---------------------------------------------------------------------------
+// LLMProvider interface
+// ---------------------------------------------------------------------------
+
+func (o *OllamaProvider) Chat(ctx context.Context, messages []core.Message, opts ...core.ChatOption) (*core.Response, error) {
+	p := o.resolve(messages, opts)
+
 	reqBody := ollamaChatRequest{
-		Model:    model,
-		Messages: ollamaMsgs,
-		Stream:   false,
-		Options: ollamaChatOptions{
-			Temperature: temp,
-			NumPredict:  maxTok,
-		},
+		Model: p.model, Messages: p.messages, Stream: false,
+		Options: ollamaChatOptions{Temperature: p.temp, NumPredict: p.maxTok},
 	}
 
 	body, err := json.Marshal(reqBody)
@@ -132,14 +131,13 @@ func (o *OllamaProvider) Chat(ctx context.Context, messages []core.Message, opts
 		return nil, fmt.Errorf("marshal ollama request: %w", err)
 	}
 
-	url := o.host + "/api/chat"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.host+"/api/chat", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create ollama request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	log.Debug("ollama chat request", "model", model, "messages", len(ollamaMsgs))
+	log.Debug("ollama chat request", "model", p.model, "messages", len(p.messages))
 
 	resp, err := o.chatClient.Do(req)
 	if err != nil {
@@ -162,46 +160,18 @@ func (o *OllamaProvider) Chat(ctx context.Context, messages []core.Message, opts
 
 	return &core.Response{
 		Content:          ollamaResp.Message.Content,
-		Model:            model,
+		Model:            p.model,
 		PromptTokens:     ollamaResp.PromptEvalCount,
 		CompletionTokens: ollamaResp.EvalCount,
 	}, nil
 }
 
-// Stream sends a streaming chat request to Ollama and returns a channel of chunks.
-// Each line of the NDJSON response becomes one StreamChunk.
 func (o *OllamaProvider) Stream(ctx context.Context, messages []core.Message, opts ...core.ChatOption) (<-chan core.StreamChunk, error) {
-	options := core.ApplyOptions(opts)
-
-	model := o.model
-	if options.Model != "" {
-		model = options.Model
-	}
-	temp := o.temperature
-	if options.Temperature != 0 {
-		temp = options.Temperature
-	}
-	maxTok := o.maxTokens
-	if options.MaxTokens != 0 {
-		maxTok = options.MaxTokens
-	}
-
-	ollamaMsgs := make([]ollamaChatMsg, 0, len(messages)+1)
-	if options.SystemPrompt != "" {
-		ollamaMsgs = append(ollamaMsgs, ollamaChatMsg{Role: "system", Content: options.SystemPrompt})
-	}
-	for _, m := range messages {
-		ollamaMsgs = append(ollamaMsgs, ollamaChatMsg{Role: m.Role, Content: m.Content})
-	}
+	p := o.resolve(messages, opts)
 
 	reqBody := ollamaChatRequest{
-		Model:    model,
-		Messages: ollamaMsgs,
-		Stream:   true,
-		Options: ollamaChatOptions{
-			Temperature: temp,
-			NumPredict:  maxTok,
-		},
+		Model: p.model, Messages: p.messages, Stream: true,
+		Options: ollamaChatOptions{Temperature: p.temp, NumPredict: p.maxTok},
 	}
 
 	body, err := json.Marshal(reqBody)
@@ -209,15 +179,12 @@ func (o *OllamaProvider) Stream(ctx context.Context, messages []core.Message, op
 		return nil, fmt.Errorf("marshal ollama stream request: %w", err)
 	}
 
-	url := o.host + "/api/chat"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.host+"/api/chat", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create ollama stream request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	// Use a client without timeout since streaming can be long-lived;
-	// cancellation is handled via context.
 	streamClient := &http.Client{}
 	resp, err := streamClient.Do(req)
 	if err != nil {
@@ -234,14 +201,12 @@ func (o *OllamaProvider) Stream(ctx context.Context, messages []core.Message, op
 	}
 
 	ch := make(chan core.StreamChunk, 32)
-
 	go func() {
 		defer close(ch)
 		defer resp.Body.Close()
 
 		decoder := json.NewDecoder(resp.Body)
 		for {
-			// Check for context cancellation between reads
 			select {
 			case <-ctx.Done():
 				ch <- core.StreamChunk{Done: true, Err: ctx.Err()}
@@ -259,11 +224,7 @@ func (o *OllamaProvider) Stream(ctx context.Context, messages []core.Message, op
 				return
 			}
 
-			ch <- core.StreamChunk{
-				Content: chunk.Message.Content,
-				Done:    chunk.Done,
-			}
-
+			ch <- core.StreamChunk{Content: chunk.Message.Content, Done: chunk.Done}
 			if chunk.Done {
 				return
 			}
@@ -273,34 +234,24 @@ func (o *OllamaProvider) Stream(ctx context.Context, messages []core.Message, op
 	return ch, nil
 }
 
-// Name returns the provider name.
-func (o *OllamaProvider) Name() string { return "ollama" }
+func (o *OllamaProvider) Name() string      { return "ollama" }
+func (o *OllamaProvider) ModelName() string  { return o.model }
 
-// ModelName returns the configured model name.
-func (o *OllamaProvider) ModelName() string { return o.model }
-
-// Available checks whether the Ollama server is reachable.
-// Krill fact: krill use bioluminescence to check if their swarm-mates are nearby.
 func (o *OllamaProvider) Available(ctx context.Context) bool {
-	url := o.host + "/api/tags"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, o.host+"/api/tags", nil)
 	if err != nil {
 		return false
 	}
-
 	resp, err := o.healthClient.Do(req)
 	if err != nil {
 		log.Debug("ollama health check failed", "error", err)
 		return false
 	}
 	defer resp.Body.Close()
-	// Drain body to allow connection reuse
-	io.Copy(io.Discard, resp.Body)
-
+	_, _ = io.Copy(io.Discard, resp.Body)
 	return resp.StatusCode == http.StatusOK
 }
 
-// isConnectionRefused detects connection refused errors regardless of wrapping.
 func isConnectionRefused(err error) bool {
 	if err == nil {
 		return false
@@ -308,5 +259,5 @@ func isConnectionRefused(err error) bool {
 	s := err.Error()
 	return strings.Contains(s, "connection refused") ||
 		strings.Contains(s, "connect: connection refused") ||
-		strings.Contains(s, "dial tcp") && strings.Contains(s, "refused")
+		(strings.Contains(s, "dial tcp") && strings.Contains(s, "refused"))
 }

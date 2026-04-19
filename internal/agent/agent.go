@@ -1,9 +1,6 @@
 // Package agent implements the main Krill Agent - the brain's executive function.
 // It receives messages, classifies intent, generates plans, gates approval,
 // and orchestrates execution. This is where the krill comes alive.
-//
-// Krill fact: despite being only 6cm long, krill coordinate in swarms of
-// billions. This agent coordinates plans, sub-krills, and memory the same way.
 package agent
 
 import (

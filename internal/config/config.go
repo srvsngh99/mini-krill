@@ -128,7 +128,6 @@ func DataDir() string {
 }
 
 // DefaultConfig returns a Config with sensible defaults that work out of the box.
-// Krill fact: krill survive with minimal resources - so does this config.
 func DefaultConfig() *Config {
 	dataDir := DataDir()
 	return &Config{

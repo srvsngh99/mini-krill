@@ -16,9 +16,7 @@ import (
 )
 
 // CloudProvider implements core.LLMProvider for cloud-hosted LLM APIs.
-// Supports OpenAI (and any OpenAI-compatible endpoint), Anthropic, and Google Gemini.
-// Krill fact: krill migrate between surface and deep ocean daily - this provider
-// migrates between cloud APIs with the same ease.
+// Supports OpenAI (and compatible), Anthropic, and Google Gemini.
 type CloudProvider struct {
 	providerName string
 	model        string
@@ -29,8 +27,6 @@ type CloudProvider struct {
 	client       *http.Client
 }
 
-// NewCloudProvider creates a cloud LLM provider. providerName must be one of:
-// "openai", "anthropic", "google".
 func NewCloudProvider(providerName string, cfg config.LLMConfig) *CloudProvider {
 	temp := cfg.Temperature
 	if temp <= 0 {
@@ -40,7 +36,6 @@ func NewCloudProvider(providerName string, cfg config.LLMConfig) *CloudProvider 
 	if maxTok <= 0 {
 		maxTok = 2048
 	}
-
 	return &CloudProvider{
 		providerName: providerName,
 		model:        cfg.Model,
@@ -48,17 +43,14 @@ func NewCloudProvider(providerName string, cfg config.LLMConfig) *CloudProvider 
 		baseURL:      cfg.BaseURL,
 		temperature:  temp,
 		maxTokens:    maxTok,
-		client: &http.Client{
-			Timeout: 120 * time.Second,
-		},
+		client:       &http.Client{Timeout: 120 * time.Second},
 	}
 }
 
 // ---------------------------------------------------------------------------
-// LLMProvider interface implementation
+// LLMProvider interface
 // ---------------------------------------------------------------------------
 
-// Chat dispatches to the appropriate cloud API based on provider name.
 func (c *CloudProvider) Chat(ctx context.Context, messages []core.Message, opts ...core.ChatOption) (*core.Response, error) {
 	options := core.ApplyOptions(opts)
 
@@ -89,14 +81,10 @@ func (c *CloudProvider) Chat(ctx context.Context, messages []core.Message, opts 
 	}
 }
 
-// Stream returns a channel that emits a single chunk with the full response.
-// Full streaming support can be added later per-provider.
 func (c *CloudProvider) Stream(ctx context.Context, messages []core.Message, opts ...core.ChatOption) (<-chan core.StreamChunk, error) {
 	ch := make(chan core.StreamChunk, 1)
-
 	go func() {
 		defer close(ch)
-
 		resp, err := c.Chat(ctx, messages, opts...)
 		if err != nil {
 			ch <- core.StreamChunk{Done: true, Err: err}
@@ -104,25 +92,59 @@ func (c *CloudProvider) Stream(ctx context.Context, messages []core.Message, opt
 		}
 		ch <- core.StreamChunk{Content: resp.Content, Done: true}
 	}()
-
 	return ch, nil
 }
 
-// Name returns the provider name (openai, anthropic, google).
-func (c *CloudProvider) Name() string { return c.providerName }
+func (c *CloudProvider) Name() string                    { return c.providerName }
+func (c *CloudProvider) ModelName() string               { return c.model }
+func (c *CloudProvider) Available(_ context.Context) bool { return c.apiKey != "" }
 
-// ModelName returns the configured model name.
-func (c *CloudProvider) ModelName() string { return c.model }
+// ---------------------------------------------------------------------------
+// Shared HTTP helper
+// ---------------------------------------------------------------------------
 
-// Available returns true if an API key is configured.
-// A lightweight probe could be added per-provider, but checking for a key
-// avoids burning API quota on health checks.
-func (c *CloudProvider) Available(_ context.Context) bool {
-	return c.apiKey != ""
+// doJSON sends a JSON request and returns the raw response body.
+// Handles marshalling, context, headers, and error status codes.
+func (c *CloudProvider) doJSON(ctx context.Context, method, url string, headers map[string]string, reqBody interface{}) ([]byte, error) {
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		// Truncate response body in error to avoid leaking API keys
+		errMsg := string(respBody)
+		if len(errMsg) > 200 {
+			errMsg = errMsg[:200] + "..."
+		}
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, errMsg)
+	}
+
+	return respBody, nil
 }
 
 // ---------------------------------------------------------------------------
-// OpenAI (and OpenAI-compatible APIs)
+// OpenAI
 // ---------------------------------------------------------------------------
 
 func (c *CloudProvider) chatOpenAI(ctx context.Context, messages []core.Message, model string, temp float64, maxTok int, systemPrompt string) (*core.Response, error) {
@@ -130,10 +152,8 @@ func (c *CloudProvider) chatOpenAI(ctx context.Context, messages []core.Message,
 	if base == "" {
 		base = "https://api.openai.com"
 	}
-	base = strings.TrimRight(base, "/")
-	url := base + "/v1/chat/completions"
+	url := strings.TrimRight(base, "/") + "/v1/chat/completions"
 
-	// Build messages with optional system prompt
 	oaiMsgs := make([]map[string]string, 0, len(messages)+1)
 	if systemPrompt != "" {
 		oaiMsgs = append(oaiMsgs, map[string]string{"role": "system", "content": systemPrompt})
@@ -142,41 +162,16 @@ func (c *CloudProvider) chatOpenAI(ctx context.Context, messages []core.Message,
 		oaiMsgs = append(oaiMsgs, map[string]string{"role": m.Role, "content": m.Content})
 	}
 
-	reqBody := map[string]interface{}{
-		"model":       model,
-		"messages":    oaiMsgs,
-		"temperature": temp,
-		"max_tokens":  maxTok,
-	}
-
-	body, err := json.Marshal(reqBody)
+	respBody, err := c.doJSON(ctx, http.MethodPost, url,
+		map[string]string{"Authorization": "Bearer " + c.apiKey},
+		map[string]interface{}{
+			"model": model, "messages": oaiMsgs,
+			"temperature": temp, "max_tokens": maxTok,
+		})
 	if err != nil {
-		return nil, fmt.Errorf("marshal openai request: %w", err)
+		return nil, fmt.Errorf("openai: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("create openai request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("openai request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read openai response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("openai returned status %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	// Parse response - use a flexible struct to handle unexpected fields
 	var oaiResp struct {
 		Choices []struct {
 			Message struct {
@@ -189,9 +184,8 @@ func (c *CloudProvider) chatOpenAI(ctx context.Context, messages []core.Message,
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(respBody, &oaiResp); err != nil {
-		return nil, fmt.Errorf("decode openai response: %w", err)
+		return nil, fmt.Errorf("openai decode: %w", err)
 	}
-
 	if len(oaiResp.Choices) == 0 {
 		return nil, fmt.Errorf("openai returned no choices")
 	}
@@ -209,13 +203,8 @@ func (c *CloudProvider) chatOpenAI(ctx context.Context, messages []core.Message,
 // ---------------------------------------------------------------------------
 
 func (c *CloudProvider) chatAnthropic(ctx context.Context, messages []core.Message, model string, temp float64, maxTok int, systemPrompt string) (*core.Response, error) {
-	url := "https://api.anthropic.com/v1/messages"
-
-	// Anthropic: system prompt goes in the top-level "system" field, not in messages.
-	// Messages must alternate user/assistant, starting with user.
 	anthropicMsgs := make([]map[string]string, 0, len(messages))
 	for _, m := range messages {
-		// Skip system messages - they go in the system field
 		if m.Role == "system" {
 			if systemPrompt == "" {
 				systemPrompt = m.Content
@@ -224,48 +213,25 @@ func (c *CloudProvider) chatAnthropic(ctx context.Context, messages []core.Messa
 		}
 		anthropicMsgs = append(anthropicMsgs, map[string]string{"role": m.Role, "content": m.Content})
 	}
-
-	// Anthropic requires at least one message
 	if len(anthropicMsgs) == 0 {
 		return nil, fmt.Errorf("anthropic requires at least one non-system message")
 	}
 
 	reqBody := map[string]interface{}{
-		"model":       model,
-		"messages":    anthropicMsgs,
-		"max_tokens":  maxTok,
-		"temperature": temp,
+		"model": model, "messages": anthropicMsgs,
+		"max_tokens": maxTok, "temperature": temp,
 	}
 	if systemPrompt != "" {
 		reqBody["system"] = systemPrompt
 	}
 
-	body, err := json.Marshal(reqBody)
+	respBody, err := c.doJSON(ctx, http.MethodPost, "https://api.anthropic.com/v1/messages",
+		map[string]string{
+			"x-api-key":         c.apiKey,
+			"anthropic-version": "2023-06-01",
+		}, reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("marshal anthropic request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("create anthropic request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", c.apiKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("anthropic request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read anthropic response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("anthropic returned status %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("anthropic: %w", err)
 	}
 
 	var anthropicResp struct {
@@ -279,10 +245,9 @@ func (c *CloudProvider) chatAnthropic(ctx context.Context, messages []core.Messa
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(respBody, &anthropicResp); err != nil {
-		return nil, fmt.Errorf("decode anthropic response: %w", err)
+		return nil, fmt.Errorf("anthropic decode: %w", err)
 	}
 
-	// Extract text from the first text content block
 	var content string
 	for _, block := range anthropicResp.Content {
 		if block.Type == "text" || block.Text != "" {
@@ -309,26 +274,15 @@ func (c *CloudProvider) chatGoogle(ctx context.Context, messages []core.Message,
 		model, c.apiKey,
 	)
 
-	// Build Gemini contents array
-	// Gemini uses "user" and "model" roles (not "assistant")
-	contents := make([]map[string]interface{}, 0, len(messages)+1)
-
-	// Prepend system prompt as a user message if provided (Gemini handles
-	// system instructions via systemInstruction field, but for simplicity
-	// and broad compatibility we use the generationConfig approach)
+	contents := make([]map[string]interface{}, 0, len(messages)+2)
 	if systemPrompt != "" {
 		contents = append(contents, map[string]interface{}{
-			"role": "user",
-			"parts": []map[string]string{
-				{"text": systemPrompt},
-			},
+			"role":  "user",
+			"parts": []map[string]string{{"text": systemPrompt}},
 		})
-		// Add a model acknowledgment to maintain alternating turns
 		contents = append(contents, map[string]interface{}{
-			"role": "model",
-			"parts": []map[string]string{
-				{"text": "Understood."},
-			},
+			"role":  "model",
+			"parts": []map[string]string{{"text": "Understood."}},
 		})
 	}
 
@@ -338,52 +292,26 @@ func (c *CloudProvider) chatGoogle(ctx context.Context, messages []core.Message,
 		case "assistant":
 			role = "model"
 		case "system":
-			// System messages already handled above; skip duplicates
 			if systemPrompt != "" {
 				continue
 			}
 			role = "user"
 		}
 		contents = append(contents, map[string]interface{}{
-			"role": role,
-			"parts": []map[string]string{
-				{"text": m.Content},
-			},
+			"role":  role,
+			"parts": []map[string]string{{"text": m.Content}},
 		})
 	}
 
-	reqBody := map[string]interface{}{
-		"contents": contents,
-		"generationConfig": map[string]interface{}{
-			"temperature":     temp,
-			"maxOutputTokens": maxTok,
-		},
-	}
-
-	body, err := json.Marshal(reqBody)
+	respBody, err := c.doJSON(ctx, http.MethodPost, url, nil,
+		map[string]interface{}{
+			"contents": contents,
+			"generationConfig": map[string]interface{}{
+				"temperature": temp, "maxOutputTokens": maxTok,
+			},
+		})
 	if err != nil {
-		return nil, fmt.Errorf("marshal google request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("create google request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("google request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read google response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("google returned status %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("google: %w", err)
 	}
 
 	var geminiResp struct {
@@ -400,7 +328,7 @@ func (c *CloudProvider) chatGoogle(ctx context.Context, messages []core.Message,
 		} `json:"usageMetadata"`
 	}
 	if err := json.Unmarshal(respBody, &geminiResp); err != nil {
-		return nil, fmt.Errorf("decode google response: %w", err)
+		return nil, fmt.Errorf("google decode: %w", err)
 	}
 
 	var content string

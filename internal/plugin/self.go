@@ -1,7 +1,5 @@
 // Package plugin - self-awareness skills for Mini Krill.
 // These give the krill eyes on itself and hands to modify itself.
-// Krill fact: krill have compound eyes with 7 visual pigments - more than
-// any other crustacean. These self-skills are the krill's compound eyes.
 package plugin
 
 import (
