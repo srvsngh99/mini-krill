@@ -478,7 +478,7 @@ func extractMessageText(msg *tgbotapi.Message) string {
 	}
 
 	// Photo
-	if msg.Photo != nil && len(msg.Photo) > 0 {
+	if len(msg.Photo) > 0 {
 		return "[The user sent a photo. Acknowledge it warmly - you can't see images yet but respond naturally.]"
 	}
 
