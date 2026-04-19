@@ -1,8 +1,6 @@
 // Package doctor provides diagnostic health checks for Mini Krill.
 // Think of it as the krill's immune system - constantly monitoring internal
 // health and flagging problems before they become critical.
-// Krill fact: krill can survive without food for up to 200 days by shrinking
-// their own body. The doctor ensures Mini Krill never has to resort to that.
 package doctor
 
 import (

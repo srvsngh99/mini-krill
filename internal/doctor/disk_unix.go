@@ -1,6 +1,4 @@
 // disk_unix.go - Unix/macOS disk space check using syscall.Statfs.
-// Krill fact: krill eggs sink up to 3000 meters before hatching - this check
-// ensures there is enough space in the depths for the krill's data to grow.
 
 //go:build !windows
 

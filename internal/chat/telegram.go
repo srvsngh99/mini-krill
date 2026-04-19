@@ -300,63 +300,6 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 	}
 }
 
-// isRelevantGroupMessage decides if the krill should chime in on a group message
-// it wasn't directly mentioned in. Krill are social creatures - they don't just
-// wait to be called, they participate when they have something to add.
-func (t *TelegramBot) isRelevantGroupMessage(msg *tgbotapi.Message, botUsername string) bool {
-	text := strings.ToLower(extractMessageText(msg))
-	if text == "" {
-		return false
-	}
-
-	// Always respond to questions directed at the group
-	if strings.Contains(text, "?") && !strings.HasPrefix(text, "[the user sent") {
-		return true
-	}
-
-	// Respond if someone mentions "krill" by name
-	if strings.Contains(text, "krill") || strings.Contains(text, "mini krill") {
-		return true
-	}
-
-	// Respond to messages from other bots (they might be talking about something relevant)
-	if msg.From != nil && msg.From.IsBot {
-		return true
-	}
-
-	// Respond to opinions, debates, asks for help
-	opinionTriggers := []string{
-		"what do you think", "any thoughts", "opinions",
-		"help me", "can someone", "anyone know",
-		"agree", "disagree", "debate",
-		"interesting", "cool", "awesome", "amazing",
-		"wrong", "right", "correct", "incorrect",
-	}
-	for _, trigger := range opinionTriggers {
-		if strings.Contains(text, trigger) {
-			return true
-		}
-	}
-
-	// Respond to technical/AI topics the krill would have opinions on
-	techTriggers := []string{
-		"ai", "llm", "model", "agent", "bot",
-		"code", "programming", "deploy", "build",
-		"search", "data", "memory", "brain",
-	}
-	matchCount := 0
-	for _, trigger := range techTriggers {
-		if strings.Contains(text, trigger) {
-			matchCount++
-		}
-	}
-	if matchCount >= 2 {
-		return true
-	}
-
-	return false
-}
-
 func truncateLog(s string, n int) string {
 	if len(s) <= n {
 		return s

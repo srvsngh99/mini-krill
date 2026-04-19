@@ -2,9 +2,6 @@
 // MCP servers expose external tools to the krill agent via JSON-RPC 2.0 over
 // stdin/stdout. This is how krill extends its tentacles into the wider ecosystem -
 // file systems, databases, APIs, and beyond.
-// Krill fact: krill have 10 pairs of thoracic legs (thoracopods) for swimming and
-// filter-feeding. MCP servers are the krill's digital thoracopods - each one
-// reaches out to grab a different kind of resource.
 package plugin
 
 import (
