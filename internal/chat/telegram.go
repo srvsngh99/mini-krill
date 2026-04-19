@@ -22,6 +22,9 @@ const telegramMaxLen = 4096
 // After replying to a bot, wait this long before replying to the same bot again.
 const botCooldown = 30 * time.Second
 
+// LearnFunc is called to store group conversation insights to memory.
+type LearnFunc func(ctx context.Context, key, value string) error
+
 // TelegramBot implements core.ChatBot for Telegram.
 type TelegramBot struct {
 	bot          *tgbotapi.BotAPI
@@ -31,6 +34,7 @@ type TelegramBot struct {
 	done         chan struct{}
 	botReplies   map[int64]time.Time // tracks last reply to each bot (by user ID)
 	botRepliesMu sync.Mutex
+	learnFn      LearnFunc // optional: store group learnings to memory
 }
 
 // NewTelegramBot creates a TelegramBot using the provided config and handler.
@@ -55,6 +59,11 @@ func NewTelegramBot(cfg config.TelegramConfig, handler core.ChatHandler) (*Teleg
 		done:       make(chan struct{}),
 		botReplies: make(map[int64]time.Time),
 	}, nil
+}
+
+// SetLearnFunc sets a callback for storing group conversation learnings.
+func (t *TelegramBot) SetLearnFunc(fn LearnFunc) {
+	t.learnFn = fn
 }
 
 // Platform returns "telegram".
@@ -160,18 +169,22 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 			return
 		}
 
-		// Decide if we should respond based on context
-		shouldRespond := mentioned || isReplyToMe || t.isRelevantGroupMessage(msg, botUsername)
+		// In a group, krill is always listening and participates naturally.
+		// Mentioned/replied = always respond. Otherwise = respond to anything
+		// relevant (questions, bot messages, opinions, topics it knows about).
+		// This creates natural group dynamics where both bots and humans interact.
+		directlyAddressed := mentioned || isReplyToMe
 
-		if !shouldRespond {
-			log.Debug("group message not relevant, staying quiet",
-				"from", msg.From.UserName,
-				"text_preview", truncateLog(extractMessageText(msg), 50),
-			)
-			return
+		if !directlyAddressed {
+			// Still respond to most messages - krill is an active group member.
+			// Only skip truly irrelevant noise (very short, no substance).
+			text := strings.TrimSpace(extractMessageText(msg))
+			if len(text) < 3 && !isFromBot {
+				return // too short to be meaningful
+			}
 		}
 
-		log.Info("group message relevant, responding",
+		log.Info("group message, participating",
 			"from", msg.From.UserName,
 			"mentioned", mentioned,
 			"reply_to_me", isReplyToMe,
@@ -189,16 +202,32 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 	// Strip @mention from message text so the agent gets clean input
 	messageText = stripMention(messageText, botUsername)
 
-	// Add context about who's talking (useful in groups)
+	// Add group context so the agent knows who's talking and behaves naturally.
+	// The krill should be a group participant, not just a responder.
 	if isGroup && msg.From != nil {
 		senderName := msg.From.FirstName
 		if senderName == "" {
 			senderName = msg.From.UserName
 		}
-		if isFromBot {
-			messageText = fmt.Sprintf("[Message from bot @%s in group chat]: %s", msg.From.UserName, messageText)
+
+		mentioned := t.isMentioned(msg, botUsername)
+		isReplyToMe := msg.ReplyToMessage != nil &&
+			msg.ReplyToMessage.From != nil &&
+			msg.ReplyToMessage.From.UserName == botUsername
+
+		if mentioned || isReplyToMe {
+			// Directly addressed - respond fully
+			if isFromBot {
+				messageText = fmt.Sprintf("[Group chat - @%s is talking to you directly]: %s", msg.From.UserName, messageText)
+			} else {
+				messageText = fmt.Sprintf("[Group chat - %s is talking to you directly]: %s", senderName, messageText)
+			}
+		} else if isFromBot {
+			// Another bot said something - respond as a fellow group member
+			messageText = fmt.Sprintf("[Group chat - bot @%s said this. You are both in a group with the user. Respond naturally as a group participant. Keep it brief and conversational. Add your perspective if you have one, or react naturally. Don't repeat what the other bot said.]: %s", msg.From.UserName, messageText)
 		} else {
-			messageText = fmt.Sprintf("[Message from %s in group chat]: %s", senderName, messageText)
+			// User said something to the group - participate naturally
+			messageText = fmt.Sprintf("[Group chat - %s said this to the group. You and other bots are group members. Respond naturally and briefly like a friend in a group chat. Don't be overly formal or assistant-like. If you have nothing meaningful to add, keep it very short.]: %s", senderName, messageText)
 		}
 	}
 
@@ -245,6 +274,18 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 		t.replyLong(chatID, msg.MessageID, resp)
 	} else {
 		t.sendLong(chatID, resp)
+	}
+
+	// Learn from group interactions - store interesting exchanges
+	if isGroup && t.handler != nil {
+		senderName := ""
+		if msg.From != nil {
+			senderName = msg.From.UserName
+			if senderName == "" {
+				senderName = msg.From.FirstName
+			}
+		}
+		go t.maybeLearnFromGroup(ctx, senderName, extractMessageText(msg), resp)
 	}
 }
 
@@ -310,6 +351,24 @@ func truncateLog(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+// maybeLearnFromGroup stores interesting group exchanges to memory so the
+// krill gets better over time. Only stores substantial exchanges.
+func (t *TelegramBot) maybeLearnFromGroup(ctx context.Context, sender, input, response string) {
+	if t.learnFn == nil {
+		return
+	}
+	// Only learn from substantial exchanges (not greetings or one-word messages)
+	if len(input) < 20 || len(response) < 20 {
+		return
+	}
+	// Store as a group conversation memory
+	key := fmt.Sprintf("group_%s_%d", sender, time.Now().Unix())
+	value := fmt.Sprintf("%s said: %s\nKrill responded: %s", sender, truncateLog(input, 200), truncateLog(response, 200))
+	if err := t.learnFn(ctx, key, value); err != nil {
+		log.Debug("failed to store group learning", "error", err)
+	}
 }
 
 // isMentioned checks if the bot is @mentioned in the message text or entities.

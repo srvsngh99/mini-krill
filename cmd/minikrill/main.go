@@ -409,6 +409,16 @@ var diveCmd = &cobra.Command{
 			if err != nil {
 				fmt.Printf("  "+cRed+"Telegram: %s\n"+cReset, friendlyError(err))
 			} else {
+				// Wire group learning - krill remembers interesting group exchanges
+				tgBot.SetLearnFunc(func(ctx context.Context, key, value string) error {
+					return stack.brain.Memory().Store(ctx, core.MemoryEntry{
+						Key:        key,
+						Value:      value,
+						Tags:       []string{"group-learned", "telegram"},
+						CreatedAt:  time.Now(),
+						AccessedAt: time.Now(),
+					})
+				})
 				go func() {
 					if err := tgBot.Start(ctx); err != nil {
 						klog.Error("telegram error", "error", err)
