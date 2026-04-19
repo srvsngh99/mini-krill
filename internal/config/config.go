@@ -31,6 +31,7 @@ type Config struct {
 // AgentConfig controls the main krill agent behaviour.
 type AgentConfig struct {
 	Name         string `yaml:"name"`
+	Personality  string `yaml:"personality"`  // active personality profile (default: "krill")
 	MaxSubKrills int    `yaml:"max_sub_krills"`
 	PlanApproval bool   `yaml:"plan_approval"` // require user approval before executing plans
 }
@@ -49,6 +50,7 @@ type LLMConfig struct {
 type BrainConfig struct {
 	DataDir          string `yaml:"data_dir"`
 	SoulFile         string `yaml:"soul_file"`
+	Personality      string `yaml:"personality"`  // active personality profile name
 	MaxMemories      int    `yaml:"max_memories"`
 	HeartbeatSec     int    `yaml:"heartbeat_interval_sec"`
 }
@@ -215,6 +217,9 @@ func fillDefaults(cfg *Config) {
 	if cfg.MCP.Servers == nil {
 		cfg.MCP.Servers = make(map[string]MCPServerConfig)
 	}
+	if cfg.Agent.Personality == "" {
+		cfg.Agent.Personality = "krill"
+	}
 	if cfg.Telegram.BotMaxTurns == 0 {
 		cfg.Telegram.BotMaxTurns = 3
 	}
@@ -241,6 +246,7 @@ func EnsureDataDir() error {
 		filepath.Join(DataDir(), "brain", "memories"),
 		filepath.Join(DataDir(), "logs"),
 		filepath.Join(DataDir(), "skills"),
+		filepath.Join(DataDir(), "personalities"),
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0755); err != nil {
