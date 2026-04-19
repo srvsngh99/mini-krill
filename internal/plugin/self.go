@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/srvsngh99/mini-krill/internal/brain"
 	"github.com/srvsngh99/mini-krill/internal/config"
 	"github.com/srvsngh99/mini-krill/internal/core"
 	"github.com/srvsngh99/mini-krill/internal/doctor"
@@ -61,6 +62,7 @@ func NewSelfSkills(sc SelfContext) []core.Skill {
 		selfLearn(sc),
 		selfAddSkill(sc),
 		selfHeal(sc),
+		selfReflect(sc),
 	}
 }
 
@@ -653,6 +655,123 @@ func selfHeal(sc SelfContext) core.Skill {
 			}
 
 			return sb.String(), nil
+		},
+	}
+}
+
+func selfReflect(sc SelfContext) core.Skill {
+	return &selfSkill{
+		name: "self:reflect",
+		desc: "Reflect on interactions and evolve the adaptive personality",
+		exec: func(ctx context.Context, _ string, llm core.LLMProvider) (string, error) {
+			if llm == nil {
+				return "Cannot reflect without LLM access", nil
+			}
+
+			// Gather all personality feedback from memory
+			entries, err := sc.Brain.Memory().Search(ctx, "personality-feedback", 50)
+			if err != nil || len(entries) == 0 {
+				return "No interaction feedback stored yet. Chat more and I'll learn from our conversations!", nil
+			}
+
+			// Categorize signals
+			var positive, negative, curious, engaged int
+			var feedbackSummary strings.Builder
+			for _, e := range entries {
+				if strings.Contains(e.Value, "signal:positive") {
+					positive++
+				} else if strings.Contains(e.Value, "signal:negative") {
+					negative++
+				} else if strings.Contains(e.Value, "signal:curious") {
+					curious++
+				} else if strings.Contains(e.Value, "signal:engaged") {
+					engaged++
+				}
+				feedbackSummary.WriteString(e.Value + "\n")
+			}
+
+			// Get current personality
+			p := sc.Brain.GetPersonality()
+
+			// Ask LLM to analyze and suggest evolution
+			prompt := fmt.Sprintf(`You are analyzing interaction patterns to evolve an AI personality.
+
+Current personality:
+  Name: %s
+  Traits: %s
+  Style: %s
+
+Interaction signals (%d total):
+  Positive reactions: %d
+  Negative reactions: %d
+  Curious follow-ups: %d
+  Deeply engaged: %d
+
+Recent feedback samples:
+%s
+
+Based on these patterns, suggest how this personality should evolve:
+1. What traits to strengthen or add?
+2. What style adjustments to make?
+3. What quirks has the user responded well to?
+4. What to avoid?
+
+Return a YAML block with updated personality fields:
+name: %s
+traits: [updated traits]
+style: "updated style"
+quirks: ["new quirks based on what works"]
+greeting: "updated greeting"`,
+				p.Name, strings.Join(p.Traits, ", "), p.Style,
+				len(entries), positive, negative, curious, engaged,
+				truncateStr(feedbackSummary.String(), 1500),
+				p.Name)
+
+			resp, err := llm.Chat(ctx, []core.Message{
+				{Role: "user", Content: prompt},
+			}, core.WithTemperature(0.4))
+			if err != nil {
+				return fmt.Sprintf("Reflection failed: %v", err), nil
+			}
+
+			// Parse and save evolved personality
+			yamlContent := extractYAMLBlock(resp.Content)
+			var newP core.Personality
+			if err := yaml.Unmarshal([]byte(yamlContent), &newP); err != nil {
+				return fmt.Sprintf("Could not parse evolved personality. Raw reflection:\n\n%s", resp.Content), nil
+			}
+
+			// Preserve krill facts and fill gaps
+			if len(newP.KrillFacts) == 0 {
+				newP.KrillFacts = core.KrillFacts
+			}
+			if newP.Name == "" {
+				newP.Name = p.Name
+			}
+
+			soul := sc.Brain.GetSoul()
+			if err := brain.SavePersonality(
+				strings.ToLower(strings.ReplaceAll(newP.Name, " ", "-")),
+				sc.DataDir, soul, &newP,
+			); err != nil {
+				return fmt.Sprintf("Failed to save evolved personality: %v", err), nil
+			}
+
+			log.Info("self:reflect evolved personality",
+				"name", newP.Name,
+				"positive", positive,
+				"negative", negative,
+				"traits", strings.Join(newP.Traits, ", "),
+			)
+
+			return fmt.Sprintf("Personality evolution complete!\n\n"+
+				"Analyzed %d interactions (%d positive, %d negative, %d curious, %d engaged)\n\n"+
+				"Updated traits: %s\n"+
+				"Updated style: %s\n\n"+
+				"The evolution has been saved. These changes shape future conversations.",
+				len(entries), positive, negative, curious, engaged,
+				strings.Join(newP.Traits, ", "),
+				newP.Style), nil
 		},
 	}
 }

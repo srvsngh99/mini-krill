@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/srvsngh99/mini-krill/internal/config"
 	"github.com/srvsngh99/mini-krill/internal/core"
@@ -101,12 +102,21 @@ func (a *KrillAgent) Chat(ctx context.Context, input string) (string, error) {
 	log.Debug("intent classified", "input_preview", truncate(input, 50), "intent", intent)
 
 	// --- Phase 4: Route based on intent ---
+	var response string
+	var err error
 	switch intent {
 	case "TASK":
-		return a.handleTask(ctx, input)
+		response, err = a.handleTask(ctx, input)
 	default:
-		return a.handleChat(ctx)
+		response, err = a.handleChat(ctx)
 	}
+
+	// --- Phase 5: Learn from interaction (adaptive personality) ---
+	if err == nil && a.brain.Memory() != nil {
+		go a.recordFeedback(context.Background(), input, response)
+	}
+
+	return response, err
 }
 
 // Plan generates a plan for the given task. Delegates to the planner module.
@@ -211,7 +221,8 @@ func (a *KrillAgent) handleChat(ctx context.Context) (string, error) {
 					strings.HasPrefix(skillName, "self:evolve") ||
 					strings.HasPrefix(skillName, "self:learn") ||
 					strings.HasPrefix(skillName, "self:add-skill") ||
-					strings.HasPrefix(skillName, "self:heal") {
+					strings.HasPrefix(skillName, "self:heal") ||
+					strings.HasPrefix(skillName, "self:reflect") {
 					a.appendMessage(core.Message{Role: "assistant", Content: result})
 					return result, nil
 				}
@@ -293,6 +304,7 @@ func (a *KrillAgent) detectSelfSkill(msg string) (skillName, skillInput string) 
 		{[]string{"add a skill", "create a skill", "new skill", "add skill"}, "self:add-skill"},
 		{[]string{"heal yourself", "fix yourself", "self heal", "self-heal", "repair yourself"}, "self:heal"},
 		{[]string{"switch to ollama", "switch to openai", "switch to anthropic", "switch to google", "auto approve", "require approval", "log level"}, "self:configure"},
+		{[]string{"reflect on yourself", "reflect on our conversations", "evolve yourself", "how have i changed you", "what have you learned about me"}, "self:reflect"},
 	}
 
 	for _, entry := range selfMap {
@@ -303,6 +315,64 @@ func (a *KrillAgent) detectSelfSkill(msg string) (skillName, skillInput string) 
 		}
 	}
 	return "", ""
+}
+
+// recordFeedback silently stores interaction signals for adaptive personality evolution.
+// Runs in background goroutine - never blocks the response.
+func (a *KrillAgent) recordFeedback(_ context.Context, input, response string) {
+	lower := strings.ToLower(input)
+
+	// Detect sentiment signals
+	var signal string
+
+	// Positive signals
+	positives := []string{"thanks", "thank you", "great", "perfect", "awesome", "love it",
+		"exactly", "nice", "good job", "well done", "brilliant", "amazing"}
+	for _, p := range positives {
+		if strings.Contains(lower, p) {
+			signal = "positive"
+			break
+		}
+	}
+
+	// Negative signals
+	if signal == "" {
+		negatives := []string{"no", "wrong", "not what i", "stop", "bad", "terrible",
+			"useless", "don't", "incorrect", "nah"}
+		for _, n := range negatives {
+			if strings.Contains(lower, n) {
+				signal = "negative"
+				break
+			}
+		}
+	}
+
+	// Engagement signals
+	if signal == "" {
+		if len(input) > 100 {
+			signal = "engaged" // long input = interested
+		} else if strings.Contains(input, "?") {
+			signal = "curious" // follow-up question
+		}
+	}
+
+	if signal == "" {
+		return // no signal worth recording
+	}
+
+	ctx := context.Background()
+	key := fmt.Sprintf("feedback_%d", time.Now().UnixMilli())
+	entry := core.MemoryEntry{
+		Key:        key,
+		Value:      fmt.Sprintf("signal:%s | user: %s | krill: %s", signal, truncate(input, 100), truncate(response, 100)),
+		Tags:       []string{"personality-feedback", signal},
+		CreatedAt:  time.Now(),
+		AccessedAt: time.Now(),
+	}
+
+	if err := a.brain.Memory().Store(ctx, entry); err != nil {
+		log.Debug("failed to store feedback", "error", err)
+	}
 }
 
 // shouldSearch detects if a message likely needs current web information.
