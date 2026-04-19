@@ -134,6 +134,14 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 		return
 	}
 
+	// Extract text from all message types - krill understands everything
+	messageText := extractMessageText(msg)
+	if strings.TrimSpace(messageText) == "" {
+		// Completely empty - nothing to process
+		t.react(chatID, msg.MessageID, "eyes")
+		return
+	}
+
 	// Acknowledge with a reaction emoji so user knows we received it
 	t.react(chatID, msg.MessageID, "eyes")
 
@@ -148,7 +156,7 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 		ChatID:   fmt.Sprintf("%d", chatID),
 		UserID:   fmt.Sprintf("%d", msg.From.ID),
 		Username: msg.From.UserName,
-		Text:     msg.Text,
+		Text:     messageText,
 	}
 
 	resp, err := t.handler.HandleMessage(ctx, chatMsg)
@@ -218,6 +226,86 @@ func (t *TelegramBot) handleCommand(chatID int64, msg *tgbotapi.Message) {
 			msg.Command(),
 		))
 	}
+}
+
+// extractMessageText builds a text representation from any Telegram message type.
+// Krill have compound eyes that see everything - this function sees every message type.
+func extractMessageText(msg *tgbotapi.Message) string {
+	// Regular text message (may contain emojis inline)
+	if msg.Text != "" {
+		return msg.Text
+	}
+
+	// Caption on media (photos, videos, GIFs with captions)
+	if msg.Caption != "" {
+		return msg.Caption
+	}
+
+	// Sticker - translate to descriptive text the LLM can understand
+	if msg.Sticker != nil {
+		emoji := msg.Sticker.Emoji
+		setName := msg.Sticker.SetName
+		if emoji != "" && setName != "" {
+			return fmt.Sprintf("[The user sent a sticker: %s from pack '%s'. Respond to the emotion/meaning behind this sticker naturally.]", emoji, setName)
+		}
+		if emoji != "" {
+			return fmt.Sprintf("[The user sent a sticker with emoji: %s. Respond to the emotion/meaning behind it naturally.]", emoji)
+		}
+		return "[The user sent a sticker. React playfully.]"
+	}
+
+	// GIF / Animation
+	if msg.Animation != nil {
+		name := msg.Animation.FileName
+		if name != "" {
+			return fmt.Sprintf("[The user sent a GIF: '%s'. React to it playfully and naturally, as if you can see it.]", name)
+		}
+		return "[The user sent a GIF/animation. React to it playfully - match their energy.]"
+	}
+
+	// Photo
+	if msg.Photo != nil && len(msg.Photo) > 0 {
+		return "[The user sent a photo. Acknowledge it warmly - you can't see images yet but respond naturally.]"
+	}
+
+	// Video
+	if msg.Video != nil {
+		return "[The user sent a video. Acknowledge it - you can't watch videos yet but respond naturally.]"
+	}
+
+	// Voice message
+	if msg.Voice != nil {
+		return "[The user sent a voice message. You can't hear audio yet - let them know warmly.]"
+	}
+
+	// Document/file
+	if msg.Document != nil {
+		name := msg.Document.FileName
+		if name != "" {
+			return fmt.Sprintf("[The user sent a file: '%s'. Acknowledge it naturally.]", name)
+		}
+		return "[The user sent a document. Acknowledge it naturally.]"
+	}
+
+	// Contact
+	if msg.Contact != nil {
+		return fmt.Sprintf("[The user shared a contact: %s %s. Acknowledge it.]",
+			msg.Contact.FirstName, msg.Contact.LastName)
+	}
+
+	// Location
+	if msg.Location != nil {
+		return fmt.Sprintf("[The user shared a location: lat %.4f, lon %.4f. Acknowledge it.]",
+			msg.Location.Latitude, msg.Location.Longitude)
+	}
+
+	// Dice/game
+	if msg.Dice != nil {
+		return fmt.Sprintf("[The user rolled a %s and got %d. React to the result!]",
+			msg.Dice.Emoji, msg.Dice.Value)
+	}
+
+	return ""
 }
 
 // isAllowed checks whether a user ID is in the AllowedIDs list.
