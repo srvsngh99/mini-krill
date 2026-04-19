@@ -353,13 +353,20 @@ func emojiChar(name string) string {
 }
 
 // sendMessage sends a single text message to the given chat.
+// Uses Markdown parse mode so LLM formatting renders natively in Telegram.
 func (t *TelegramBot) sendMessage(chatID int64, text string) {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
 	reply := tgbotapi.NewMessage(chatID, text)
+	reply.ParseMode = "Markdown"
 	if _, err := t.bot.Send(reply); err != nil {
-		log.Error("failed to send telegram message", "chat_id", chatID, "error", err)
+		// Markdown parsing can fail on malformed output - retry as plain text
+		log.Debug("markdown send failed, retrying as plain text", "error", err)
+		reply.ParseMode = ""
+		if _, err := t.bot.Send(reply); err != nil {
+			log.Error("failed to send telegram message", "chat_id", chatID, "error", err)
+		}
 	}
 }
 
