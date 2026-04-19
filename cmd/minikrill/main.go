@@ -223,6 +223,16 @@ func initStack(quiet bool) (*krillStack, error) {
 		_ = mcpReg.LoadFromConfig(cfg.MCP.Servers)
 	}
 
+	// Self-awareness: give the krill eyes and hands on its own internals
+	skillReg.RegisterSelfSkills(plugin.SelfContext{
+		Brain:     krillBrain,
+		Config:    cfg,
+		Heartbeat: krillBrain.Heartbeat(),
+		Skills:    skillReg,
+		LLM:       llmProvider,
+		DataDir:   config.DataDir(),
+	})
+
 	krillAgent := agent.New(cfg.Agent, llmProvider, krillBrain, skillReg, mcpReg)
 	chatHandler := chat.NewHandler(krillAgent)
 

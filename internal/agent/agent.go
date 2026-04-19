@@ -191,10 +191,47 @@ func (a *KrillAgent) handleTask(ctx context.Context, input string) (string, erro
 // If the user's question looks like it needs current information, the krill
 // automatically searches the web first and includes results in context.
 func (a *KrillAgent) handleChat(ctx context.Context) (string, error) {
-	// Check if the latest user message needs web search
+	// Check if the latest user message is about the krill itself
 	lastMsg := ""
 	if len(a.history) > 0 {
 		lastMsg = a.history[len(a.history)-1].Content
+	}
+
+	// Self-awareness: detect and invoke self-skills
+	if skillName, skillInput := a.detectSelfSkill(lastMsg); skillName != "" {
+		if skill, ok := a.skills.Get(skillName); ok {
+			log.Info("invoking self-skill", "skill", skillName)
+			result, err := skill.Execute(ctx, skillInput, a.llm)
+			if err != nil {
+				log.Error("self-skill failed", "skill", skillName, "error", err)
+			} else if result != "" {
+				// For write skills, return result directly (it's already the confirmation)
+				if strings.HasPrefix(skillName, "self:tune") ||
+					strings.HasPrefix(skillName, "self:configure") ||
+					strings.HasPrefix(skillName, "self:evolve") ||
+					strings.HasPrefix(skillName, "self:learn") ||
+					strings.HasPrefix(skillName, "self:add-skill") ||
+					strings.HasPrefix(skillName, "self:heal") {
+					a.appendMessage(core.Message{Role: "assistant", Content: result})
+					return result, nil
+				}
+				// For read skills, inject into LLM context so the krill can discuss it naturally
+				enriched := a.brain.EnrichMessages(a.history)
+				selfCtx := core.Message{
+					Role:    "system",
+					Content: "Here is information about yourself that the user is asking about. Use it to respond naturally in first person:\n\n" + result,
+				}
+				enriched = append(enriched[:len(enriched)-1], selfCtx, enriched[len(enriched)-1])
+				resp, err := a.llm.Chat(ctx, enriched)
+				if err != nil {
+					// Fallback: return raw self-skill output
+					a.appendMessage(core.Message{Role: "assistant", Content: result})
+					return result, nil
+				}
+				a.appendMessage(core.Message{Role: "assistant", Content: resp.Content})
+				return resp.Content, nil
+			}
+		}
 	}
 
 	enriched := a.brain.EnrichMessages(a.history)
@@ -230,6 +267,42 @@ func (a *KrillAgent) handleChat(ctx context.Context) (string, error) {
 	)
 
 	return resp.Content, nil
+}
+
+// detectSelfSkill checks if the message is about the krill itself and maps
+// it to the appropriate self:* skill. Returns ("", "") if not self-referential.
+// Krill have compound eyes with 7 visual pigments - these detect self-references.
+func (a *KrillAgent) detectSelfSkill(msg string) (skillName, skillInput string) {
+	lower := strings.ToLower(msg)
+
+	// Read-only introspection
+	selfMap := []struct {
+		triggers []string
+		skill    string
+	}{
+		{[]string{"your health", "check yourself", "are you ok", "how are you feeling", "diagnose yourself"}, "self:health"},
+		{[]string{"your personality", "who are you", "describe yourself", "about yourself", "your identity", "your traits"}, "self:inspect"},
+		{[]string{"your status", "your uptime", "how long have you been", "your vitals"}, "self:status"},
+		{[]string{"your memories", "what do you remember", "what have you learned", "your memory"}, "self:memory"},
+		{[]string{"your skills", "your capabilities", "what can you do", "your abilities"}, "self:skills"},
+		{[]string{"your config", "your settings", "your configuration", "show config"}, "self:config"},
+		// Write operations
+		{[]string{"tune your", "change temperature", "set temperature", "tune temperature", "set max_token", "tune max_token"}, "self:tune"},
+		{[]string{"learn that", "remember that", "remember this", "memorize", "note that"}, "self:learn"},
+		{[]string{"evolve your", "update your personality", "change your style", "change your trait", "add trait", "be more", "be less"}, "self:evolve"},
+		{[]string{"add a skill", "create a skill", "new skill", "add skill"}, "self:add-skill"},
+		{[]string{"heal yourself", "fix yourself", "self heal", "self-heal", "repair yourself"}, "self:heal"},
+		{[]string{"switch to ollama", "switch to openai", "switch to anthropic", "switch to google", "auto approve", "require approval", "log level"}, "self:configure"},
+	}
+
+	for _, entry := range selfMap {
+		for _, trigger := range entry.triggers {
+			if strings.Contains(lower, trigger) {
+				return entry.skill, msg
+			}
+		}
+	}
+	return "", ""
 }
 
 // shouldSearch detects if a message likely needs current web information.

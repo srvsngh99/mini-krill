@@ -285,6 +285,18 @@ func (r *SkillRegistryImpl) RegisterBuiltins() {
 	log.Debug("built-in skills registered", "count", len(builtins))
 }
 
+// RegisterSelfSkills registers all self-awareness and self-modification skills.
+// These give the krill compound eyes on its own internals.
+func (r *SkillRegistryImpl) RegisterSelfSkills(sc SelfContext) {
+	selfSkills := NewSelfSkills(sc)
+	for _, s := range selfSkills {
+		if err := r.Register(s); err != nil {
+			log.Warn("failed to register self-skill", "name", s.Name(), "error", err)
+		}
+	}
+	log.Debug("self-awareness skills registered", "count", len(selfSkills))
+}
+
 // --- recall skill ---
 // A marker skill that signals the agent to search its memory.
 // The actual memory lookup is handled by the agent layer - this skill
