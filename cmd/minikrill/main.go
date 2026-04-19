@@ -203,6 +203,9 @@ func initStack(quiet bool) (*krillStack, error) {
 		_ = klog.Init(cfg.Log)
 	}
 
+	// Seed built-in personality profiles on first run
+	brain.SeedDefaultPersonalities(config.DataDir())
+
 	// Sync personality from agent config to brain config
 	if cfg.Agent.Personality != "" {
 		cfg.Brain.Personality = cfg.Agent.Personality
@@ -1008,6 +1011,8 @@ var personalityListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List available personalities",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		_ = config.EnsureDataDir()
+		brain.SeedDefaultPersonalities(config.DataDir())
 		cfg, _ := config.Load()
 		active := "krill"
 		if cfg != nil && cfg.Agent.Personality != "" {
