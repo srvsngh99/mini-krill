@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -144,11 +145,34 @@ var initCmd = &cobra.Command{
 // dive command
 // ---------------------------------------------------------------------------
 
+var diveFG bool
+
+func init() {
+	diveCmd.Flags().BoolVarP(&diveFG, "foreground", "f", false, "run in foreground (default: daemonize)")
+}
+
 var diveCmd = &cobra.Command{
 	Use:   "dive",
 	Short: "Start Mini Krill - dive into the deep",
 	Long:  "Starts the agent with all configured services (Telegram, Discord).",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if !diveFG {
+			return diveDaemon()
+		}
+
+		// Auto-start Ollama before initializing the stack
+		var ollamaMgr *ollama.OllamaManager
+		cfg, _ := config.Load()
+		if cfg == nil {
+			cfg = config.DefaultConfig()
+		}
+		if cfg.LLM.Provider == "ollama" && cfg.Ollama.AutoStart {
+			ollamaMgr = ollama.NewManager(cfg.Ollama)
+			if err := ollamaMgr.EnsureRunning(context.Background()); err != nil {
+				klog.Warn("ollama auto-start failed (will retry via health monitor)", "error", err)
+			}
+		}
+
 		stack, err := initStack(false)
 		if err != nil {
 			return err
@@ -157,6 +181,12 @@ var diveCmd = &cobra.Command{
 		printBanner()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+
+		// Start health monitor (does NOT stop Ollama on exit)
+		if ollamaMgr != nil {
+			ollamaMgr.StartHealthMonitor()
+			defer ollamaMgr.StopHealthMonitor()
+		}
 
 		if err := stack.hb.Start(ctx); err != nil {
 			klog.Warn("heartbeat start failed", "error", err)
@@ -213,7 +243,7 @@ var diveCmd = &cobra.Command{
 		fmt.Println(cDimCyan + "  " + randomFact() + cReset)
 
 		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 		<-sigCh
 
 		fmt.Println()
@@ -223,6 +253,64 @@ var diveCmd = &cobra.Command{
 		_ = stack.mcp.Close()
 		return nil
 	},
+}
+
+// diveDaemon re-execs the dive command as a detached background process.
+func diveDaemon() error {
+	// Check if a daemon is already running
+	pidFile := filepath.Join(config.DataDir(), "krill.pid")
+	if data, err := os.ReadFile(pidFile); err == nil {
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
+			if proc, err := os.FindProcess(pid); err == nil {
+				if proc.Signal(syscall.Signal(0)) == nil {
+					return fmt.Errorf("Mini Krill is already diving (PID %d). Run 'minikrill surface' first", pid)
+				}
+			}
+		}
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve executable: %w", err)
+	}
+
+	logDir := filepath.Join(config.DataDir(), "logs")
+	_ = os.MkdirAll(logDir, 0755)
+	logPath := filepath.Join(logDir, "dive.log")
+
+	out, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return fmt.Errorf("open log file: %w", err)
+	}
+
+	childArgs := []string{"dive", "--foreground"}
+	if verbose {
+		childArgs = append(childArgs, "--verbose")
+	}
+
+	child := exec.Command(exe, childArgs...)
+	child.Stdout = out
+	child.Stderr = out
+	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+
+	if err := child.Start(); err != nil {
+		out.Close()
+		return fmt.Errorf("start daemon: %w", err)
+	}
+	out.Close()
+
+	// Detach - the parent does not wait for the child.
+	_ = child.Process.Release()
+
+	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(child.Process.Pid)), 0644)
+
+	printBanner()
+	fmt.Printf(cBGreen+"  Mini Krill is swimming!"+cReset+" "+cDim+"(PID: %d)\n"+cReset, child.Process.Pid)
+	fmt.Printf(cDim+"  Log: %s\n"+cReset, logPath)
+	fmt.Println()
+	fmt.Println(cDim + "  Stop with: " + cReset + "minikrill surface")
+	fmt.Println()
+	return nil
 }
 
 // ---------------------------------------------------------------------------

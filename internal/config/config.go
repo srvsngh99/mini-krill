@@ -138,7 +138,7 @@ func DefaultConfig() *Config {
 		},
 		LLM: LLMConfig{
 			Provider:    "ollama",
-			Model:       "llama3.2",
+			Model:       "gemma4:e2b",
 			Temperature: 0.7,
 			MaxTokens:   2048,
 		},
@@ -152,7 +152,7 @@ func DefaultConfig() *Config {
 			Host:         "http://localhost:11434",
 			AutoInstall:  true,
 			AutoStart:    true,
-			DefaultModel: "llama3.2",
+			DefaultModel: "gemma4:e2b",
 		},
 		Plugins: PluginsConfig{
 			Dir: filepath.Join(dataDir, "skills"),
