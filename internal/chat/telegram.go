@@ -131,10 +131,10 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 	isFromBot := msg.From != nil && msg.From.IsBot
 	botUsername := t.bot.Self.UserName
 
-	// Access control: if AllowedIDs is non-empty, only listed users may interact.
-	// In groups, skip this check for bot-to-bot interactions.
-	if !isFromBot && len(t.cfg.AllowedIDs) > 0 && !t.isAllowed(msg.From.ID) {
-		log.Warn("telegram message from unauthorised user",
+	// In groups, skip AllowedIDs check - the group itself is access control.
+	// In DMs, enforce AllowedIDs if configured.
+	if !isGroup && len(t.cfg.AllowedIDs) > 0 && !t.isAllowed(msg.From.ID) {
+		log.Warn("telegram DM from unauthorised user",
 			"user_id", msg.From.ID,
 			"username", msg.From.UserName,
 		)
@@ -147,35 +147,36 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 		return
 	}
 
-	// --- Group chat logic ---
+	// --- Group chat awareness ---
 	if isGroup {
 		mentioned := t.isMentioned(msg, botUsername)
-		isReply := msg.ReplyToMessage != nil &&
+		isReplyToMe := msg.ReplyToMessage != nil &&
 			msg.ReplyToMessage.From != nil &&
 			msg.ReplyToMessage.From.UserName == botUsername
 
-		// In groups, only respond when:
-		// 1. Directly @mentioned
-		// 2. Replied to krill's message
-		// 3. From another bot (with cooldown to prevent loops)
-		if !mentioned && !isReply && !isFromBot {
-			return // not addressed to us, ignore silently
+		// Bot-to-bot loop prevention: cooldown after replying to same bot
+		if isFromBot && !t.canReplyToBot(msg.From.ID) {
+			log.Debug("skipping bot message (cooldown active)", "bot", msg.From.UserName)
+			return
 		}
 
-		// Bot-to-bot: rate limit to prevent infinite loops
-		if isFromBot {
-			if !t.canReplyToBot(msg.From.ID) {
-				log.Debug("skipping bot message (cooldown active)",
-					"bot", msg.From.UserName,
-				)
-				return
-			}
-			// If not mentioned and not a reply to us, only respond 30% of the time
-			// to keep group chat natural
-			if !mentioned && !isReply && rand.Float64() > 0.3 {
-				return
-			}
+		// Decide if we should respond based on context
+		shouldRespond := mentioned || isReplyToMe || t.isRelevantGroupMessage(msg, botUsername)
+
+		if !shouldRespond {
+			log.Debug("group message not relevant, staying quiet",
+				"from", msg.From.UserName,
+				"text_preview", truncateLog(extractMessageText(msg), 50),
+			)
+			return
 		}
+
+		log.Info("group message relevant, responding",
+			"from", msg.From.UserName,
+			"mentioned", mentioned,
+			"reply_to_me", isReplyToMe,
+			"is_bot", isFromBot,
+		)
 	}
 
 	// Extract text from all message types
@@ -245,6 +246,70 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 	} else {
 		t.sendLong(chatID, resp)
 	}
+}
+
+// isRelevantGroupMessage decides if the krill should chime in on a group message
+// it wasn't directly mentioned in. Krill are social creatures - they don't just
+// wait to be called, they participate when they have something to add.
+func (t *TelegramBot) isRelevantGroupMessage(msg *tgbotapi.Message, botUsername string) bool {
+	text := strings.ToLower(extractMessageText(msg))
+	if text == "" {
+		return false
+	}
+
+	// Always respond to questions directed at the group
+	if strings.Contains(text, "?") && !strings.HasPrefix(text, "[the user sent") {
+		return true
+	}
+
+	// Respond if someone mentions "krill" by name
+	if strings.Contains(text, "krill") || strings.Contains(text, "mini krill") {
+		return true
+	}
+
+	// Respond to messages from other bots (they might be talking about something relevant)
+	if msg.From != nil && msg.From.IsBot {
+		return true
+	}
+
+	// Respond to opinions, debates, asks for help
+	opinionTriggers := []string{
+		"what do you think", "any thoughts", "opinions",
+		"help me", "can someone", "anyone know",
+		"agree", "disagree", "debate",
+		"interesting", "cool", "awesome", "amazing",
+		"wrong", "right", "correct", "incorrect",
+	}
+	for _, trigger := range opinionTriggers {
+		if strings.Contains(text, trigger) {
+			return true
+		}
+	}
+
+	// Respond to technical/AI topics the krill would have opinions on
+	techTriggers := []string{
+		"ai", "llm", "model", "agent", "bot",
+		"code", "programming", "deploy", "build",
+		"search", "data", "memory", "brain",
+	}
+	matchCount := 0
+	for _, trigger := range techTriggers {
+		if strings.Contains(text, trigger) {
+			matchCount++
+		}
+	}
+	if matchCount >= 2 {
+		return true
+	}
+
+	return false
+}
+
+func truncateLog(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 // isMentioned checks if the bot is @mentioned in the message text or entities.
