@@ -30,10 +30,11 @@ type Config struct {
 
 // AgentConfig controls the main krill agent behaviour.
 type AgentConfig struct {
-	Name         string `yaml:"name"`
-	Personality  string `yaml:"personality"`  // active personality profile (default: "krill")
-	MaxSubKrills int    `yaml:"max_sub_krills"`
-	PlanApproval bool   `yaml:"plan_approval"` // require user approval before executing plans
+	Name          string `yaml:"name"`
+	Personality   string `yaml:"personality"`  // active personality profile (default: "krill")
+	MaxSubKrills  int    `yaml:"max_sub_krills"`
+	PlanApproval  bool   `yaml:"plan_approval"` // require user approval before executing plans
+	RecoveryTurns int    `yaml:"recovery_turns"` // turns to load on cold start (default 10, from brain config)
 }
 
 // LLMConfig selects and configures the LLM provider.
@@ -53,6 +54,7 @@ type BrainConfig struct {
 	Personality      string `yaml:"personality"`  // active personality profile name
 	MaxMemories      int    `yaml:"max_memories"`
 	HeartbeatSec     int    `yaml:"heartbeat_interval_sec"`
+	RecoveryTurns    int    `yaml:"recovery_turns"` // turns to load on cold start (default 10)
 }
 
 // TelegramConfig for the Telegram bot integration.
@@ -221,6 +223,9 @@ func fillDefaults(cfg *Config) {
 	}
 	if cfg.Telegram.BotMaxTurns == 0 {
 		cfg.Telegram.BotMaxTurns = 3
+	}
+	if cfg.Brain.RecoveryTurns == 0 {
+		cfg.Brain.RecoveryTurns = 10
 	}
 }
 

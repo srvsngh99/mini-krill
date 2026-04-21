@@ -150,6 +150,9 @@ func initStack(quiet bool) (*krillStack, error) {
 		DataDir:   config.DataDir(),
 	})
 
+	// Pass recovery config from brain to agent for cold-start continuity
+	cfg.Agent.RecoveryTurns = cfg.Brain.RecoveryTurns
+
 	krillAgent := agent.New(cfg.Agent, llmProvider, krillBrain, skillReg, mcpReg)
 	chatHandler := chat.NewHandler(krillAgent)
 

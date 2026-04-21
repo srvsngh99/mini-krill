@@ -15,6 +15,7 @@ import (
 // and heartbeat into one cohesive cognitive system.
 type KrillBrain struct {
 	memory      *FileMemory
+	convStore   *ConversationStore
 	soul        *core.Soul
 	personality *core.Personality
 	heartbeat   *KrillHeartbeat
@@ -47,11 +48,18 @@ func New(cfg config.BrainConfig, llm core.LLMProvider) (*KrillBrain, error) {
 		return nil, fmt.Errorf("init memory: %w", err)
 	}
 
+	// Initialize conversation store (SQLite)
+	convStore, err := NewConversationStore(filepath.Join(cfg.DataDir, "conversations.db"))
+	if err != nil {
+		return nil, fmt.Errorf("init conversation store: %w", err)
+	}
+
 	// Create heartbeat monitor
 	hb := NewHeartbeat(cfg.HeartbeatSec, llm, cfg.DataDir)
 
 	brain := &KrillBrain{
 		memory:      memory,
+		convStore:   convStore,
 		soul:        soul,
 		personality: personality,
 		heartbeat:   hb,
@@ -70,6 +78,22 @@ func New(cfg config.BrainConfig, llm core.LLMProvider) (*KrillBrain, error) {
 // Memory returns the krill's persistent memory store.
 func (b *KrillBrain) Memory() core.Memory {
 	return b.memory
+}
+
+// ConversationStore returns the durable conversation turn store, or nil.
+func (b *KrillBrain) ConversationStore() core.ConversationStore {
+	if b.convStore == nil {
+		return nil
+	}
+	return b.convStore
+}
+
+// Close releases resources held by the brain (conversation database, etc.).
+func (b *KrillBrain) Close() error {
+	if b.convStore != nil {
+		return b.convStore.Close()
+	}
+	return nil
 }
 
 // GetPersonality returns the krill's personality configuration.
