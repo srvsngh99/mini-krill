@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -194,6 +195,16 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 			return
 		}
 
+		// If the message explicitly mentions a different bot, don't respond.
+		// This prevents identity confusion where our bot answers for another bot.
+		if !mentioned && !isReplyToMe && mentionsOtherBot(text, botUsername) {
+			log.Debug("message mentions another bot, skipping",
+				"from", msg.From.UserName,
+				"text_preview", truncateLog(text, 50),
+			)
+			return
+		}
+
 		log.Info("group message, participating",
 			"from", msg.From.UserName,
 			"mentioned", mentioned,
@@ -268,6 +279,21 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 		resp = "..."
 	}
 
+	// Check for cross-channel message directives in the response
+	resp, crossTargets := extractCrossPostDirectives(resp)
+	for _, ct := range crossTargets {
+		targetID, parseErr := strconv.ParseInt(ct.ChatID, 10, 64)
+		if parseErr != nil {
+			log.Warn("invalid cross-post target chat ID", "id", ct.ChatID)
+			continue
+		}
+		t.SendToChat(targetID, ct.Text)
+		log.Info("cross-posted message", "target_chat", ct.ChatID)
+	}
+	if strings.TrimSpace(resp) == "" && len(crossTargets) > 0 {
+		resp = "Done! Message sent to the other chat."
+	}
+
 	// Track bot-to-bot turn
 	if isFromBot {
 		t.incrementBotTurns(chatID)
@@ -287,16 +313,18 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 		t.sendLong(chatID, resp)
 	}
 
-	// Learn from group interactions - store interesting exchanges
-	if isGroup && t.handler != nil {
-		senderName := ""
-		if msg.From != nil {
-			senderName = msg.From.UserName
-			if senderName == "" {
-				senderName = msg.From.FirstName
-			}
+	// Learn from interactions - store interesting exchanges
+	senderName := ""
+	if msg.From != nil {
+		senderName = msg.From.UserName
+		if senderName == "" {
+			senderName = msg.From.FirstName
 		}
+	}
+	if isGroup && t.handler != nil {
 		go t.maybeLearnFromGroup(ctx, senderName, extractMessageText(msg), resp)
+	} else if !isGroup && t.learnFn != nil {
+		go t.maybeLearnFromDM(ctx, senderName, extractMessageText(msg), resp)
 	}
 }
 
@@ -322,6 +350,24 @@ func (t *TelegramBot) maybeLearnFromGroup(ctx context.Context, sender, input, re
 	value := fmt.Sprintf("%s said: %s\nKrill responded: %s", sender, truncateLog(input, 200), truncateLog(response, 200))
 	if err := t.learnFn(ctx, key, value); err != nil {
 		log.Debug("failed to store group learning", "error", err)
+	}
+}
+
+// maybeLearnFromDM stores DM conversation exchanges to memory so the krill
+// can recall previous DM conversations across restarts.
+func (t *TelegramBot) maybeLearnFromDM(ctx context.Context, sender, input, response string) {
+	if t.learnFn == nil {
+		return
+	}
+	// Lower threshold than group - DMs are direct interactions worth remembering
+	if len(input) < 10 || len(response) < 10 {
+		return
+	}
+	key := fmt.Sprintf("dm_%s_%d", sender, time.Now().Unix())
+	value := fmt.Sprintf("DM with %s: user said: %s\nKrill responded: %s",
+		sender, truncateLog(input, 200), truncateLog(response, 200))
+	if err := t.learnFn(ctx, key, value); err != nil {
+		log.Debug("failed to store DM learning", "error", err)
 	}
 }
 
@@ -353,6 +399,37 @@ func stripMention(text, botUsername string) string {
 	return strings.TrimSpace(text)
 }
 
+// mentionsOtherBot returns true if the text contains an @mention that is NOT
+// for this bot. This prevents the krill from answering when someone talks to
+// a different bot in the group.
+func mentionsOtherBot(text, myUsername string) bool {
+	lower := strings.ToLower(text)
+	myMention := "@" + strings.ToLower(myUsername)
+	idx := 0
+	for {
+		atPos := strings.Index(lower[idx:], "@")
+		if atPos == -1 {
+			break
+		}
+		absPos := idx + atPos
+		// Extract the username after @
+		end := absPos + 1
+		for end < len(lower) && (lower[end] >= 'a' && lower[end] <= 'z' ||
+			lower[end] >= '0' && lower[end] <= '9' || lower[end] == '_') {
+			end++
+		}
+		mention := lower[absPos:end]
+		if len(mention) > 1 && mention != myMention {
+			return true // found a mention that's not us
+		}
+		idx = end
+		if idx >= len(lower) {
+			break
+		}
+	}
+	return false
+}
+
 // getBotTurns returns the current bot-to-bot exchange count for a chat.
 func (t *TelegramBot) getBotTurns(chatID int64) int {
 	t.botTurnsMu.Lock()
@@ -376,6 +453,7 @@ func (t *TelegramBot) resetBotTurns(chatID int64) {
 
 // replyLong sends a reply to a specific message, splitting if needed.
 func (t *TelegramBot) replyLong(chatID int64, replyTo int, text string) {
+	text = sanitizeMarkdown(text)
 	chunks := chunkMessage(text, telegramMaxLen)
 	for i, chunk := range chunks {
 		if strings.TrimSpace(chunk) == "" {
@@ -587,10 +665,92 @@ func (t *TelegramBot) sendMessage(chatID int64, text string) {
 // sendLong sends a response that may exceed Telegram's 4096-char limit by
 // splitting it into multiple messages.
 func (t *TelegramBot) sendLong(chatID int64, text string) {
+	text = sanitizeMarkdown(text)
 	chunks := chunkMessage(text, telegramMaxLen)
 	for _, chunk := range chunks {
 		t.sendMessage(chatID, chunk)
 	}
+}
+
+// crossPostTarget holds a parsed cross-post directive.
+type crossPostTarget struct {
+	ChatID string
+	Text   string
+}
+
+// extractCrossPostDirectives finds and extracts [CROSSPOST:id]...[/CROSSPOST]
+// directives from a response. Returns the cleaned text and any cross-post targets.
+func extractCrossPostDirectives(text string) (string, []crossPostTarget) {
+	var targets []crossPostTarget
+	for {
+		start := strings.Index(text, "[CROSSPOST:")
+		if start == -1 {
+			break
+		}
+		end := strings.Index(text[start:], "[/CROSSPOST]")
+		if end == -1 {
+			break
+		}
+		end += start
+
+		// Parse: [CROSSPOST:chatid]message[/CROSSPOST]
+		header := text[start : start+len("[CROSSPOST:")] // "[CROSSPOST:"
+		_ = header
+		idStart := start + len("[CROSSPOST:")
+		closeBracket := strings.Index(text[idStart:], "]")
+		if closeBracket == -1 {
+			break
+		}
+		chatID := text[idStart : idStart+closeBracket]
+		msgStart := idStart + closeBracket + 1
+		msg := strings.TrimSpace(text[msgStart:end])
+
+		if chatID != "" && msg != "" {
+			targets = append(targets, crossPostTarget{ChatID: chatID, Text: msg})
+		}
+
+		// Remove the directive from the text
+		text = text[:start] + text[end+len("[/CROSSPOST]"):]
+	}
+	return strings.TrimSpace(text), targets
+}
+
+// SendToChat sends a message to a specific chat ID. Enables cross-channel messaging.
+func (t *TelegramBot) SendToChat(chatID int64, text string) {
+	t.sendLong(chatID, text)
+}
+
+// sanitizeMarkdown cleans up LLM-generated markdown to be safe for Telegram's
+// Markdown parser. Ensures formatting markers are balanced and converts
+// triple backticks that Telegram Markdown v1 handles poorly.
+func sanitizeMarkdown(text string) string {
+	text = balanceMarkers(text, '*')
+	text = balanceMarkers(text, '_')
+	// Convert triple backtick code blocks to single backtick inline code
+	text = strings.ReplaceAll(text, "```\n", "\n")
+	text = strings.ReplaceAll(text, "\n```", "\n")
+	text = strings.ReplaceAll(text, "```", "`")
+	return text
+}
+
+// balanceMarkers ensures formatting markers appear in pairs.
+// If there's an odd number, strip the last unpaired one.
+func balanceMarkers(text string, marker byte) string {
+	count := 0
+	for i := 0; i < len(text); i++ {
+		if text[i] == marker {
+			count++
+		}
+	}
+	if count%2 == 0 {
+		return text // already balanced
+	}
+	// Remove the last occurrence of the marker to balance
+	lastIdx := strings.LastIndexByte(text, marker)
+	if lastIdx >= 0 {
+		text = text[:lastIdx] + text[lastIdx+1:]
+	}
+	return text
 }
 
 // chunkMessage splits text into pieces of at most maxLen characters, preferring

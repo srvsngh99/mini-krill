@@ -177,6 +177,7 @@ var diveCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer stack.brain.Close()
 
 		printBanner()
 		ctx, cancel := context.WithCancel(context.Background())
@@ -355,6 +356,7 @@ var chatCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer stack.brain.Close()
 
 		printBanner()
 		fmt.Printf(cDim+"  Provider: %s/%s"+cReset, stack.cfg.LLM.Provider, stack.cfg.LLM.Model)
@@ -459,6 +461,7 @@ var tuiCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer stack.brain.Close()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		_ = stack.hb.Start(ctx)

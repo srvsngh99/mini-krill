@@ -122,9 +122,17 @@ type Memory interface {
 	Count() int
 }
 
+// ConversationStore persists conversation turns across sessions.
+type ConversationStore interface {
+	SaveTurn(channel, role, content string) error
+	LoadRecent(channel string, n int) ([]Message, error)
+	Close() error
+}
+
 // Brain orchestrates memory, personality, and soul.
 type Brain interface {
 	Memory() Memory
+	ConversationStore() ConversationStore
 	GetPersonality() *Personality
 	GetSoul() *Soul
 	SystemPrompt() string

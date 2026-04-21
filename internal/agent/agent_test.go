@@ -52,11 +52,12 @@ func (m *MockProvider) Available(_ context.Context) bool { return true }
 
 type mockBrain struct{}
 
-func (b *mockBrain) Memory() core.Memory               { return nil }
-func (b *mockBrain) GetPersonality() *core.Personality  { return &core.Personality{Name: "TestKrill"} }
-func (b *mockBrain) GetSoul() *core.Soul                { return &core.Soul{SystemPrompt: "You are a test krill.", Identity: "test"} }
-func (b *mockBrain) SystemPrompt() string               { return "You are a test krill." }
-func (b *mockBrain) RandomFact() string                 { return "Krill are tiny." }
+func (b *mockBrain) Memory() core.Memory                          { return nil }
+func (b *mockBrain) ConversationStore() core.ConversationStore     { return nil }
+func (b *mockBrain) GetPersonality() *core.Personality             { return &core.Personality{Name: "TestKrill"} }
+func (b *mockBrain) GetSoul() *core.Soul                           { return &core.Soul{SystemPrompt: "You are a test krill.", Identity: "test"} }
+func (b *mockBrain) SystemPrompt() string                          { return "You are a test krill." }
+func (b *mockBrain) RandomFact() string                            { return "Krill are tiny." }
 func (b *mockBrain) EnrichMessages(msgs []core.Message) []core.Message {
 	sysMsg := core.Message{Role: "system", Content: "You are a test krill."}
 	if len(msgs) > 0 && msgs[0].Role == "system" {
