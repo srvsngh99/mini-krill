@@ -37,6 +37,7 @@ type TelegramBot struct {
 	botTurns     map[int64]int // tracks consecutive bot-to-bot exchanges per chat
 	botTurnsMu   sync.Mutex
 	learnFn      LearnFunc // optional: store group learnings to memory
+	providerMgr  core.ProviderControl // optional: runtime model/provider switching
 }
 
 // NewTelegramBot creates a TelegramBot using the provided config and handler.
@@ -66,6 +67,11 @@ func NewTelegramBot(cfg config.TelegramConfig, handler core.ChatHandler) (*Teleg
 // SetLearnFunc sets a callback for storing group conversation learnings.
 func (t *TelegramBot) SetLearnFunc(fn LearnFunc) {
 	t.learnFn = fn
+}
+
+// SetProviderManager injects the provider manager for runtime model switching.
+func (t *TelegramBot) SetProviderManager(mgr core.ProviderControl) {
+	t.providerMgr = mgr
 }
 
 // Platform returns "telegram".
@@ -100,6 +106,10 @@ func (t *TelegramBot) Start(ctx context.Context) error {
 				if !ok {
 					log.Info("telegram updates channel closed")
 					return
+				}
+				if update.CallbackQuery != nil {
+					t.handleCallbackQuery(update.CallbackQuery)
+					continue
 				}
 				if update.Message == nil {
 					continue
@@ -223,6 +233,22 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 
 	// Strip @mention from message text so the agent gets clean input
 	messageText = stripMention(messageText, botUsername)
+
+	// Natural language provider switching: "switch to claude", "use gemini", etc.
+	if t.providerMgr != nil {
+		if target := detectNLSwitch(messageText); target != "" {
+			provider, model, ok := t.providerMgr.ResolveTarget(target)
+			if ok {
+				if err := t.providerMgr.Switch(provider, model); err != nil {
+					t.sendMessage(chatID, fmt.Sprintf("Switch failed: %s", err.Error()))
+				} else {
+					info := t.providerMgr.ActiveInfo()
+					t.sendMessage(chatID, fmt.Sprintf("Switched to %s (%s)", info.Provider, info.Model))
+				}
+				return
+			}
+		}
+	}
 
 	// Add group context so the agent knows who's talking and behaves naturally.
 	// The krill should be a group participant, not just a responder.
@@ -487,13 +513,16 @@ func (t *TelegramBot) handleCommand(chatID int64, msg *tgbotapi.Message) {
 		t.sendMessage(chatID, strings.Join([]string{
 			"Mini Krill - Commands:",
 			"",
-			"/start  - Wake me up from the deep",
-			"/help   - Show this help text",
-			"/status - Check my vital signs",
-			"/fact   - Learn something about real krill",
-			"/plan   - Start a dive plan for a task",
+			"/start   - Wake me up from the deep",
+			"/help    - Show this help text",
+			"/status  - Check my vital signs",
+			"/model   - Show active provider and model",
+			"/models  - List all providers and models",
+			"/switch  - Switch provider (e.g. /switch ollama)",
+			"/fact    - Learn something about real krill",
+			"/plan    - Start a dive plan for a task",
 			"",
-			"Or just send me a message and I'll do my best!",
+			"Or say 'switch to claude' or 'use gemini' naturally!",
 		}, "\n"))
 
 	case "status":
@@ -507,6 +536,15 @@ func (t *TelegramBot) handleCommand(chatID int64, msg *tgbotapi.Message) {
 		facts := core.KrillFacts
 		t.sendMessage(chatID, "Did you know? "+facts[rand.Intn(len(facts))])
 
+	case "model":
+		t.handleModelCommand(chatID, msg)
+
+	case "models":
+		t.handleModelsCommand(chatID, msg)
+
+	case "switch":
+		t.handleSwitchCommand(chatID, msg)
+
 	case "plan":
 		t.sendMessage(chatID,
 			"Tell me what you need done and I'll draft a dive plan for your approval! "+
@@ -518,6 +556,208 @@ func (t *TelegramBot) handleCommand(chatID int64, msg *tgbotapi.Message) {
 			msg.Command(),
 		))
 	}
+}
+
+// ── Model/provider command handlers ─────────────────────────────────────────
+
+func (t *TelegramBot) handleModelCommand(chatID int64, msg *tgbotapi.Message) {
+	if t.providerMgr == nil {
+		t.sendMessage(chatID, "Provider management not available.")
+		return
+	}
+	info := t.providerMgr.ActiveInfo()
+	text := fmt.Sprintf("Provider: %s\nModel: %s", info.Provider, info.Model)
+
+	providers := t.providerMgr.ListProviders()
+	var buttons []tgbotapi.InlineKeyboardButton
+	for _, p := range providers {
+		label := p.Name
+		if p.IsActive {
+			label = ">> " + label
+		}
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData(label, "sw:"+p.Name))
+	}
+
+	reply := tgbotapi.NewMessage(chatID, text)
+	if len(buttons) > 0 {
+		reply.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(buttons...),
+		)
+	}
+	reply.ReplyToMessageID = msg.MessageID
+	if _, err := t.bot.Send(reply); err != nil {
+		log.Error("failed to send model info", "error", err)
+	}
+}
+
+func (t *TelegramBot) handleModelsCommand(chatID int64, msg *tgbotapi.Message) {
+	if t.providerMgr == nil {
+		t.sendMessage(chatID, "Provider management not available.")
+		return
+	}
+	providers := t.providerMgr.ListProviders()
+	active := t.providerMgr.ActiveInfo()
+
+	var lines []string
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, p := range providers {
+		marker := ""
+		if p.IsActive {
+			marker = " << active"
+		}
+		keyStatus := ""
+		if p.NeedsKey && !p.HasKey {
+			keyStatus = " [no API key]"
+		}
+		lines = append(lines, fmt.Sprintf("\n%s%s%s", p.Name, marker, keyStatus))
+
+		var rowButtons []tgbotapi.InlineKeyboardButton
+		for _, m := range p.Models {
+			activeMarker := ""
+			if p.IsActive && m == active.Model {
+				activeMarker = " <<"
+			}
+			lines = append(lines, fmt.Sprintf("  %s%s", m, activeMarker))
+
+			short := m
+			if len(short) > 20 {
+				short = short[:20]
+			}
+			rowButtons = append(rowButtons, tgbotapi.NewInlineKeyboardButtonData(
+				short, fmt.Sprintf("sw:%s:%s", p.Name, m),
+			))
+		}
+		for len(rowButtons) > 0 {
+			end := 3
+			if end > len(rowButtons) {
+				end = len(rowButtons)
+			}
+			rows = append(rows, rowButtons[:end])
+			rowButtons = rowButtons[end:]
+		}
+	}
+
+	text := strings.Join(lines, "\n")
+	reply := tgbotapi.NewMessage(chatID, text)
+	if len(rows) > 0 {
+		reply.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	}
+	reply.ReplyToMessageID = msg.MessageID
+	if _, err := t.bot.Send(reply); err != nil {
+		log.Error("failed to send models list", "error", err)
+	}
+}
+
+func (t *TelegramBot) handleSwitchCommand(chatID int64, msg *tgbotapi.Message) {
+	if t.providerMgr == nil {
+		t.sendMessage(chatID, "Provider management not available.")
+		return
+	}
+	args := strings.TrimSpace(msg.CommandArguments())
+	if args == "" {
+		t.sendMessage(chatID, "Usage: /switch <provider> [model]\nExample: /switch ollama\nExample: /switch openai gpt-4o")
+		return
+	}
+	parts := strings.Fields(args)
+	provider, model, ok := t.providerMgr.ResolveTarget(parts[0])
+	if !ok {
+		t.sendMessage(chatID, fmt.Sprintf("Unknown target: %s\nAvailable: ollama, openai, anthropic, google", parts[0]))
+		return
+	}
+	if len(parts) > 1 {
+		model = parts[1]
+	}
+	if err := t.providerMgr.Switch(provider, model); err != nil {
+		t.sendMessage(chatID, fmt.Sprintf("Switch failed: %s", err.Error()))
+		return
+	}
+	info := t.providerMgr.ActiveInfo()
+	t.sendMessage(chatID, fmt.Sprintf("Switched to %s (%s)", info.Provider, info.Model))
+}
+
+// handleCallbackQuery processes inline keyboard button taps.
+func (t *TelegramBot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
+	if query == nil || query.Data == "" {
+		return
+	}
+
+	callback := tgbotapi.NewCallback(query.ID, "")
+	if _, err := t.bot.Request(callback); err != nil {
+		log.Debug("callback answer failed", "error", err)
+	}
+
+	if t.providerMgr == nil {
+		return
+	}
+
+	data := query.Data
+
+	if strings.HasPrefix(data, "sw:") {
+		parts := strings.SplitN(data[3:], ":", 2)
+		provider := parts[0]
+		model := ""
+		if len(parts) > 1 {
+			model = parts[1]
+		}
+
+		resolvedProv, resolvedModel, ok := t.providerMgr.ResolveTarget(provider)
+		if !ok {
+			t.editCallbackMessage(query, fmt.Sprintf("Unknown provider: %s", provider))
+			return
+		}
+		if model != "" {
+			resolvedModel = model
+		}
+
+		if err := t.providerMgr.Switch(resolvedProv, resolvedModel); err != nil {
+			t.editCallbackMessage(query, fmt.Sprintf("Switch failed: %s", err.Error()))
+			return
+		}
+
+		info := t.providerMgr.ActiveInfo()
+		text := fmt.Sprintf("Switched to %s (%s)", info.Provider, info.Model)
+
+		providers := t.providerMgr.ListProviders()
+		var buttons []tgbotapi.InlineKeyboardButton
+		for _, p := range providers {
+			label := p.Name
+			if p.Name == info.Provider {
+				label = ">> " + label
+			}
+			buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData(label, "sw:"+p.Name))
+		}
+
+		edit := tgbotapi.NewEditMessageText(query.Message.Chat.ID, query.Message.MessageID, text)
+		if len(buttons) > 0 {
+			keyboard := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(buttons...))
+			edit.ReplyMarkup = &keyboard
+		}
+		if _, err := t.bot.Send(edit); err != nil {
+			log.Debug("edit callback message failed", "error", err)
+		}
+	}
+}
+
+func (t *TelegramBot) editCallbackMessage(query *tgbotapi.CallbackQuery, text string) {
+	edit := tgbotapi.NewEditMessageText(query.Message.Chat.ID, query.Message.MessageID, text)
+	if _, err := t.bot.Send(edit); err != nil {
+		log.Debug("edit callback message failed", "error", err)
+	}
+}
+
+// detectNLSwitch checks if a message is a natural language provider switch.
+func detectNLSwitch(text string) string {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	prefixes := []string{"switch to ", "use ", "change to ", "change model to ", "set model "}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(lower, prefix) {
+			candidate := strings.TrimSpace(lower[len(prefix):])
+			candidate = strings.TrimRight(candidate, ".!")
+			candidate = strings.SplitN(candidate, " for ", 2)[0]
+			return strings.TrimSpace(candidate)
+		}
+	}
+	return ""
 }
 
 // extractMessageText builds a text representation from any Telegram message type.

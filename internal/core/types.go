@@ -268,6 +268,34 @@ type ChatBot interface {
 }
 
 // ---------------------------------------------------------------------------
+// Provider control types (runtime model/provider switching)
+// ---------------------------------------------------------------------------
+
+// ProviderInfo describes a single available LLM provider.
+type ProviderInfo struct {
+	Name     string   `json:"name"`
+	Models   []string `json:"models"`
+	IsActive bool     `json:"is_active"`
+	NeedsKey bool     `json:"needs_key"`
+	HasKey   bool     `json:"has_key"`
+}
+
+// ActiveInfo describes the currently active provider and model.
+type ActiveInfo struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+}
+
+// ProviderControl is the interface for runtime provider/model management.
+// Implemented by llm.ProviderManager, consumed by chat handlers.
+type ProviderControl interface {
+	ActiveInfo() ActiveInfo
+	Switch(provider, model string) error
+	ListProviders() []ProviderInfo
+	ResolveTarget(input string) (provider, model string, ok bool)
+}
+
+// ---------------------------------------------------------------------------
 // Doctor types
 // ---------------------------------------------------------------------------
 
