@@ -202,6 +202,7 @@ var diveCmd = &cobra.Command{
 			if err != nil {
 				fmt.Printf("  "+cRed+"Telegram: %s\n"+cReset, friendlyError(err))
 			} else {
+				tgBot.SetProviderManager(stack.llm)
 				tgBot.SetLearnFunc(func(ctx context.Context, key, value string) error {
 					return stack.brain.Memory().Store(ctx, core.MemoryEntry{
 						Key:        key,
