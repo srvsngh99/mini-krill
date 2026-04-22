@@ -88,7 +88,7 @@ func init() {
 // krillStack holds all initialized subsystems.
 type krillStack struct {
 	cfg     *config.Config
-	llm     core.LLMProvider
+	llm     *llm.ProviderManager
 	brain   *brain.KrillBrain
 	hb      core.Heartbeat
 	skills  *plugin.SkillRegistryImpl
@@ -124,8 +124,9 @@ func initStack(quiet bool) (*krillStack, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init LLM provider: %w", err)
 	}
+	providerMgr := llm.NewProviderManager(cfg, llmProvider)
 
-	krillBrain, err := brain.New(cfg.Brain, llmProvider)
+	krillBrain, err := brain.New(cfg.Brain, providerMgr)
 	if err != nil {
 		return nil, fmt.Errorf("init brain: %w", err)
 	}
@@ -146,16 +147,19 @@ func initStack(quiet bool) (*krillStack, error) {
 		Config:    cfg,
 		Heartbeat: krillBrain.Heartbeat(),
 		Skills:    skillReg,
-		LLM:       llmProvider,
+		LLM:       providerMgr,
 		DataDir:   config.DataDir(),
 	})
 
-	krillAgent := agent.New(cfg.Agent, llmProvider, krillBrain, skillReg, mcpReg)
+	// Pass recovery config from brain to agent for cold-start continuity
+	cfg.Agent.RecoveryTurns = cfg.Brain.RecoveryTurns
+
+	krillAgent := agent.New(cfg.Agent, providerMgr, krillBrain, skillReg, mcpReg)
 	chatHandler := chat.NewHandler(krillAgent)
 
 	return &krillStack{
 		cfg:     cfg,
-		llm:     llmProvider,
+		llm:     providerMgr,
 		brain:   krillBrain,
 		hb:      krillBrain.Heartbeat(),
 		skills:  skillReg,

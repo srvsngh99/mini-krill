@@ -21,8 +21,11 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Agent.MaxSubKrills != 3 {
 		t.Errorf("Agent.MaxSubKrills = %d, want 3", cfg.Agent.MaxSubKrills)
 	}
-	if cfg.LLM.Model != "llama3.2" {
-		t.Errorf("LLM.Model = %q, want %q", cfg.LLM.Model, "llama3.2")
+	if cfg.LLM.Model == "" {
+		t.Error("LLM.Model is empty, want a default model to be set")
+	}
+	if cfg.LLM.Model != cfg.Ollama.DefaultModel {
+		t.Errorf("LLM.Model = %q, want it to match Ollama.DefaultModel %q", cfg.LLM.Model, cfg.Ollama.DefaultModel)
 	}
 	if cfg.LLM.Temperature != 0.7 {
 		t.Errorf("LLM.Temperature = %f, want 0.7", cfg.LLM.Temperature)

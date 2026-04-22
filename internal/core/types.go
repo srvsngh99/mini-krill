@@ -122,9 +122,17 @@ type Memory interface {
 	Count() int
 }
 
+// ConversationStore persists conversation turns across sessions.
+type ConversationStore interface {
+	SaveTurn(channel, role, content string) error
+	LoadRecent(channel string, n int) ([]Message, error)
+	Close() error
+}
+
 // Brain orchestrates memory, personality, and soul.
 type Brain interface {
 	Memory() Memory
+	ConversationStore() ConversationStore
 	GetPersonality() *Personality
 	GetSoul() *Soul
 	SystemPrompt() string
@@ -257,6 +265,34 @@ type ChatBot interface {
 	Start(ctx context.Context) error
 	Stop() error
 	Platform() string
+}
+
+// ---------------------------------------------------------------------------
+// Provider control types (runtime model/provider switching)
+// ---------------------------------------------------------------------------
+
+// ProviderInfo describes a single available LLM provider.
+type ProviderInfo struct {
+	Name     string   `json:"name"`
+	Models   []string `json:"models"`
+	IsActive bool     `json:"is_active"`
+	NeedsKey bool     `json:"needs_key"`
+	HasKey   bool     `json:"has_key"`
+}
+
+// ActiveInfo describes the currently active provider and model.
+type ActiveInfo struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+}
+
+// ProviderControl is the interface for runtime provider/model management.
+// Implemented by llm.ProviderManager, consumed by chat handlers.
+type ProviderControl interface {
+	ActiveInfo() ActiveInfo
+	Switch(provider, model string) error
+	ListProviders() []ProviderInfo
+	ResolveTarget(input string) (provider, model string, ok bool)
 }
 
 // ---------------------------------------------------------------------------

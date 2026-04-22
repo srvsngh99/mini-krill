@@ -57,6 +57,7 @@ type KrillAgent struct {
 	skills      core.SkillRegistry
 	mcp         core.MCPRegistry
 	cfg         config.AgentConfig
+	channel     string // platform channel for conversation isolation (cli, telegram, etc.)
 	history     []core.Message
 	pendingPlan *core.Plan
 	subMgr      *SubKrillManager
@@ -67,17 +68,36 @@ type KrillAgent struct {
 // Like a krill larva hatching in the deep ocean - small but ready to grow.
 func New(cfg config.AgentConfig, llm core.LLMProvider, brain core.Brain, skills core.SkillRegistry, mcp core.MCPRegistry) *KrillAgent {
 	log.Info("krill agent spawning", "name", cfg.Name, "plan_approval", cfg.PlanApproval)
+
+	sysPrompt := brain.SystemPrompt()
+
+	// Cold-start recovery: inject recent conversation from durable storage
+	if cs := brain.ConversationStore(); cs != nil {
+		if recoveryCtx := buildRecoveryContext(cs, "cli", cfg.RecoveryTurns); recoveryCtx != "" {
+			sysPrompt += "\n\n## Recent Conversation (from last session)\nBelow is your recent conversation. Use it for continuity. Do not mention recovery unless asked:\n" + recoveryCtx
+			log.Info("conversation continuity restored", "channel", "cli")
+		}
+	}
+
 	return &KrillAgent{
-		llm:    llm,
-		brain:  brain,
-		skills: skills,
-		mcp:    mcp,
-		cfg:    cfg,
+		llm:     llm,
+		brain:   brain,
+		skills:  skills,
+		mcp:     mcp,
+		cfg:     cfg,
+		channel: "cli",
 		history: []core.Message{
-			{Role: "system", Content: brain.SystemPrompt()},
+			{Role: "system", Content: sysPrompt},
 		},
 		subMgr: NewSubKrillManager(cfg, llm),
 	}
+}
+
+// SetChannel sets the platform channel for conversation isolation.
+func (a *KrillAgent) SetChannel(ch string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.channel = ch
 }
 
 // Chat is the main entry point - every user message flows through here.
@@ -93,6 +113,7 @@ func (a *KrillAgent) Chat(ctx context.Context, input string) (string, error) {
 
 	// --- Phase 2: Record user message ---
 	a.appendMessage(core.Message{Role: "user", Content: input})
+	a.saveTurn("user", input)
 
 	// --- Phase 3: Classify intent ---
 	intent := a.classifyIntent(ctx, input)
@@ -149,6 +170,7 @@ func (a *KrillAgent) handlePendingPlan(ctx context.Context, input string) (strin
 		}
 
 		a.appendMessage(core.Message{Role: "assistant", Content: result})
+		a.saveTurn("assistant", result)
 		return result, nil
 	}
 
@@ -182,6 +204,7 @@ func (a *KrillAgent) handleTask(ctx context.Context, input string) (string, erro
 			return fmt.Sprintf("This krill hit a reef during auto-execution: %v", err), nil
 		}
 		a.appendMessage(core.Message{Role: "assistant", Content: result})
+		a.saveTurn("assistant", result)
 		return result, nil
 	}
 
@@ -191,6 +214,7 @@ func (a *KrillAgent) handleTask(ctx context.Context, input string) (string, erro
 	log.Info("plan generated, awaiting approval", "task", input, "steps", len(plan.Steps))
 
 	a.appendMessage(core.Message{Role: "assistant", Content: formatted})
+	a.saveTurn("assistant", formatted)
 	return formatted, nil
 }
 
@@ -221,6 +245,7 @@ func (a *KrillAgent) handleChat(ctx context.Context) (string, error) {
 					strings.HasPrefix(skillName, "self:heal") ||
 					strings.HasPrefix(skillName, "self:reflect") {
 					a.appendMessage(core.Message{Role: "assistant", Content: result})
+					a.saveTurn("assistant", result)
 					return result, nil
 				}
 				// For read skills, inject into LLM context so the krill can discuss it naturally
@@ -234,15 +259,27 @@ func (a *KrillAgent) handleChat(ctx context.Context) (string, error) {
 				if err != nil {
 					// Fallback: return raw self-skill output
 					a.appendMessage(core.Message{Role: "assistant", Content: result})
+					a.saveTurn("assistant", result)
 					return result, nil
 				}
 				a.appendMessage(core.Message{Role: "assistant", Content: resp.Content})
+				a.saveTurn("assistant", resp.Content)
 				return resp.Content, nil
 			}
 		}
 	}
 
 	enriched := a.brain.EnrichMessages(a.history)
+
+	// Inject capability awareness so the LLM knows what it can and cannot do
+	if a.skills != nil {
+		skillList := buildSkillSummary(a.skills)
+		capabilityMsg := core.Message{
+			Role:    "system",
+			Content: "Your available capabilities: " + skillList + ". You CANNOT do anything outside these capabilities. If asked to do something not listed, say so honestly.",
+		}
+		enriched = append(enriched[:len(enriched)-1], capabilityMsg, enriched[len(enriched)-1])
+	}
 
 	// If the question likely needs current info, search the web first
 	if a.shouldSearch(lastMsg) {
@@ -261,6 +298,22 @@ func (a *KrillAgent) handleChat(ctx context.Context) (string, error) {
 		}
 	}
 
+	// If the user is asking about previous conversations, inject DM memories
+	if a.brain.Memory() != nil && looksLikeRecallRequest(lastMsg) {
+		entries, err := a.brain.Memory().Search(context.Background(), "dm_", 5)
+		if err == nil && len(entries) > 0 {
+			var contextParts []string
+			for _, e := range entries {
+				contextParts = append(contextParts, e.Value)
+			}
+			recallMsg := core.Message{
+				Role:    "system",
+				Content: "Here are your recent conversation memories. Use them if the user asks about past interactions:\n\n" + strings.Join(contextParts, "\n---\n"),
+			}
+			enriched = append(enriched[:len(enriched)-1], recallMsg, enriched[len(enriched)-1])
+		}
+	}
+
 	resp, err := a.llm.Chat(ctx, enriched)
 	if err != nil {
 		log.Error("LLM chat failed", "error", err)
@@ -268,6 +321,7 @@ func (a *KrillAgent) handleChat(ctx context.Context) (string, error) {
 	}
 
 	a.appendMessage(core.Message{Role: "assistant", Content: resp.Content})
+	a.saveTurn("assistant", resp.Content)
 	log.Debug("chat response generated",
 		"tokens_in", resp.PromptTokens,
 		"tokens_out", resp.CompletionTokens,
@@ -326,19 +380,29 @@ func (a *KrillAgent) recordFeedback(_ context.Context, input, response string) {
 	positives := []string{"thanks", "thank you", "great", "perfect", "awesome", "love it",
 		"exactly", "nice", "good job", "well done", "brilliant", "amazing"}
 	for _, p := range positives {
-		if strings.Contains(lower, p) {
+		if containsWord(lower, p) {
 			signal = "positive"
 			break
 		}
 	}
 
-	// Negative signals
+	// Negative signals - real dissatisfaction only
 	if signal == "" {
-		negatives := []string{"no", "wrong", "not what i", "stop", "bad", "terrible",
-			"useless", "don't", "incorrect", "nah"}
+		negatives := []string{"wrong", "terrible", "useless", "bad", "incorrect", "awful", "broken", "stupid"}
 		for _, n := range negatives {
-			if strings.Contains(lower, n) {
+			if containsWord(lower, n) {
 				signal = "negative"
+				break
+			}
+		}
+	}
+
+	// Correction signals - user is correcting, not angry
+	if signal == "" {
+		corrections := []string{"no", "nah", "nope", "not what i", "that's not right", "don't"}
+		for _, c := range corrections {
+			if containsWord(lower, c) {
+				signal = "correction"
 				break
 			}
 		}
@@ -420,6 +484,37 @@ func (a *KrillAgent) classifyIntent(ctx context.Context, input string) string {
 	return "CHAT"
 }
 
+// saveTurn persists a single turn to the durable conversation store.
+// Runs inline (not goroutine) to ensure ordering.
+func (a *KrillAgent) saveTurn(role, content string) {
+	if cs := a.brain.ConversationStore(); cs != nil {
+		if err := cs.SaveTurn(a.channel, role, content); err != nil {
+			log.Debug("failed to save turn", "error", err)
+		}
+	}
+}
+
+// buildRecoveryContext formats recent turns from the conversation store as
+// a readable thread for system prompt injection on cold start.
+func buildRecoveryContext(store core.ConversationStore, channel string, maxTurns int) string {
+	if store == nil || maxTurns <= 0 {
+		return ""
+	}
+	msgs, err := store.LoadRecent(channel, maxTurns)
+	if err != nil || len(msgs) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	for _, m := range msgs {
+		label := "User"
+		if m.Role == "assistant" {
+			label = "Krill"
+		}
+		sb.WriteString(fmt.Sprintf("%s: %s\n", label, truncate(m.Content, 300)))
+	}
+	return sb.String()
+}
+
 // appendMessage adds a message to history and trims to maxHistory.
 // Krill shed their exoskeleton to grow - we shed old messages to stay nimble.
 func (a *KrillAgent) appendMessage(msg core.Message) {
@@ -435,10 +530,77 @@ func (a *KrillAgent) appendMessage(msg core.Message) {
 	}
 }
 
+// looksLikeRecallRequest detects if the user is asking about previous conversations.
+func looksLikeRecallRequest(msg string) bool {
+	lower := strings.ToLower(msg)
+	triggers := []string{
+		"last conversation", "previous conversation", "remember when",
+		"do you remember", "we talked about", "earlier we", "last time",
+		"our last", "previously", "last chat", "before this",
+	}
+	for _, t := range triggers {
+		if strings.Contains(lower, t) {
+			return true
+		}
+	}
+	return false
+}
+
+// buildSkillSummary returns a short comma-separated list of enabled skill names
+// for injecting into chat context so the LLM knows its actual capabilities.
+func buildSkillSummary(skills core.SkillRegistry) string {
+	if skills == nil {
+		return "chat, plan"
+	}
+	infos := skills.List()
+	if len(infos) == 0 {
+		return "chat, plan"
+	}
+	var parts []string
+	for _, info := range infos {
+		if info.Enabled {
+			parts = append(parts, info.Name)
+		}
+	}
+	if len(parts) == 0 {
+		return "chat, plan"
+	}
+	return "chat, plan, " + strings.Join(parts, ", ")
+}
+
 // truncate shortens a string for log output.
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// containsWord checks if a word appears as a standalone word in text,
+// not as a substring of another word. For example, containsWord("I know", "no")
+// returns false, but containsWord("no way", "no") returns true.
+func containsWord(text, word string) bool {
+	idx := 0
+	for {
+		pos := strings.Index(text[idx:], word)
+		if pos == -1 {
+			return false
+		}
+		absPos := idx + pos
+		startOK := absPos == 0 || !isWordChar(text[absPos-1])
+		endPos := absPos + len(word)
+		endOK := endPos >= len(text) || !isWordChar(text[endPos])
+		if startOK && endOK {
+			return true
+		}
+		idx = absPos + 1
+		if idx >= len(text) {
+			return false
+		}
+	}
+}
+
+// isWordChar returns true if c is a letter, digit, or apostrophe.
+func isWordChar(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '\''
 }
