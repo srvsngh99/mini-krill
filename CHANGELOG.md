@@ -3,6 +3,12 @@
 All notable changes to Mini Krill will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.0] - 2026-04-24
+
+### Added
+- `minikrill run "<prompt>"` - one-shot chat command: sends a prompt through the agent and prints the plain text response to stdout, then exits (60s timeout)
+- `minikrill notify <message>` - sends a Telegram message using `KRILL_TELEGRAM_TOKEN` and `KRILL_TELEGRAM_CHAT_ID` env vars
+
 ## [0.1.0] - 2025-04-19
 
 ### Added
