@@ -3,12 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 )
+
+var runTimeout time.Duration
 
 var runCmd = &cobra.Command{
 	Use:   "run [prompt]",
@@ -19,21 +20,23 @@ var runCmd = &cobra.Command{
 
 		stack, err := initStack(true)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("init stack: %w", err)
 		}
 		defer stack.brain.Close()
 
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
 		defer cancel()
 
 		resp, err := stack.agent.Chat(ctx, prompt)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("chat: %w", err)
 		}
 
 		fmt.Println(resp)
 		return nil
 	},
+}
+
+func init() {
+	runCmd.Flags().DurationVar(&runTimeout, "timeout", 60*time.Second, "max wait time for the response")
 }
