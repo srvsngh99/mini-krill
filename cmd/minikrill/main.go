@@ -78,7 +78,8 @@ func init() {
 	personalityCmd.AddCommand(personalityListCmd, personalityCreateCmd, personalitySwitchCmd, personalityShowCmd)
 
 	rootCmd.AddCommand(initCmd, diveCmd, surfaceCmd, chatCmd, tuiCmd,
-		doctorCmd, sonarCmd, versionCmd, ollamaCmd, skillCmd, brainCmd, personalityCmd)
+		doctorCmd, sonarCmd, versionCmd, ollamaCmd, skillCmd, brainCmd, personalityCmd,
+		runCmd, notifyCmd)
 }
 
 // ---------------------------------------------------------------------------
