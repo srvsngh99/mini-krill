@@ -58,10 +58,92 @@ var initCmd = &cobra.Command{
 			return err
 		}
 		if providerIdx < 0 {
+			fmt.Println(cDim + "  Setup cancelled." + cReset)
 			return nil
 		}
 
 		switch providerIdx {
+		case 0: // Ollama
+			cfg.LLM.Provider = "ollama"
+			fmt.Println()
+			mgr := ollama.NewManager(cfg.Ollama)
+			if !mgr.IsInstalled() {
+				ans := ask(scanner, cYellow+"  Ollama not found."+cReset+" Install now? "+cDim+"[Y/n]"+cReset+" ")
+				if ans == "" || strings.HasPrefix(strings.ToLower(ans), "y") {
+					fmt.Println(cDim + "  Installing Ollama..." + cReset)
+					if err := mgr.Install(context.Background()); err != nil {
+						fmt.Printf(cRed+"  Install failed: %v\n"+cReset, err)
+						fmt.Println(cDim + "  Install manually: https://ollama.com" + cReset)
+					} else {
+						fmt.Println(cGreen + "  Ollama installed!" + cReset)
+					}
+				}
+			} else {
+				fmt.Println(cGreen + "  Ollama: found!" + cReset)
+			}
+			// Build model list: locally available models first, then suggestions, then Custom.
+			var modelItems []selectItem
+			var modelNames []string
+			localSet := make(map[string]bool)
+
+			if models, err := mgr.ListModels(context.Background()); err == nil && len(models) > 0 {
+				for _, m := range models {
+					modelItems = append(modelItems, selectItem{label: m.Name, desc: "already downloaded"})
+					modelNames = append(modelNames, m.Name)
+					localSet[m.Name] = true
+				}
+			}
+
+			suggested := []struct{ name, desc string }{
+				{"gemma3:4b", "recommended; balanced speed and quality"},
+				{"llama3.2:3b", "low-memory fallback"},
+				{"mistral:7b", "strong general-purpose model"},
+			}
+			for _, s := range suggested {
+				if !localSet[s.name] {
+					modelItems = append(modelItems, selectItem{label: s.name, desc: s.desc + " (will download)"})
+					modelNames = append(modelNames, s.name)
+				}
+			}
+			modelItems = append(modelItems, selectItem{label: "Custom...", desc: "enter a model name manually"})
+			modelNames = append(modelNames, "")
+
+			fmt.Println(cBCyan + "  Choose a model:" + cReset)
+			fmt.Println()
+			modelIdx, err := promptSelect(modelItems)
+			if err != nil {
+				return err
+			}
+			if modelIdx < 0 {
+				fmt.Println(cDim + "  Setup cancelled." + cReset)
+				return nil
+			}
+
+			selectedModel := modelNames[modelIdx]
+			if selectedModel == "" { // Custom
+				selectedModel = ask(scanner, cCyan+"  Model name: "+cReset)
+				selectedModel = strings.TrimSpace(selectedModel)
+				if selectedModel == "" {
+					selectedModel = cfg.Ollama.DefaultModel
+				}
+			}
+			cfg.LLM.Model = selectedModel
+			cfg.Ollama.DefaultModel = selectedModel
+
+			if !localSet[selectedModel] {
+				fmt.Printf(cDim+"  Pulling %s in background..."+cReset+"\n", selectedModel)
+				go func(model string) {
+					if err := mgr.EnsureRunning(context.Background()); err != nil {
+						fmt.Printf("\n"+cRed+"  Background pull: could not start Ollama: %v"+cReset+"\n", err)
+						return
+					}
+					if err := mgr.Pull(context.Background(), model); err != nil {
+						fmt.Printf("\n"+cRed+"  Background pull of %s failed: %v"+cReset+"\n", model, err)
+					} else {
+						fmt.Printf("\n"+cGreen+"  Model %s is ready!"+cReset+"\n", model)
+					}
+				}(selectedModel)
+			}
 		case 1: // Codex
 			cfg.LLM.Provider = "codex"
 			cfg.LLM.Model = "auto"
@@ -98,30 +180,8 @@ var initCmd = &cobra.Command{
 					_ = cmd.Run()
 				}
 			}
-		default: // Ollama (index 0)
-			cfg.LLM.Provider = "ollama"
-			fmt.Println()
-			mgr := ollama.NewManager(cfg.Ollama)
-			if !mgr.IsInstalled() {
-				ans := ask(scanner, cYellow+"  Ollama not found."+cReset+" Install now? "+cDim+"[Y/n]"+cReset+" ")
-				if ans == "" || strings.HasPrefix(strings.ToLower(ans), "y") {
-					fmt.Println(cDim + "  Installing Ollama..." + cReset)
-					if err := mgr.Install(context.Background()); err != nil {
-						fmt.Printf(cRed+"  Install failed: %v\n"+cReset, err)
-						fmt.Println(cDim + "  Install manually: https://ollama.com" + cReset)
-					} else {
-						fmt.Println(cGreen + "  Ollama installed!" + cReset)
-					}
-				}
-			} else {
-				fmt.Println(cGreen + "  Ollama: found!" + cReset)
-			}
-			fmt.Printf(cDim+"  Model [%s]: "+cReset, cfg.Ollama.DefaultModel)
-			scanner.Scan()
-			if m := strings.TrimSpace(scanner.Text()); m != "" && !isConfirmation(m) {
-				cfg.LLM.Model = m
-				cfg.Ollama.DefaultModel = m
-			}
+		default:
+			return fmt.Errorf("unexpected provider index: %d", providerIdx)
 		}
 
 		fmt.Println()
