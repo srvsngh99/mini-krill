@@ -224,11 +224,6 @@ func ask(scanner *bufio.Scanner, question string) string {
 	return strings.TrimSpace(scanner.Text())
 }
 
-func isConfirmation(s string) bool {
-	s = strings.ToLower(s)
-	return s == "yes" || s == "y" || s == "ok" || s == "sure" || s == "yep"
-}
-
 // friendlyError strips raw API error dumps into a short, helpful message.
 func friendlyError(err error) string {
 	msg := err.Error()
