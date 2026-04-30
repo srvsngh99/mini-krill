@@ -69,9 +69,9 @@ func TestLoadRecentEmpty(t *testing.T) {
 func TestChannelIsolation(t *testing.T) {
 	store := newTestStore(t)
 
-	store.SaveTurn("cli", "user", "cli message")
-	store.SaveTurn("telegram", "user", "telegram message")
-	store.SaveTurn("cli", "assistant", "cli response")
+	_ = store.SaveTurn("cli", "user", "cli message")
+	_ = store.SaveTurn("telegram", "user", "telegram message")
+	_ = store.SaveTurn("cli", "assistant", "cli response")
 
 	cliMsgs, _ := store.LoadRecent("cli", 10)
 	tgMsgs, _ := store.LoadRecent("telegram", 10)
