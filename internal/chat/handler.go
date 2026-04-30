@@ -57,6 +57,9 @@ func (h *ChatHandlerImpl) HandleMessage(ctx context.Context, msg core.ChatMessag
 		return "Bubbles! Something went wrong in the deep... (" + err.Error() + ")", nil
 	}
 
+	// Strip internal reasoning prefixes that some LLMs emit.
+	resp = cleanInternalPrefixes(resp)
+
 	// Never send an empty message - surface a krill fact instead.
 	if strings.TrimSpace(resp) == "" {
 		log.Warn("agent returned empty response, sending krill fact",
@@ -90,6 +93,40 @@ func (h *ChatHandlerImpl) handleReminder(input string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// cleanInternalPrefixes strips internal reasoning markers that LLMs sometimes
+// emit as part of their response (e.g. "Plan: greet the user. Hi there!").
+func cleanInternalPrefixes(text string) string {
+	prefixes := []string{
+		"Plan:",
+		"plan:",
+		"PLAN:",
+		"Thinking:",
+		"thinking:",
+		"THINKING:",
+		"Internal:",
+		"internal:",
+	}
+	trimmed := strings.TrimSpace(text)
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(trimmed, prefix) {
+			// Remove everything up to the first sentence boundary after the prefix
+			after := strings.TrimSpace(trimmed[len(prefix):])
+			// Look for the real response after the planning sentence
+			for _, sep := range []string{". ", ".\n", "! ", "!\n"} {
+				if idx := strings.Index(after, sep); idx >= 0 && idx < 200 {
+					cleaned := strings.TrimSpace(after[idx+len(sep):])
+					if cleaned != "" {
+						return cleaned
+					}
+				}
+			}
+			// If no sentence boundary, just strip the prefix
+			return after
+		}
+	}
+	return text
 }
 
 // randomFact picks a random entry from core.KrillFacts.

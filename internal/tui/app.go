@@ -152,8 +152,14 @@ func (a *App) View() string {
 		return "\n  Waiting for terminal..."
 	}
 
-	// Build layout: header + tabs + body + footer
-	header := RenderHeader(a.version, a.width)
+	// Chat tab gets a compact header for maximum chat space;
+	// other tabs keep the full ASCII art banner.
+	var header string
+	if a.activeTab == TabChat {
+		header = RenderCompactHeader(a.version, a.width)
+	} else {
+		header = RenderHeader(a.version, a.width)
+	}
 	tabBar := a.renderTabBar()
 	body := a.renderBody()
 	footer := a.renderFooter()
@@ -283,6 +289,9 @@ func (a *App) onTabSwitch() {
 		a.chat.Blur()
 	}
 
+	// Recalculate view sizes since chat tab uses a compact header.
+	a.resizeViews()
+
 	// Refresh logs when switching to logs tab
 	if a.activeTab == TabLogs {
 		a.logs.RefreshLogs()
@@ -332,7 +341,12 @@ func (a *App) resizeViews() {
 // bodyHeight computes the available vertical space for view content
 // by subtracting the actual rendered header, tab bar, and footer heights.
 func (a *App) bodyHeight() int {
-	header := RenderHeader(a.version, a.width)
+	var header string
+	if a.activeTab == TabChat {
+		header = RenderCompactHeader(a.version, a.width)
+	} else {
+		header = RenderHeader(a.version, a.width)
+	}
 	tabBar := a.renderTabBar()
 	footer := a.renderFooter()
 
