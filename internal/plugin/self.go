@@ -171,6 +171,13 @@ func selfMemory(sc SelfContext) core.Skill {
 		desc: "List or search the krill's memories",
 		exec: func(ctx context.Context, input string, _ core.LLMProvider) (string, error) {
 			mem := sc.Brain.Memory()
+			lowerInput := strings.ToLower(strings.TrimSpace(input))
+			for _, broad := range []string{"what do you remember", "your memories", "what have you learned", "show memories", "list memories"} {
+				if strings.Contains(lowerInput, broad) {
+					input = ""
+					break
+				}
+			}
 
 			// If input provided, search
 			if strings.TrimSpace(input) != "" {
@@ -333,7 +340,7 @@ func selfConfigure(sc SelfContext) core.Skill {
 			changes := []string{}
 
 			// Provider switch
-			for _, p := range []string{"ollama", "openai", "anthropic", "google"} {
+			for _, p := range []string{"ollama", "codex", "claude", "openai", "anthropic", "google"} {
 				if strings.Contains(lower, "switch to "+p) || strings.Contains(lower, "use "+p) || strings.Contains(lower, "provider "+p) {
 					old := sc.Config.LLM.Provider
 					sc.Config.LLM.Provider = p
@@ -362,7 +369,7 @@ func selfConfigure(sc SelfContext) core.Skill {
 			}
 
 			if len(changes) == 0 {
-				return "Could not parse config change. Try:\n  'switch to ollama'\n  'log level debug'\n  'auto approve' / 'require approval'", nil
+				return "Could not parse config change. Try:\n  'switch to ollama'\n  'switch to codex'\n  'switch to claude'\n  'log level debug'\n  'auto approve' / 'require approval'", nil
 			}
 
 			if err := config.Save(sc.Config); err != nil {

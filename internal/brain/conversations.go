@@ -1,101 +1,136 @@
 package brain
 
 import (
-	"database/sql"
+	"bufio"
+	"encoding/json"
 	"fmt"
-
-	_ "github.com/mattn/go-sqlite3"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
 
 	"github.com/srvsngh99/mini-krill/internal/core"
 	log "github.com/srvsngh99/mini-krill/internal/log"
 )
 
-// ConversationStore persists conversation turns to SQLite so the krill
-// remembers what was said across restarts. Each turn is written immediately
-// and keyed by channel (cli, telegram, discord, tui) for isolation.
+// ConversationStore persists conversation turns to an append-only JSONL file.
+// JSONL keeps release builds fully static and avoids CGO-dependent SQLite.
 type ConversationStore struct {
-	db *sql.DB
+	path string
+	mu   sync.Mutex
 }
 
-// NewConversationStore opens (or creates) a SQLite database at dbPath and
-// initialises the turns table. WAL mode is enabled for concurrent safety.
-func NewConversationStore(dbPath string) (*ConversationStore, error) {
-	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL")
-	if err != nil {
-		return nil, fmt.Errorf("open conversations db: %w", err)
-	}
-
-	if err := initConversationSchema(db); err != nil {
-		db.Close()
-		return nil, err
-	}
-
-	// Count existing turns for the startup log line.
-	var count int
-	_ = db.QueryRow("SELECT COUNT(*) FROM turns").Scan(&count)
-	log.Info("conversation store initialized", "path", dbPath, "turns", count)
-
-	return &ConversationStore{db: db}, nil
+type conversationTurn struct {
+	Channel   string    `json:"channel"`
+	Role      string    `json:"role"`
+	Content   string    `json:"content"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
-func initConversationSchema(db *sql.DB) error {
-	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS turns (
-			id        INTEGER PRIMARY KEY AUTOINCREMENT,
-			channel   TEXT     NOT NULL,
-			role      TEXT     NOT NULL,
-			content   TEXT     NOT NULL,
-			timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-		);
-		CREATE INDEX IF NOT EXISTS idx_turns_channel_ts ON turns(channel, timestamp);
-	`)
-	if err != nil {
-		return fmt.Errorf("init conversation schema: %w", err)
+// NewConversationStore opens (or creates) a durable JSONL conversation store.
+func NewConversationStore(path string) (*ConversationStore, error) {
+	if path == "" {
+		return nil, fmt.Errorf("conversation store path is empty")
 	}
-	return nil
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return nil, fmt.Errorf("create conversation dir: %w", err)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("open conversations store: %w", err)
+	}
+	_ = f.Close()
+
+	store := &ConversationStore{path: path}
+	count, _ := store.countTurns()
+	log.Info("conversation store initialized", "path", path, "turns", count)
+	return store, nil
 }
 
 // SaveTurn writes a single user or assistant message to durable storage.
 func (s *ConversationStore) SaveTurn(channel, role, content string) error {
-	_, err := s.db.Exec(
-		"INSERT INTO turns (channel, role, content) VALUES (?, ?, ?)",
-		channel, role, content,
-	)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	f, err := os.OpenFile(s.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
+		return fmt.Errorf("open conversations store: %w", err)
+	}
+	defer f.Close()
+
+	turn := conversationTurn{
+		Channel:   channel,
+		Role:      role,
+		Content:   content,
+		Timestamp: time.Now().UTC(),
+	}
+	data, err := json.Marshal(turn)
+	if err != nil {
+		return fmt.Errorf("marshal turn: %w", err)
+	}
+	if _, err := f.Write(append(data, '\n')); err != nil {
 		return fmt.Errorf("save turn: %w", err)
 	}
 	return nil
 }
 
-// LoadRecent returns the last n turns for the given channel, ordered oldest-first
-// so they can be injected directly into a message history.
+// LoadRecent returns the last n turns for the given channel, ordered oldest-first.
 func (s *ConversationStore) LoadRecent(channel string, n int) ([]core.Message, error) {
-	rows, err := s.db.Query(`
-		SELECT role, content FROM (
-			SELECT role, content, id FROM turns
-			WHERE channel = ?
-			ORDER BY id DESC
-			LIMIT ?
-		) sub ORDER BY id ASC`,
-		channel, n,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("load recent turns: %w", err)
+	if n <= 0 {
+		return nil, nil
 	}
-	defer rows.Close()
 
-	var msgs []core.Message
-	for rows.Next() {
-		var m core.Message
-		if err := rows.Scan(&m.Role, &m.Content); err != nil {
-			return nil, fmt.Errorf("scan turn: %w", err)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	f, err := os.Open(s.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
 		}
-		msgs = append(msgs, m)
+		return nil, fmt.Errorf("open conversations store: %w", err)
 	}
-	return msgs, rows.Err()
+	defer f.Close()
+
+	var recent []core.Message
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		var turn conversationTurn
+		if err := json.Unmarshal(scanner.Bytes(), &turn); err != nil {
+			log.Debug("skipping malformed conversation turn", "error", err)
+			continue
+		}
+		if turn.Channel != channel {
+			continue
+		}
+		recent = append(recent, core.Message{Role: turn.Role, Content: turn.Content})
+		if len(recent) > n {
+			recent = recent[len(recent)-n:]
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read conversations store: %w", err)
+	}
+	return recent, nil
 }
 
-// Close closes the underlying database connection.
-func (s *ConversationStore) Close() error {
-	return s.db.Close()
+func (s *ConversationStore) Close() error { return nil }
+
+func (s *ConversationStore) countTurns() (int, error) {
+	f, err := os.Open(s.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	defer f.Close()
+
+	count := 0
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		count++
+	}
+	return count, scanner.Err()
 }

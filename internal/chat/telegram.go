@@ -29,15 +29,15 @@ type LearnFunc func(ctx context.Context, key, value string) error
 
 // TelegramBot implements core.ChatBot for Telegram.
 type TelegramBot struct {
-	bot          *tgbotapi.BotAPI
-	handler      core.ChatHandler
-	cfg          config.TelegramConfig
-	stopCh       chan struct{}
-	done         chan struct{}
-	botTurns     map[int64]int // tracks consecutive bot-to-bot exchanges per chat
-	botTurnsMu   sync.Mutex
-	learnFn      LearnFunc // optional: store group learnings to memory
-	providerMgr  core.ProviderControl // optional: runtime model/provider switching
+	bot         *tgbotapi.BotAPI
+	handler     core.ChatHandler
+	cfg         config.TelegramConfig
+	stopCh      chan struct{}
+	done        chan struct{}
+	botTurns    map[int64]int // tracks consecutive bot-to-bot exchanges per chat
+	botTurnsMu  sync.Mutex
+	learnFn     LearnFunc            // optional: store group learnings to memory
+	providerMgr core.ProviderControl // optional: runtime model/provider switching
 }
 
 // NewTelegramBot creates a TelegramBot using the provided config and handler.
@@ -518,11 +518,11 @@ func (t *TelegramBot) handleCommand(chatID int64, msg *tgbotapi.Message) {
 			"/status  - Check my vital signs",
 			"/model   - Show active provider and model",
 			"/models  - List all providers and models",
-			"/switch  - Switch provider (e.g. /switch ollama)",
+			"/switch  - Switch provider (e.g. /switch local, /switch codex gpt-5.5)",
 			"/fact    - Learn something about real krill",
 			"/plan    - Start a dive plan for a task",
 			"",
-			"Or say 'switch to claude' or 'use gemini' naturally!",
+			"Or say 'remember that ...', 'what do you remember', or 'switch to claude' naturally!",
 		}, "\n"))
 
 	case "status":
@@ -655,13 +655,13 @@ func (t *TelegramBot) handleSwitchCommand(chatID int64, msg *tgbotapi.Message) {
 	}
 	args := strings.TrimSpace(msg.CommandArguments())
 	if args == "" {
-		t.sendMessage(chatID, "Usage: /switch <provider> [model]\nExample: /switch ollama\nExample: /switch openai gpt-4o")
+		t.sendMessage(chatID, "Usage: /switch <provider> [model]\nExample: /switch local\nExample: /switch codex gpt-5.5\nExample: /switch claude sonnet")
 		return
 	}
 	parts := strings.Fields(args)
 	provider, model, ok := t.providerMgr.ResolveTarget(parts[0])
 	if !ok {
-		t.sendMessage(chatID, fmt.Sprintf("Unknown target: %s\nAvailable: ollama, openai, anthropic, google", parts[0]))
+		t.sendMessage(chatID, fmt.Sprintf("Unknown target: %s\nAvailable: local, ollama, codex, claude", parts[0]))
 		return
 	}
 	if len(parts) > 1 {

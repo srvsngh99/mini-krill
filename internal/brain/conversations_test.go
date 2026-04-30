@@ -8,8 +8,8 @@ import (
 
 func newTestStore(t *testing.T) *ConversationStore {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "test_conversations.db")
-	store, err := NewConversationStore(dbPath)
+	storePath := filepath.Join(t.TempDir(), "test_conversations.jsonl")
+	store, err := NewConversationStore(storePath)
 	if err != nil {
 		t.Fatalf("NewConversationStore: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestLoadRecentEmpty(t *testing.T) {
 		t.Fatalf("LoadRecent: %v", err)
 	}
 	if len(msgs) != 0 {
-		t.Fatalf("expected 0 messages from empty DB, got %d", len(msgs))
+		t.Fatalf("expected 0 messages from empty store, got %d", len(msgs))
 	}
 }
 

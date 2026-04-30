@@ -39,49 +39,58 @@ var initCmd = &cobra.Command{
 		fmt.Println(cBold + "  Welcome to Mini Krill setup!" + cReset)
 		fmt.Println(cDim + "  Let's get you swimming in under a minute." + cReset)
 		fmt.Println()
+		fmt.Println(cBCyan + "  Required:" + cReset + " choose one model provider.")
+		fmt.Println(cBCyan + "  Optional:" + cReset + " Telegram/Discord bots, Codex login, Claude login.")
+		fmt.Println(cDim + "  Recommended local model: gemma3:4b. Low-memory fallback: llama3.2:3b." + cReset)
+		fmt.Println()
 
 		cfg := config.DefaultConfig()
 		scanner := bufio.NewScanner(os.Stdin)
 
 		fmt.Println(cBCyan + "  Choose your LLM provider:" + cReset)
 		fmt.Println()
-		fmt.Println("    " + cBGreen + "[1]" + cReset + " Ollama        " + cDim + "local, free, private" + cReset)
-		fmt.Println("    " + cBBlue + "[2]" + cReset + " OpenAI        " + cDim + "$20/mo plan" + cReset)
-		fmt.Println("    " + cBBlue + "[3]" + cReset + " Anthropic     " + cDim + "$20/mo plan" + cReset)
-		fmt.Println("    " + cBBlue + "[4]" + cReset + " Google Gemini " + cDim + "free tier available" + cReset)
+		fmt.Println("    " + cBGreen + "[1]" + cReset + " Ollama        " + cDim + "local, free, private; pulls gemma3:4b" + cReset)
+		fmt.Println("    " + cBBlue + "[2]" + cReset + " Codex         " + cDim + "optional; ChatGPT subscription via official Codex CLI" + cReset)
+		fmt.Println("    " + cBBlue + "[3]" + cReset + " Claude Code   " + cDim + "optional; Claude Pro/Max via official Claude CLI" + cReset)
 		fmt.Println()
 		choice := ask(scanner, cCyan+"  > "+cReset)
 
 		switch choice {
-		case "2", "openai":
-			cfg.LLM.Provider = "openai"
-			cfg.LLM.Model = "gpt-4o-mini"
+		case "2", "codex", "chatgpt":
+			cfg.LLM.Provider = "codex"
+			cfg.LLM.Model = "auto"
 			fmt.Println()
-			cfg.LLM.APIKey = ask(scanner, cCyan+"  API key: "+cReset)
-			fmt.Printf(cDim+"  Model [%s]: "+cReset, cfg.LLM.Model)
-			scanner.Scan()
-			if m := strings.TrimSpace(scanner.Text()); m != "" && !isConfirmation(m) {
-				cfg.LLM.Model = m
+			fmt.Println(cDim + "  Mini Krill stores no Codex OAuth tokens. The official Codex CLI owns login." + cReset)
+			if _, err := exec.LookPath("codex"); err != nil {
+				fmt.Println(cYellow + "  Codex CLI not found. Install it, then run: codex login" + cReset)
+			} else {
+				fmt.Println(cDim + "  Codex CLI found." + cReset)
+				ans := ask(scanner, cCyan+"  Run Codex login now? "+cDim+"[Y/n]"+cReset+" ")
+				if ans == "" || strings.HasPrefix(strings.ToLower(ans), "y") {
+					cmd := exec.Command("codex", "login")
+					cmd.Stdin = os.Stdin
+					cmd.Stdout = os.Stdout
+					cmd.Stderr = os.Stderr
+					_ = cmd.Run()
+				}
 			}
-		case "3", "anthropic":
-			cfg.LLM.Provider = "anthropic"
-			cfg.LLM.Model = "claude-sonnet-4-20250514"
+		case "3", "claude", "claude code", "claude-code":
+			cfg.LLM.Provider = "claude"
+			cfg.LLM.Model = "auto"
 			fmt.Println()
-			cfg.LLM.APIKey = ask(scanner, cCyan+"  API key: "+cReset)
-			fmt.Printf(cDim+"  Model [%s]: "+cReset, cfg.LLM.Model)
-			scanner.Scan()
-			if m := strings.TrimSpace(scanner.Text()); m != "" && !isConfirmation(m) {
-				cfg.LLM.Model = m
-			}
-		case "4", "google":
-			cfg.LLM.Provider = "google"
-			cfg.LLM.Model = "gemini-2.0-flash"
-			fmt.Println()
-			cfg.LLM.APIKey = ask(scanner, cCyan+"  API key: "+cReset)
-			fmt.Printf(cDim+"  Model [%s]: "+cReset, cfg.LLM.Model)
-			scanner.Scan()
-			if m := strings.TrimSpace(scanner.Text()); m != "" && !isConfirmation(m) {
-				cfg.LLM.Model = m
+			fmt.Println(cDim + "  Mini Krill stores no Claude OAuth tokens. The official Claude CLI owns login." + cReset)
+			if _, err := exec.LookPath("claude"); err != nil {
+				fmt.Println(cYellow + "  Claude CLI not found. Install Claude Code, then run: claude auth login" + cReset)
+			} else {
+				fmt.Println(cDim + "  Claude CLI found." + cReset)
+				ans := ask(scanner, cCyan+"  Run Claude login now? "+cDim+"[Y/n]"+cReset+" ")
+				if ans == "" || strings.HasPrefix(strings.ToLower(ans), "y") {
+					cmd := exec.Command("claude", "auth", "login")
+					cmd.Stdin = os.Stdin
+					cmd.Stdout = os.Stdout
+					cmd.Stderr = os.Stderr
+					_ = cmd.Run()
+				}
 			}
 		default:
 			cfg.LLM.Provider = "ollama"
@@ -438,15 +447,24 @@ var chatCmd = &cobra.Command{
 func printChatHelp() {
 	fmt.Println()
 	fmt.Println(cBCyan + "  Commands:" + cReset)
-	fmt.Println("    " + cCyan + "help" + cReset + "      Show this help")
-	fmt.Println("    " + cCyan + "fact" + cReset + "      Random krill fact")
-	fmt.Println("    " + cCyan + "status" + cReset + "    System status")
-	fmt.Println("    " + cCyan + "exit" + cReset + "      Leave the chat")
+	fmt.Println("    " + cCyan + "help" + cReset + "             Show this help")
+	fmt.Println("    " + cCyan + "fact" + cReset + "             Random krill fact")
+	fmt.Println("    " + cCyan + "status" + cReset + "           System status")
+	fmt.Println("    " + cCyan + "/model" + cReset + "           Show active provider/model")
+	fmt.Println("    " + cCyan + "/models" + cReset + "          List providers and auth status")
+	fmt.Println("    " + cCyan + "/use local" + cReset + "       Switch to Ollama")
+	fmt.Println("    " + cCyan + "/use codex" + cReset + "       Switch to Codex CLI")
+	fmt.Println("    " + cCyan + "/use claude" + cReset + "      Switch to Claude Code")
+	fmt.Println("    " + cCyan + "what do you remember" + cReset + "  List saved memories")
+	fmt.Println("    " + cCyan + "exit" + cReset + "             Leave the chat")
 	fmt.Println()
 	fmt.Println(cBCyan + "  Tips:" + cReset)
 	fmt.Println(cDim + "    Ask anything" + cReset + " - I'll chat naturally")
 	fmt.Println(cDim + "    Give me a task" + cReset + " - I'll show a dive plan for your approval")
+	fmt.Println(cDim + "    Say" + cReset + " 'remember that ...'" + cDim + " to save a preference locally" + cReset)
 	fmt.Println(cDim + "    Say" + cReset + " 'yes'" + cDim + " to approve," + cReset + " 'no'" + cDim + " to reject a plan" + cReset)
+	fmt.Println(cDim + "    Read docs/INTERFACES.md for CLI, Telegram, and Discord setup" + cReset)
+	fmt.Println(cDim + "    Read docs/TESTING.md for the full feature checklist" + cReset)
 	fmt.Println()
 }
 
@@ -603,4 +621,3 @@ var skillListCmd = &cobra.Command{
 		return nil
 	},
 }
-

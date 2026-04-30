@@ -84,7 +84,8 @@ var ollamaListCmd = &cobra.Command{
 		}
 		if len(models) == 0 {
 			fmt.Println("No models found.")
-			fmt.Println(cDim + "Pull one with: " + cReset + "minikrill ollama pull gemma4:e2b")
+			fmt.Println(cDim + "Recommended: " + cReset + "minikrill ollama pull gemma3:4b")
+			fmt.Println(cDim + "Low-memory fallback: " + cReset + "minikrill ollama pull llama3.2:3b")
 			return nil
 		}
 		fmt.Println(cBold + "Local models:" + cReset)
@@ -139,7 +140,7 @@ var ollamaEnsureCmd = &cobra.Command{
 		// Pull default model if not present
 		model := cfg.Ollama.DefaultModel
 		if model == "" {
-			model = "gemma4:e2b"
+			model = "gemma3:4b"
 		}
 		if !mgr.HasModel(ctx, model) {
 			fmt.Printf(cDim+"Pulling %s..."+cReset+"\n", model)
