@@ -1,5 +1,5 @@
 # Mini Krill installer for Windows
-# Usage: irm https://raw.githubusercontent.com/srvsngh99/mini-krill/master/scripts/install.ps1 | iex
+# Usage: irm https://raw.githubusercontent.com/srvsngh99/mini-krill/main/scripts/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
@@ -66,4 +66,17 @@ Write-Host ""
 Write-Host "[info] Mini Krill $version installed to $InstallDir\$Binary" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Run 'minikrill init' to get started."
+Write-Host ""
+Write-Host "  Setup hints:"
+Write-Host "    Mandatory: choose one provider in 'minikrill init'."
+Write-Host "    Recommended local: Ollama + gemma3:4b."
+Write-Host "    Low-memory local: Ollama + llama3.2:3b."
+Write-Host "    Optional: Codex subscription via 'codex login'."
+Write-Host "    Optional: Claude subscription via 'claude auth login'."
+Write-Host "    Optional: Telegram/Discord bot tokens for chat integrations."
+Write-Host ""
+Write-Host "  Test after setup:"
+Write-Host "    minikrill doctor"
+Write-Host "    minikrill run /models"
+Write-Host "    minikrill chat"
 Write-Host ""

@@ -8,12 +8,12 @@ agent:
   plan_approval: true    # always show plan before executing
 
 llm:
-  provider: ollama       # ollama, openai, anthropic, google
-  model: llama3.2
+  provider: ollama       # ollama, codex, claude (API providers are experimental)
+  model: gemma3:4b
   temperature: 0.7
   max_tokens: 2048
-  api_key: ""            # set via KRILL_LLM_API_KEY env var
-  base_url: ""           # custom API endpoint (optional)
+  api_key: ""            # reserved for future API-provider support
+  base_url: ""           # custom API endpoint for API-provider support
 
 brain:
   data_dir: ""           # defaults to ~/.mini-krill/brain
@@ -25,7 +25,7 @@ ollama:
   host: "http://localhost:11434"
   auto_install: true
   auto_start: true
-  default_model: gemma4:e2b
+  default_model: gemma3:4b
 
 telegram:
   enabled: false

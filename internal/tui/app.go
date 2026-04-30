@@ -128,7 +128,7 @@ func (a *App) View() string {
 	}
 
 	// Build layout: header + tabs + body + footer
-	header := RenderHeader(a.version)
+	header := RenderHeader(a.version, a.width)
 	tabBar := a.renderTabBar()
 	body := a.renderBody()
 	footer := a.renderFooter()

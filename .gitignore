@@ -33,6 +33,10 @@ vendor/
 /logs/
 *.pid
 
+# Local AI CLI/session state
+.claude/
+.codex/
+
 # Secrets
 .env
 .env.*
