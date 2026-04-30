@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -350,14 +351,23 @@ func (c *ChatView) sendChat(text string) tea.Cmd {
 // LogsView
 // ---------------------------------------------------------------------------
 
+// logsCopiedMsg signals that logs were copied to clipboard.
+type logsCopiedMsg struct{ err error }
+
+// clearCopiedMsg clears the "copied" badge after a delay.
+type clearCopiedMsg struct{}
+
 // LogsView displays a scrollable view of log file contents.
 type LogsView struct {
 	viewport viewport.Model
 	content  string
 	logFile  string
+	rawLines []string // plain text lines (unstyled) for clipboard
 	width    int
 	height   int
 	ready    bool
+	copied   bool
+	copyErr  string
 }
 
 // NewLogsView creates a log viewer for the given file path.
@@ -385,6 +395,7 @@ func (l *LogsView) SetSize(w, h int) {
 func (l *LogsView) RefreshLogs() {
 	if l.logFile == "" {
 		l.content = DimStyle.Render("No log file configured")
+		l.rawLines = nil
 		l.viewport.SetContent(l.content)
 		return
 	}
@@ -392,12 +403,14 @@ func (l *LogsView) RefreshLogs() {
 	data, err := os.ReadFile(l.logFile)
 	if err != nil {
 		l.content = DimStyle.Render(fmt.Sprintf("  Cannot read log file: %v\n  Path: %s", err, l.logFile))
+		l.rawLines = nil
 		l.viewport.SetContent(l.content)
 		return
 	}
 
 	if len(data) == 0 {
 		l.content = DimStyle.Render("  Log file is empty - krill is being quiet...")
+		l.rawLines = nil
 		l.viewport.SetContent(l.content)
 		return
 	}
@@ -415,6 +428,9 @@ func (l *LogsView) RefreshLogs() {
 		logLines = logLines[len(logLines)-maxLines:]
 	}
 
+	// Store raw lines for clipboard copy
+	l.rawLines = logLines
+
 	// Colorize log levels
 	var styled []string
 	for _, line := range logLines {
@@ -428,6 +444,32 @@ func (l *LogsView) RefreshLogs() {
 
 // Update handles messages for the logs view.
 func (l *LogsView) Update(msg tea.Msg) tea.Cmd {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if msg.String() == "c" && len(l.rawLines) > 0 {
+			raw := strings.Join(l.rawLines, "\n")
+			return func() tea.Msg {
+				err := clipboard.WriteAll(raw)
+				return logsCopiedMsg{err: err}
+			}
+		}
+	case logsCopiedMsg:
+		if msg.err != nil {
+			log.Warn("clipboard copy failed", "error", msg.err)
+			l.copyErr = "copy failed"
+		} else {
+			l.copied = true
+			l.copyErr = ""
+		}
+		return tea.Tick(3*time.Second, func(time.Time) tea.Msg {
+			return clearCopiedMsg{}
+		})
+	case clearCopiedMsg:
+		l.copied = false
+		l.copyErr = ""
+		return nil
+	}
+
 	var cmd tea.Cmd
 	l.viewport, cmd = l.viewport.Update(msg)
 	return cmd
@@ -439,7 +481,13 @@ func (l *LogsView) View() string {
 		return "\n  Initializing log viewer..."
 	}
 
-	header := DimStyle.Render(fmt.Sprintf("  Log: %s  (scroll with j/k or arrow keys)", l.logFile))
+	hint := "scroll: j/k  copy: c"
+	if l.copied {
+		hint = "scroll: j/k  copy: c  " + AccentStyle.Render("✓ copied!")
+	} else if l.copyErr != "" {
+		hint = "scroll: j/k  copy: c  " + ErrorStyle.Render("✗ " + l.copyErr)
+	}
+	header := DimStyle.Render(fmt.Sprintf("  Log: %s  (%s)", l.logFile, hint))
 	return lipgloss.JoinVertical(lipgloss.Left, header, l.viewport.View())
 }
 
@@ -500,6 +548,7 @@ func (h *HelpView) View() string {
 		{"Right / Left", "Next / previous tab"},
 		{"Esc", "Unfocus chat input"},
 		{"j / k", "Scroll down / up (logs)"},
+		{"c", "Copy logs to clipboard (logs)"},
 		{"Enter", "Send message (chat)"},
 		{"q / Ctrl+C", "Quit (not in chat input)"},
 		{"?", "Show this help"},
