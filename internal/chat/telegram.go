@@ -301,7 +301,8 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 	}
 
 	resp, err := t.handler.HandleMessage(msgCtx, chatMsg)
-	if err != nil {
+	handlerFailed := err != nil
+	if handlerFailed {
 		log.Error("handler error", "chat_id", chatID, "error", err)
 		resp = "Bubbles! My handler hit a reef. Try again in a moment."
 	}
@@ -329,9 +330,11 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 		t.incrementBotTurns(chatID)
 	}
 
-	// Swap reaction based on response content
-	if strings.Contains(resp, "reef") || strings.Contains(resp, "went wrong") {
+	// Swap reaction: eyes → thumbs_up on success, eyes → thumbs_down on failure
+	if handlerFailed {
 		t.react(chatID, msg.MessageID, "thumbs_down")
+	} else {
+		t.react(chatID, msg.MessageID, "thumbs_up")
 	}
 
 	// In groups, reply to the original message for context

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"regexp"
 	"strings"
 	"time"
 
@@ -95,35 +96,23 @@ func (h *ChatHandlerImpl) handleReminder(input string) (string, bool) {
 	return "", false
 }
 
+// internalPrefixRe matches a leading reasoning preamble from the LLM.
+// Pattern: starts with Plan:/Thinking:/Internal: (case-insensitive), followed
+// by a short reasoning sentence ending with . or !, then the real response.
+// Only matches if the preamble sentence is <=200 chars — avoids stripping
+// legitimate multi-sentence content that happens to start with "Plan:".
+var internalPrefixRe = regexp.MustCompile(`(?i)^(plan|thinking|internal):\s[^.!]{0,200}[.!]\s+`)
+
 // cleanInternalPrefixes strips internal reasoning markers that LLMs sometimes
 // emit as part of their response (e.g. "Plan: greet the user. Hi there!").
+// Only strips when the prefix is followed by a sentence boundary and there is
+// remaining content — never strips the entire response.
 func cleanInternalPrefixes(text string) string {
-	prefixes := []string{
-		"Plan:",
-		"plan:",
-		"PLAN:",
-		"Thinking:",
-		"thinking:",
-		"THINKING:",
-		"Internal:",
-		"internal:",
-	}
 	trimmed := strings.TrimSpace(text)
-	for _, prefix := range prefixes {
-		if strings.HasPrefix(trimmed, prefix) {
-			// Remove everything up to the first sentence boundary after the prefix
-			after := strings.TrimSpace(trimmed[len(prefix):])
-			// Look for the real response after the planning sentence
-			for _, sep := range []string{". ", ".\n", "! ", "!\n"} {
-				if idx := strings.Index(after, sep); idx >= 0 && idx < 200 {
-					cleaned := strings.TrimSpace(after[idx+len(sep):])
-					if cleaned != "" {
-						return cleaned
-					}
-				}
-			}
-			// If no sentence boundary, just strip the prefix
-			return after
+	if loc := internalPrefixRe.FindStringIndex(trimmed); loc != nil {
+		remainder := strings.TrimSpace(trimmed[loc[1]:])
+		if remainder != "" {
+			return remainder
 		}
 	}
 	return text
