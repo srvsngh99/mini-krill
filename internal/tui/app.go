@@ -69,10 +69,11 @@ func NewApp(agent core.Agent, brain core.Brain, heartbeat core.Heartbeat, versio
 
 // Init returns the initial command batch - starts the tick loop.
 func (a *App) Init() tea.Cmd {
-	return tea.Batch(
-		tickCmd(),
-		a.chat.input.Focus(),
-	)
+	cmds := []tea.Cmd{tickCmd()}
+	if a.activeTab == 1 {
+		cmds = append(cmds, a.chat.input.Focus())
+	}
+	return tea.Batch(cmds...)
 }
 
 // Update processes all incoming messages and dispatches to the active view.
@@ -158,6 +159,13 @@ func (a *App) View() string {
 		bodyStyled,
 		footer,
 	)
+}
+
+// SetInitialTab selects which tab is active when the TUI starts.
+func (a *App) SetInitialTab(tab int) {
+	if tab >= 0 && tab < len(a.tabs) {
+		a.activeTab = tab
+	}
 }
 
 // Run starts the Bubble Tea program with alt screen.
