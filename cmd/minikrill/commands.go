@@ -183,12 +183,20 @@ var initCmd = &cobra.Command{
 
 		fmt.Println()
 		if ans := ask(scanner, cCyan+"  Enable Telegram bot? "+cDim+"[y/N]"+cReset+" "); strings.HasPrefix(strings.ToLower(ans), "y") {
+			fmt.Println(cDim + "  To get a bot token, message @BotFather on Telegram → /newbot → follow the prompts." + cReset)
 			cfg.Telegram.Token = ask(scanner, cCyan+"  Bot token: "+cReset)
 			cfg.Telegram.Enabled = cfg.Telegram.Token != ""
+			if cfg.Telegram.Enabled {
+				fmt.Println(cDim + "  Bot saved! Run " + cReset + "minikrill dive" + cDim + " to start it, then send " + cReset + "/start" + cDim + " to your bot on Telegram." + cReset)
+			}
 		}
 		if ans := ask(scanner, cCyan+"  Enable Discord bot? "+cDim+"[y/N]"+cReset+" "); strings.HasPrefix(strings.ToLower(ans), "y") {
+			fmt.Println(cDim + "  Create a bot at https://discord.com/developers/applications → Bot → Copy token." + cReset)
 			cfg.Discord.Token = ask(scanner, cCyan+"  Bot token: "+cReset)
 			cfg.Discord.Enabled = cfg.Discord.Token != ""
+			if cfg.Discord.Enabled {
+				fmt.Println(cDim + "  Bot saved! Run " + cReset + "minikrill dive" + cDim + " to start it." + cReset)
+			}
 		}
 
 		if err := config.EnsureDataDir(); err != nil {
@@ -204,10 +212,20 @@ var initCmd = &cobra.Command{
 		fmt.Println()
 		fmt.Printf(cDimCyan+"  Fun fact: %s\n"+cReset, randomFact())
 		fmt.Println()
+		fmt.Println(cDim + "  Install with " + cReset + "go install ./cmd/minikrill" + cDim + " to use " + cReset + "minikrill" + cDim + " directly," + cReset)
+		fmt.Println(cDim + "  or run immediately with " + cReset + "go run ./cmd/minikrill <command>" + cDim + "." + cReset)
+		fmt.Println()
 		fmt.Println(cBold + "  Next steps:" + cReset)
 		fmt.Println("    " + cCyan + "minikrill chat" + cReset + "     Start chatting")
 		fmt.Println("    " + cCyan + "minikrill tui" + cReset + "      Terminal dashboard")
 		fmt.Println("    " + cCyan + "minikrill doctor" + cReset + "   Health check")
+		if cfg.Telegram.Enabled && cfg.Discord.Enabled {
+			fmt.Println("    " + cCyan + "minikrill dive" + cReset + "     Start Telegram and Discord bots")
+		} else if cfg.Telegram.Enabled {
+			fmt.Println("    " + cCyan + "minikrill dive" + cReset + "     Start Telegram bot")
+		} else if cfg.Discord.Enabled {
+			fmt.Println("    " + cCyan + "minikrill dive" + cReset + "     Start Discord bot")
+		}
 		fmt.Println()
 		return nil
 	},
@@ -437,110 +455,15 @@ var chatCmd = &cobra.Command{
 			return err
 		}
 		defer stack.brain.Close()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		_ = stack.hb.Start(ctx)
+		defer func() { _ = stack.hb.Stop() }()
 
-		printBanner()
-		fmt.Printf(cDim+"  Provider: %s/%s"+cReset, stack.cfg.LLM.Provider, stack.cfg.LLM.Model)
-		fmt.Printf(cDim+" | Brain: %d memories"+cReset, stack.brain.Memory().Count())
-		fmt.Printf(cDim+" | Skills: %d"+cReset+"\n", len(stack.skills.List()))
-		fmt.Println()
-
-		greeting := stack.brain.GetPersonality().Greeting
-		if greeting == "" {
-			greeting = "Hey there! I'm Mini Krill, your crustaceous AI buddy."
-		}
-		fmt.Println(cBCyan + "  >=\\'>" + cReset + " " + greeting)
-		fmt.Println()
-		fmt.Println(cDim + "  Type " + cReset + "help" + cDim + " for commands, " + cReset + "exit" + cDim + " to leave" + cReset)
-		fmt.Println(cDim + "  Give me a task and I'll plan before doing anything" + cReset)
-		fmt.Println()
-
-		scanner := bufio.NewScanner(os.Stdin)
-		scanner.Buffer(make([]byte, 0), 1024*1024)
-		ctx := context.Background()
-
-		for {
-			fmt.Print(cBGreen + "you > " + cReset)
-			if !scanner.Scan() {
-				break
-			}
-			input := strings.TrimSpace(scanner.Text())
-			if input == "" {
-				continue
-			}
-			switch strings.ToLower(input) {
-			case "exit", "quit":
-				fmt.Println()
-				fmt.Println(cCyan + "  See you in the deep!" + cReset)
-				fmt.Println()
-				return nil
-			case "help":
-				printChatHelp()
-				continue
-			case "fact":
-				fmt.Println()
-				fmt.Printf(cBCyan+"krill > "+cReset+cDimCyan+"%s\n"+cReset, randomFact())
-				fmt.Println()
-				continue
-			case "status":
-				s := stack.hb.Status()
-				fmt.Println()
-				fmt.Print(cBCyan + "krill > " + cReset)
-				fmt.Printf(cDim+"Uptime: "+cReset+"%s", s.Uptime.Truncate(time.Second))
-				fmt.Printf(cDim+" | Memory: "+cReset+"%d KB", s.MemoryUsed/1024)
-				fmt.Printf(cDim+" | LLM: "+cReset+"%s", s.LLMStatus)
-				fmt.Println()
-				fmt.Println()
-				continue
-			}
-
-			done := make(chan struct{})
-			go spinner(done)
-
-			resp, err := stack.handler.HandleMessage(ctx, core.ChatMessage{
-				Platform: "cli",
-				Text:     input,
-			})
-			close(done)
-
-			fmt.Println()
-			if err != nil {
-				fmt.Printf(cBCyan+"krill > "+cReset+cYellow+"Bubbles! %s\n"+cReset, friendlyError(err))
-				fmt.Println(cDim + "         Try rephrasing, or check 'minikrill doctor' for issues." + cReset)
-			} else if resp == "" {
-				fmt.Println(cBCyan + "krill > " + cReset + cDimCyan + randomFact() + cReset)
-			} else {
-				fmt.Println(cBCyan + "krill > " + cReset + renderMarkdown(resp))
-			}
-			fmt.Println()
-		}
-		return nil
+		app := tui.NewApp(stack.agent, stack.brain, stack.hb, core.Version, stack.cfg.Log.File)
+		app.SetInitialTab(tui.TabChat)
+		return app.Run()
 	},
-}
-
-func printChatHelp() {
-	fmt.Println()
-	fmt.Println(cBCyan + "  Commands:" + cReset)
-	fmt.Println("    " + cCyan + "help" + cReset + "             Show this help")
-	fmt.Println("    " + cCyan + "fact" + cReset + "             Random krill fact")
-	fmt.Println("    " + cCyan + "status" + cReset + "           System status")
-	fmt.Println("    " + cCyan + "/model" + cReset + "           Show active provider/model")
-	fmt.Println("    " + cCyan + "/models" + cReset + "          List providers and auth status")
-	fmt.Println("    " + cCyan + "/use local" + cReset + "       Switch to Ollama")
-	fmt.Println("    " + cCyan + "/use codex" + cReset + "       Switch to Codex CLI")
-	fmt.Println("    " + cCyan + "/use claude" + cReset + "      Switch to Claude Code")
-	fmt.Println("    " + cCyan + "what do you remember" + cReset + "  List saved memories")
-	fmt.Println("    " + cCyan + "exit" + cReset + "             Leave the chat")
-	fmt.Println()
-	fmt.Println(cBCyan + "  Tips:" + cReset)
-	fmt.Println(cDim + "    Ask anything" + cReset + " - I'll chat naturally")
-	fmt.Println(cDim + "    Give me a task" + cReset + " - I'll show a dive plan for your approval")
-	fmt.Println(cDim + "    Say" + cReset + " 'remember that ...'" + cDim + " to save a preference locally" + cReset)
-	fmt.Println(cDim + "    Use" + cReset + " minikrill remind" + cDim + " for durable local reminders" + cReset)
-	fmt.Println(cDim + "    Use" + cReset + " minikrill summarize/research" + cDim + " for files, web pages, and research" + cReset)
-	fmt.Println(cDim + "    Say" + cReset + " 'yes'" + cDim + " to approve," + cReset + " 'no'" + cDim + " to reject a plan" + cReset)
-	fmt.Println(cDim + "    Read docs/INTERFACES.md for CLI, Telegram, and Discord setup" + cReset)
-	fmt.Println(cDim + "    Read docs/TESTING.md for the full feature checklist" + cReset)
-	fmt.Println()
 }
 
 // ---------------------------------------------------------------------------
