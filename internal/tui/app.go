@@ -203,20 +203,38 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 		a.quitting = true
 		return tea.Quit
 
+	case "esc":
+		if inChat {
+			a.chat.Blur()
+			return nil
+		}
+
 	case "q":
 		if !inChat {
 			a.quitting = true
 			return tea.Quit
 		}
 
-	case "tab", "right":
+	case "tab":
+		// Tab always switches tabs, even when chat input is focused
+		a.activeTab = (a.activeTab + 1) % len(a.tabs)
+		a.onTabSwitch()
+		return nil
+
+	case "shift+tab":
+		// Shift+Tab always switches tabs
+		a.activeTab = (a.activeTab - 1 + len(a.tabs)) % len(a.tabs)
+		a.onTabSwitch()
+		return nil
+
+	case "right":
 		if !inChat {
 			a.activeTab = (a.activeTab + 1) % len(a.tabs)
 			a.onTabSwitch()
 			return nil
 		}
 
-	case "shift+tab", "left":
+	case "left":
 		if !inChat {
 			a.activeTab = (a.activeTab - 1 + len(a.tabs)) % len(a.tabs)
 			a.onTabSwitch()
@@ -307,8 +325,18 @@ func (a *App) updateActiveView(msg tea.Msg) tea.Cmd {
 
 // resizeViews propagates terminal dimensions to all views.
 func (a *App) resizeViews() {
-	// Reserve space for header, tabs, footer
-	bodyHeight := a.height - 10
+	// Calculate body height exactly the same way View() does so
+	// the chat input bar doesn't get clipped off-screen.
+	header := RenderHeader(a.version, a.width)
+	tabBar := a.renderTabBar()
+	footer := a.renderFooter()
+
+	headerLines := strings.Count(header, "\n") + 1
+	tabLines := strings.Count(tabBar, "\n") + 1
+	footerLines := strings.Count(footer, "\n") + 1
+	margins := 3
+
+	bodyHeight := a.height - headerLines - tabLines - footerLines - margins
 	if bodyHeight < 5 {
 		bodyHeight = 5
 	}
