@@ -547,7 +547,10 @@ var tuiCmd = &cobra.Command{
 		_ = stack.hb.Start(ctx)
 		defer func() { _ = stack.hb.Stop() }()
 
-		startBots(ctx, stack)
+		bs := startBots(ctx, stack)
+		if stack.cfg.Telegram.Enabled && bs.TelegramErr != nil {
+			klog.Error("telegram bot failed in TUI mode", "error", bs.TelegramErr)
+		}
 
 		app := tui.NewApp(stack.agent, stack.brain, stack.hb, core.Version, stack.cfg.Log.File)
 		return app.Run()

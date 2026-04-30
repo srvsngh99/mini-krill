@@ -288,6 +288,10 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 		log.Debug("failed to send typing action", "error", err)
 	}
 
+	// Per-message timeout so a slow LLM doesn't block Telegram forever.
+	msgCtx, msgCancel := context.WithTimeout(ctx, 90*time.Second)
+	defer msgCancel()
+
 	chatMsg := core.ChatMessage{
 		Platform: "telegram",
 		ChatID:   fmt.Sprintf("%d", chatID),
@@ -296,9 +300,10 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 		Text:     messageText,
 	}
 
-	resp, err := t.handler.HandleMessage(ctx, chatMsg)
-	if err != nil {
-		log.Error("handler error", "error", err)
+	resp, err := t.handler.HandleMessage(msgCtx, chatMsg)
+	handlerFailed := err != nil
+	if handlerFailed {
+		log.Error("handler error", "chat_id", chatID, "error", err)
 		resp = "Bubbles! My handler hit a reef. Try again in a moment."
 	}
 	if strings.TrimSpace(resp) == "" {
@@ -325,8 +330,8 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 		t.incrementBotTurns(chatID)
 	}
 
-	// Swap reaction
-	if err != nil {
+	// Swap reaction: eyes → thumbs_up on success, eyes → thumbs_down on failure
+	if handlerFailed {
 		t.react(chatID, msg.MessageID, "thumbs_down")
 	} else {
 		t.react(chatID, msg.MessageID, "thumbs_up")
