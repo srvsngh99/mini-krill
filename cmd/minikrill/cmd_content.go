@@ -11,7 +11,12 @@ import (
 	"github.com/srvsngh99/mini-krill/internal/content"
 )
 
-var contentTimeout time.Duration
+var (
+	summarizeTimeout    time.Duration
+	webReadTimeout      time.Duration
+	webSummarizeTimeout time.Duration
+	researchTimeout     time.Duration
+)
 
 var summarizeCmd = &cobra.Command{
 	Use:   "summarize [file|dir|url]",
@@ -23,7 +28,7 @@ var summarizeCmd = &cobra.Command{
 			return err
 		}
 		defer stack.brain.Close()
-		ctx, cancel := context.WithTimeout(context.Background(), contentTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), summarizeTimeout)
 		defer cancel()
 		docs, err := content.ReadTarget(ctx, args[0])
 		if err != nil {
@@ -48,7 +53,7 @@ var webReadCmd = &cobra.Command{
 	Short: "Extract readable text from a web page",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, cancel := context.WithTimeout(context.Background(), contentTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), webReadTimeout)
 		defer cancel()
 		doc, err := content.ReadURL(ctx, args[0])
 		if err != nil {
@@ -69,7 +74,7 @@ var webSummarizeCmd = &cobra.Command{
 			return err
 		}
 		defer stack.brain.Close()
-		ctx, cancel := context.WithTimeout(context.Background(), contentTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), webSummarizeTimeout)
 		defer cancel()
 		doc, err := content.ReadURL(ctx, args[0])
 		if err != nil {
@@ -94,7 +99,7 @@ var researchCmd = &cobra.Command{
 			return err
 		}
 		defer stack.brain.Close()
-		ctx, cancel := context.WithTimeout(context.Background(), contentTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), researchTimeout)
 		defer cancel()
 		out, err := content.Research(ctx, stack.llm, strings.Join(args, " "))
 		if err != nil {
@@ -106,8 +111,9 @@ var researchCmd = &cobra.Command{
 }
 
 func init() {
-	for _, c := range []*cobra.Command{summarizeCmd, webReadCmd, webSummarizeCmd, researchCmd} {
-		c.Flags().DurationVar(&contentTimeout, "timeout", 2*time.Minute, "max time for fetch and summary")
-	}
+	summarizeCmd.Flags().DurationVar(&summarizeTimeout, "timeout", 2*time.Minute, "max time for fetch and summary")
+	webReadCmd.Flags().DurationVar(&webReadTimeout, "timeout", 2*time.Minute, "max time for fetch")
+	webSummarizeCmd.Flags().DurationVar(&webSummarizeTimeout, "timeout", 2*time.Minute, "max time for fetch and summary")
+	researchCmd.Flags().DurationVar(&researchTimeout, "timeout", 2*time.Minute, "max time for research")
 	webCmd.AddCommand(webReadCmd, webSummarizeCmd)
 }

@@ -23,12 +23,8 @@ type ChatHandlerImpl struct {
 }
 
 // NewHandler creates a ChatHandlerImpl wired to the given agent.
-func NewHandler(agent core.Agent, reminders ...*reminder.Store) *ChatHandlerImpl {
-	h := &ChatHandlerImpl{agent: agent}
-	if len(reminders) > 0 {
-		h.reminders = reminders[0]
-	}
-	return h
+func NewHandler(agent core.Agent, reminderStore *reminder.Store) *ChatHandlerImpl {
+	return &ChatHandlerImpl{agent: agent, reminders: reminderStore}
 }
 
 // HandleMessage processes an incoming chat message and returns the agent's

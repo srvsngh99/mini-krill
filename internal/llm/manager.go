@@ -121,10 +121,33 @@ func (m *ProviderManager) Switch(provider, model string) error {
 // ListProviders returns all known providers with their availability.
 func (m *ProviderManager) ListProviders() []ProviderInfo {
 	active := m.ActiveInfo()
+
+	// Run external checks concurrently to reduce latency
+	var (
+		ollamaModels []string
+		codexHasKey  bool
+		claudeHasKey bool
+		wg           sync.WaitGroup
+	)
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		ollamaModels = m.discoverOllamaModels()
+	}()
+	go func() {
+		defer wg.Done()
+		codexHasKey = commandOK(context.Background(), "codex", "login", "status")
+	}()
+	go func() {
+		defer wg.Done()
+		claudeHasKey = commandOK(context.Background(), "claude", "auth", "status")
+	}()
+	wg.Wait()
+
 	providers := []ProviderInfo{
 		{
 			Name:     "ollama",
-			Models:   m.discoverOllamaModels(),
+			Models:   ollamaModels,
 			IsActive: active.Provider == "ollama",
 			NeedsKey: false,
 			HasKey:   true,
@@ -134,14 +157,14 @@ func (m *ProviderManager) ListProviders() []ProviderInfo {
 			Models:   []string{"auto", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"},
 			IsActive: active.Provider == "codex",
 			NeedsKey: false,
-			HasKey:   commandOK(context.Background(), "codex", "login", "status"),
+			HasKey:   codexHasKey,
 		},
 		{
 			Name:     "claude",
 			Models:   []string{"auto", "opus", "sonnet", "haiku"},
 			IsActive: active.Provider == "claude",
 			NeedsKey: false,
-			HasKey:   commandOK(context.Background(), "claude", "auth", "status"),
+			HasKey:   claudeHasKey,
 		},
 		{
 			Name:     "openai",

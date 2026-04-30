@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -97,13 +98,56 @@ func isTextLike(path string) bool {
 	}
 }
 
+// isPrivateIP returns true if the IP is loopback, private, or link-local.
+func isPrivateIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()
+}
+
+// newSafeHTTPClient returns an HTTP client that blocks requests to private/loopback/link-local
+// IP addresses, preventing SSRF attacks. Redirect targets are also validated.
+func newSafeHTTPClient(timeout time.Duration) *http.Client {
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, fmt.Errorf("SSRF check: invalid address %q: %w", addr, err)
+			}
+			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+			if err != nil {
+				return nil, err
+			}
+			for _, ip := range ips {
+				if isPrivateIP(ip.IP) {
+					return nil, fmt.Errorf("SSRF blocked: address %s resolves to private IP %s", host, ip.IP)
+				}
+			}
+			return dialer.DialContext(ctx, network, net.JoinHostPort(host, port))
+		},
+	}
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			host := req.URL.Hostname()
+			if ip := net.ParseIP(host); ip != nil && isPrivateIP(ip) {
+				return fmt.Errorf("SSRF blocked: redirect to private IP %s", ip)
+			}
+			return nil
+		},
+	}
+}
+
 func ReadURL(ctx context.Context, rawURL string) (Document, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
 	if err != nil {
 		return Document{}, err
 	}
 	req.Header.Set("User-Agent", "MiniKrill/0.1")
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := newSafeHTTPClient(20 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return Document{}, err
