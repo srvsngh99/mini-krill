@@ -12,6 +12,8 @@ Memory works by saving local data under `~/.mini-krill` and sending relevant con
 
 Memory files are written with owner-only permissions where supported by the OS.
 
+`conversations.jsonl` is append-only in the current release. If you run a long-lived bot, periodically archive or remove older conversation history until built-in rotation is added.
+
 ## How To Teach It
 
 ```text

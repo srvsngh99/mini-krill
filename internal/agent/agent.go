@@ -95,15 +95,12 @@ func New(cfg config.AgentConfig, llm core.LLMProvider, brain core.Brain, skills 
 	}
 }
 
-// SetChannel is kept for platform integrations, but Mini Krill now defaults to
-// a unified conversation so users can move between interfaces without losing context.
-func (a *KrillAgent) SetChannel(ch string) {
+// SetChannel is kept for platform integrations. Mini Krill intentionally ignores
+// the requested platform channel and stores all turns in one unified channel so
+// users can move between CLI, TUI, Telegram, and Discord without losing context.
+func (a *KrillAgent) SetChannel(_ string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if strings.TrimSpace(ch) == "" {
-		a.channel = unifiedConversationChannel
-		return
-	}
 	a.channel = unifiedConversationChannel
 }
 
@@ -113,7 +110,7 @@ func (a *KrillAgent) Chat(ctx context.Context, input string) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	if response, handled := a.handleProviderCommand(ctx, input); handled {
+	if response, handled := a.handleProviderCommand(input); handled {
 		a.saveTurn("user", input)
 		a.saveTurn("assistant", response)
 		return response, nil
@@ -167,7 +164,7 @@ func (a *KrillAgent) SpawnKrill(ctx context.Context, task string) (*core.SubKril
 	return a.subMgr.Spawn(ctx, task)
 }
 
-func (a *KrillAgent) handleProviderCommand(ctx context.Context, input string) (string, bool) {
+func (a *KrillAgent) handleProviderCommand(input string) (string, bool) {
 	text := strings.TrimSpace(input)
 	lower := strings.ToLower(text)
 	mgr, ok := a.llm.(core.ProviderControl)
@@ -216,7 +213,6 @@ func (a *KrillAgent) handleProviderCommand(ctx context.Context, input string) (s
 		return authInstructions(parts[1]), true
 	}
 
-	_ = ctx
 	return "", false
 }
 
@@ -504,12 +500,23 @@ func (a *KrillAgent) buildUserMemoryContext(ctx context.Context, limit int) stri
 		if !hasAnyTag(entry.Tags, "user-preference", "self-learned") {
 			continue
 		}
-		value := strings.TrimSpace(entry.Value)
+		value := sanitizeMemoryContextValue(entry.Value)
 		if value != "" {
-			lines = append(lines, "- "+value)
+			lines = append(lines, "- user memory: "+fmt.Sprintf("%q", value))
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func sanitizeMemoryContextValue(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, "\r", " ")
+	value = strings.ReplaceAll(value, "\n", " ")
+	value = strings.Join(strings.Fields(value), " ")
+	if len(value) > 240 {
+		value = value[:240] + "..."
+	}
+	return value
 }
 
 func hasAnyTag(tags []string, expected ...string) bool {
