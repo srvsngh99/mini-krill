@@ -31,6 +31,14 @@ type SearchResult struct {
 
 func ReadTarget(ctx context.Context, target string) ([]Document, error) {
 	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") {
+		// Route YouTube URLs through the transcript extractor.
+		if IsYouTubeURL(target) {
+			doc, err := ReadYouTube(ctx, target)
+			if err != nil {
+				return nil, err
+			}
+			return []Document{doc}, nil
+		}
 		doc, err := ReadURL(ctx, target)
 		if err != nil {
 			return nil, err
