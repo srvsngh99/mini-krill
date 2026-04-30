@@ -52,7 +52,7 @@ func (m selectModel) View() string {
 	// After selection, show only the chosen item as confirmation.
 	if m.quitting {
 		if m.chosen >= 0 && m.chosen < len(m.items) {
-			return fmt.Sprintf("    %s▸ %s%s\n", cBGreen, m.items[m.chosen].label, cReset)
+			return fmt.Sprintf("    %s▸ %s%s\n", cBCyan, m.items[m.chosen].label, cReset)
 		}
 		return ""
 	}
@@ -60,11 +60,11 @@ func (m selectModel) View() string {
 	var b strings.Builder
 	for i, item := range m.items {
 		if i == m.cursor {
-			b.WriteString(fmt.Sprintf("    %s▸%s %s%-14s%s %s\n",
-				cBGreen, cReset, cBold, item.label, cReset, item.desc))
+			b.WriteString(fmt.Sprintf("    %s▸ %-14s %s%s\n",
+				cBCyan, item.label, item.desc, cReset))
 		} else {
-			b.WriteString(fmt.Sprintf("      %-14s %s%s%s\n",
-				item.label, cDim, item.desc, cReset))
+			b.WriteString(fmt.Sprintf("    %s  %-14s %s%s\n",
+				cDim, item.label, item.desc, cReset))
 		}
 	}
 	b.WriteString("\n    " + cDim + "↑/↓ navigate • enter select" + cReset)
