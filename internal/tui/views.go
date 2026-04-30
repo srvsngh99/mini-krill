@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -126,6 +127,7 @@ type ChatView struct {
 	messages []chatEntry
 	input    textinput.Model
 	viewport viewport.Model
+	spinner  spinner.Model
 	width    int
 	height   int
 	agent    core.Agent
@@ -148,6 +150,10 @@ func NewChatView(agent core.Agent) ChatView {
 	vp := viewport.New(80, 20)
 	vp.Style = lipgloss.NewStyle().Foreground(ColorWhite)
 
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	sp.Style = lipgloss.NewStyle().Foreground(ColorCyan)
+
 	greeting := chatEntry{
 		sender: "krill",
 		text:   "Hey there! I'm Mini Krill, your crustaceous AI buddy. I live in the deep ocean of your terminal. Ask me anything - I might be small, but I'm part of the largest biomass on Earth!",
@@ -158,6 +164,7 @@ func NewChatView(agent core.Agent) ChatView {
 		messages: []chatEntry{greeting},
 		input:    ti,
 		viewport: vp,
+		spinner:  sp,
 		agent:    agent,
 	}
 }
@@ -223,8 +230,8 @@ func (c *ChatView) Update(msg tea.Msg) tea.Cmd {
 			c.waiting = true
 			c.refreshViewport()
 
-			// Send to agent in goroutine
-			return c.sendChat(text)
+			// Send to agent in goroutine; start spinner alongside
+			return tea.Batch(c.sendChat(text), c.spinner.Tick)
 		}
 	case chatResponseMsg:
 		c.waiting = false
@@ -249,6 +256,16 @@ func (c *ChatView) Update(msg tea.Msg) tea.Cmd {
 
 	c.viewport, cmd = c.viewport.Update(msg)
 	cmds = append(cmds, cmd)
+
+	// Animate spinner while waiting for response — only refresh viewport on
+	// spinner ticks to avoid rebuilding chat content on every message.
+	if c.waiting {
+		if _, ok := msg.(spinner.TickMsg); ok {
+			c.spinner, cmd = c.spinner.Update(msg)
+			cmds = append(cmds, cmd)
+			c.refreshViewport()
+		}
+	}
 
 	return tea.Batch(cmds...)
 }
@@ -301,10 +318,10 @@ func (c *ChatView) refreshViewport() {
 		}
 	}
 
-	// Waiting indicator
+	// Animated waiting indicator
 	if c.waiting {
-		spinner := AccentStyle.Render("  ~ Krill is diving deep... ~")
-		lines = append(lines, spinner)
+		thinking := fmt.Sprintf("  %s Krill is thinking...", c.spinner.View())
+		lines = append(lines, AccentStyle.Render(thinking))
 	}
 
 	content := strings.Join(lines, "\n")
