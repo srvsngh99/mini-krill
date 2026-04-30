@@ -34,6 +34,9 @@ const (
 	TabChat      = 1
 	TabLogs      = 2
 	TabHelp      = 3
+
+	// layoutMargins is the vertical breathing room reserved between layout sections.
+	layoutMargins = 3
 )
 
 // ---------------------------------------------------------------------------
@@ -152,16 +155,7 @@ func (a *App) View() string {
 	body := a.renderBody()
 	footer := a.renderFooter()
 
-	// Calculate body height: total - header - tabs - footer - margins
-	headerLines := strings.Count(header, "\n") + 1
-	tabLines := strings.Count(tabBar, "\n") + 1
-	footerLines := strings.Count(footer, "\n") + 1
-	margins := 3 // breathing room
-
-	bodyHeight := a.height - headerLines - tabLines - footerLines - margins
-	if bodyHeight < 5 {
-		bodyHeight = 5
-	}
+	bodyHeight := a.bodyHeight()
 
 	// Constrain body to exact height
 	bodyStyled := lipgloss.NewStyle().
@@ -206,8 +200,8 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case "esc":
 		if inChat {
 			a.chat.Blur()
-			return nil
 		}
+		return nil
 
 	case "q":
 		if !inChat {
@@ -325,8 +319,16 @@ func (a *App) updateActiveView(msg tea.Msg) tea.Cmd {
 
 // resizeViews propagates terminal dimensions to all views.
 func (a *App) resizeViews() {
-	// Calculate body height exactly the same way View() does so
-	// the chat input bar doesn't get clipped off-screen.
+	h := a.bodyHeight()
+	a.dashboard.SetSize(a.width, h)
+	a.chat.SetSize(a.width, h)
+	a.logs.SetSize(a.width, h)
+	a.help.SetSize(a.width, h)
+}
+
+// bodyHeight computes the available vertical space for view content
+// by subtracting the actual rendered header, tab bar, and footer heights.
+func (a *App) bodyHeight() int {
 	header := RenderHeader(a.version, a.width)
 	tabBar := a.renderTabBar()
 	footer := a.renderFooter()
@@ -334,17 +336,12 @@ func (a *App) resizeViews() {
 	headerLines := strings.Count(header, "\n") + 1
 	tabLines := strings.Count(tabBar, "\n") + 1
 	footerLines := strings.Count(footer, "\n") + 1
-	margins := 3
 
-	bodyHeight := a.height - headerLines - tabLines - footerLines - margins
-	if bodyHeight < 5 {
-		bodyHeight = 5
+	h := a.height - headerLines - tabLines - footerLines - layoutMargins
+	if h < 5 {
+		h = 5
 	}
-
-	a.dashboard.SetSize(a.width, bodyHeight)
-	a.chat.SetSize(a.width, bodyHeight)
-	a.logs.SetSize(a.width, bodyHeight)
-	a.help.SetSize(a.width, bodyHeight)
+	return h
 }
 
 // renderTabBar builds the horizontal tab bar with active highlighting.
