@@ -403,16 +403,10 @@ func (a *App) renderFooter() string {
 		statusText = DimStyle.Render("  Swimming...")
 	}
 
-	// Center: current krill fact (truncated if needed)
-	fact := a.dashboard.fact
-	maxFactWidth := a.width - 40
-	if maxFactWidth < 10 {
-		maxFactWidth = 10
-	}
-	if len(fact) > maxFactWidth {
-		fact = fact[:maxFactWidth-3] + "..."
-	}
-	factText := DimStyle.Render(fact)
+	// Center: keybinding hints
+	hints := HelpKeyStyle.Render("Tab") + DimStyle.Render(": switch tabs  ") +
+		HelpKeyStyle.Render("?") + DimStyle.Render(": help  ") +
+		HelpKeyStyle.Render("q") + DimStyle.Render(": quit")
 
 	// Right: connection status
 	var connStatus string
@@ -433,7 +427,7 @@ func (a *App) renderFooter() string {
 	centerWidth := a.width - leftWidth - rightWidth - 4
 
 	left := lipgloss.NewStyle().Width(leftWidth).Render(statusText)
-	center := lipgloss.NewStyle().Width(centerWidth).Align(lipgloss.Center).Render(factText)
+	center := lipgloss.NewStyle().Width(centerWidth).Align(lipgloss.Center).Render(hints)
 	right := lipgloss.NewStyle().Width(rightWidth).Align(lipgloss.Right).Render(connStatus)
 
 	content := lipgloss.JoinHorizontal(lipgloss.Center, left, center, right)

@@ -95,8 +95,7 @@ func (p *CLIProvider) Available(ctx context.Context) bool {
 func (p *CLIProvider) runCodex(ctx context.Context, model, prompt string) ([]byte, error) {
 	args := []string{
 		"exec",
-		"--sandbox", "read-only",
-		"--ask-for-approval", "never",
+		"--full-auto",
 		"--skip-git-repo-check",
 		"--ephemeral",
 		"--color", "never",
