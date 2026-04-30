@@ -48,8 +48,8 @@ func New(cfg config.BrainConfig, llm core.LLMProvider) (*KrillBrain, error) {
 		return nil, fmt.Errorf("init memory: %w", err)
 	}
 
-	// Initialize conversation store (SQLite)
-	convStore, err := NewConversationStore(filepath.Join(cfg.DataDir, "conversations.db"))
+	// Initialize conversation store.
+	convStore, err := NewConversationStore(filepath.Join(cfg.DataDir, "conversations.jsonl"))
 	if err != nil {
 		return nil, fmt.Errorf("init conversation store: %w", err)
 	}
@@ -88,7 +88,7 @@ func (b *KrillBrain) ConversationStore() core.ConversationStore {
 	return b.convStore
 }
 
-// Close releases resources held by the brain (conversation database, etc.).
+// Close releases resources held by the brain.
 func (b *KrillBrain) Close() error {
 	if b.convStore != nil {
 		return b.convStore.Close()

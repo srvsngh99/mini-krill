@@ -1,7 +1,7 @@
 # Stage 1: Build the binary
 FROM golang:1.22-alpine AS builder
 
-LABEL maintainer="Sourav Singh <sourav@souravailabs.com>"
+LABEL maintainer="Sourav AI Labs"
 
 RUN apk add --no-cache git ca-certificates
 
@@ -22,7 +22,7 @@ RUN CGO_ENABLED=0 go build \
 # Stage 2: Minimal runtime image
 FROM alpine:latest
 
-LABEL maintainer="Sourav Singh <sourav@souravailabs.com>"
+LABEL maintainer="Sourav AI Labs"
 LABEL description="Mini Krill - lightweight AI agent CLI"
 LABEL version="0.1.0"
 

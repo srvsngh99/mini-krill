@@ -200,7 +200,7 @@ func (d *DiscordBot) handleCommand(s *discordgo.Session, m *discordgo.MessageCre
 			"`!fact`   - Learn something about real krill",
 			"`!plan`   - Start a dive plan for a task",
 			"",
-			"Or just mention me or DM me and I'll do my best!",
+			"Or mention me / DM me with normal chat commands like `/models`, `/use codex`, or `remember that ...`.",
 		}, "\n"))
 
 	case "!status":

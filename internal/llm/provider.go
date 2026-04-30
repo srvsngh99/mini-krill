@@ -1,6 +1,6 @@
 // Package llm implements LLM provider backends for Mini Krill.
 // Like krill adapting to every ocean depth, this package adapts to every
-// LLM backend - local Ollama, OpenAI, Anthropic, and Google Gemini.
+// LLM backend - local Ollama, subscription CLIs, and API providers.
 package llm
 
 import (
@@ -33,6 +33,12 @@ func NewProvider(cfg config.LLMConfig, ollamaCfg config.OllamaConfig) (core.LLMP
 		}
 		return NewOllamaProvider(host, model, cfg), nil
 
+	case "codex", "codex_cli", "codex-cli":
+		return NewCLIProvider("codex", cfg), nil
+
+	case "claude", "claude_code", "claude-code":
+		return NewCLIProvider("claude", cfg), nil
+
 	case "openai", "anthropic", "google":
 		if cfg.APIKey == "" {
 			return nil, fmt.Errorf("provider %q requires an API key (set llm.api_key or KRILL_LLM_API_KEY)", provider)
@@ -40,6 +46,6 @@ func NewProvider(cfg config.LLMConfig, ollamaCfg config.OllamaConfig) (core.LLMP
 		return NewCloudProvider(provider, cfg), nil
 
 	default:
-		return nil, fmt.Errorf("unknown LLM provider %q (supported: ollama, openai, anthropic, google)", provider)
+		return nil, fmt.Errorf("unknown LLM provider %q (supported: ollama, codex, claude, openai, anthropic, google)", provider)
 	}
 }

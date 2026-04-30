@@ -22,6 +22,8 @@ var _ core.Agent = (*KrillAgent)(nil)
 // Krill molt their exoskeleton to grow - we shed old messages to stay nimble.
 const maxHistory = 20
 
+const unifiedConversationChannel = "unified"
+
 // approvalWords are inputs that greenlight a pending plan.
 var approvalWords = map[string]bool{
 	"yes":      true,
@@ -57,7 +59,7 @@ type KrillAgent struct {
 	skills      core.SkillRegistry
 	mcp         core.MCPRegistry
 	cfg         config.AgentConfig
-	channel     string // platform channel for conversation isolation (cli, telegram, etc.)
+	channel     string // durable conversation channel; default is unified across interfaces
 	history     []core.Message
 	pendingPlan *core.Plan
 	subMgr      *SubKrillManager
@@ -73,9 +75,9 @@ func New(cfg config.AgentConfig, llm core.LLMProvider, brain core.Brain, skills 
 
 	// Cold-start recovery: inject recent conversation from durable storage
 	if cs := brain.ConversationStore(); cs != nil {
-		if recoveryCtx := buildRecoveryContext(cs, "cli", cfg.RecoveryTurns); recoveryCtx != "" {
+		if recoveryCtx := buildRecoveryContext(cs, unifiedConversationChannel, cfg.RecoveryTurns); recoveryCtx != "" {
 			sysPrompt += "\n\n## Recent Conversation (from last session)\nBelow is your recent conversation. Use it for continuity. Do not mention recovery unless asked:\n" + recoveryCtx
-			log.Info("conversation continuity restored", "channel", "cli")
+			log.Info("conversation continuity restored", "channel", unifiedConversationChannel)
 		}
 	}
 
@@ -85,7 +87,7 @@ func New(cfg config.AgentConfig, llm core.LLMProvider, brain core.Brain, skills 
 		skills:  skills,
 		mcp:     mcp,
 		cfg:     cfg,
-		channel: "cli",
+		channel: unifiedConversationChannel,
 		history: []core.Message{
 			{Role: "system", Content: sysPrompt},
 		},
@@ -93,11 +95,16 @@ func New(cfg config.AgentConfig, llm core.LLMProvider, brain core.Brain, skills 
 	}
 }
 
-// SetChannel sets the platform channel for conversation isolation.
+// SetChannel is kept for platform integrations, but Mini Krill now defaults to
+// a unified conversation so users can move between interfaces without losing context.
 func (a *KrillAgent) SetChannel(ch string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.channel = ch
+	if strings.TrimSpace(ch) == "" {
+		a.channel = unifiedConversationChannel
+		return
+	}
+	a.channel = unifiedConversationChannel
 }
 
 // Chat is the main entry point - every user message flows through here.
@@ -105,6 +112,12 @@ func (a *KrillAgent) SetChannel(ch string) {
 func (a *KrillAgent) Chat(ctx context.Context, input string) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
+	if response, handled := a.handleProviderCommand(ctx, input); handled {
+		a.saveTurn("user", input)
+		a.saveTurn("assistant", response)
+		return response, nil
+	}
 
 	// --- Phase 1: Check for pending plan approval ---
 	if a.pendingPlan != nil {
@@ -114,6 +127,7 @@ func (a *KrillAgent) Chat(ctx context.Context, input string) (string, error) {
 	// --- Phase 2: Record user message ---
 	a.appendMessage(core.Message{Role: "user", Content: input})
 	a.saveTurn("user", input)
+	a.maybeStoreUserPreference(ctx, input)
 
 	// --- Phase 3: Classify intent ---
 	intent := a.classifyIntent(ctx, input)
@@ -151,6 +165,93 @@ func (a *KrillAgent) ExecutePlan(ctx context.Context, plan *core.Plan) (string, 
 // Like a krill swarm splitting to cover more ocean territory.
 func (a *KrillAgent) SpawnKrill(ctx context.Context, task string) (*core.SubKrill, error) {
 	return a.subMgr.Spawn(ctx, task)
+}
+
+func (a *KrillAgent) handleProviderCommand(ctx context.Context, input string) (string, bool) {
+	text := strings.TrimSpace(input)
+	lower := strings.ToLower(text)
+	mgr, ok := a.llm.(core.ProviderControl)
+	if !ok {
+		return "", false
+	}
+
+	switch {
+	case lower == "/model" || lower == "model" || lower == "current model":
+		info := mgr.ActiveInfo()
+		return fmt.Sprintf("Provider: %s\nModel: %s", info.Provider, info.Model), true
+
+	case lower == "/models" || lower == "models" || lower == "list models":
+		return formatProviders(mgr.ListProviders()), true
+
+	case strings.HasPrefix(lower, "/use ") || strings.HasPrefix(lower, "use ") || strings.HasPrefix(lower, "switch to "):
+		target := strings.TrimSpace(text)
+		for _, prefix := range []string{"/use ", "use ", "switch to "} {
+			if strings.HasPrefix(strings.ToLower(target), prefix) {
+				target = strings.TrimSpace(target[len(prefix):])
+				break
+			}
+		}
+		if target == "" {
+			return "Usage: /use <local|ollama|codex|claude> [model]", true
+		}
+		parts := strings.Fields(target)
+		provider, model, ok := mgr.ResolveTarget(parts[0])
+		if !ok {
+			return fmt.Sprintf("Unknown provider or model: %s\n\n%s", parts[0], formatProviders(mgr.ListProviders())), true
+		}
+		if len(parts) > 1 {
+			model = parts[1]
+		}
+		if err := mgr.Switch(provider, model); err != nil {
+			return fmt.Sprintf("Switch failed: %s\n\nTry /auth %s, then /use %s.", err.Error(), provider, provider), true
+		}
+		info := mgr.ActiveInfo()
+		return fmt.Sprintf("Switched to %s (%s).", info.Provider, info.Model), true
+
+	case strings.HasPrefix(lower, "/auth") || strings.HasPrefix(lower, "auth "):
+		parts := strings.Fields(lower)
+		if len(parts) < 2 {
+			return "Usage: /auth <codex|claude|ollama>\n\nCodex: run `codex login`\nClaude: run `claude auth login`\nOllama: run `minikrill ollama ensure`", true
+		}
+		return authInstructions(parts[1]), true
+	}
+
+	_ = ctx
+	return "", false
+}
+
+func formatProviders(providers []core.ProviderInfo) string {
+	var lines []string
+	lines = append(lines, "Available providers:")
+	for _, p := range providers {
+		active := ""
+		if p.IsActive {
+			active = " [active]"
+		}
+		auth := "ready"
+		if p.NeedsKey && !p.HasKey {
+			auth = "needs API key"
+		} else if !p.NeedsKey && !p.HasKey && (p.Name == "codex" || p.Name == "claude") {
+			auth = "login required"
+		}
+		models := strings.Join(p.Models, ", ")
+		lines = append(lines, fmt.Sprintf("- %s%s: %s (%s)", p.Name, active, models, auth))
+	}
+	lines = append(lines, "", "Switch with `/use local`, `/use codex`, or `/use claude`.")
+	return strings.Join(lines, "\n")
+}
+
+func authInstructions(provider string) string {
+	switch provider {
+	case "codex", "chatgpt":
+		return "Codex subscription auth uses the official Codex CLI. Run:\n\n  codex login\n\nThen return here and run `/use codex`."
+	case "claude", "claude-code":
+		return "Claude subscription auth uses the official Claude Code CLI. Run:\n\n  claude auth login\n\nThen return here and run `/use claude`."
+	case "ollama", "local":
+		return "Local auth is not needed. To prepare Ollama, run:\n\n  minikrill ollama ensure\n\nThen return here and run `/use local`."
+	default:
+		return "Unknown auth target. Use `/auth codex`, `/auth claude`, or `/auth ollama`."
+	}
 }
 
 // handlePendingPlan processes user input when a plan is awaiting approval.
@@ -281,6 +382,14 @@ func (a *KrillAgent) handleChat(ctx context.Context) (string, error) {
 		enriched = append(enriched[:len(enriched)-1], capabilityMsg, enriched[len(enriched)-1])
 	}
 
+	if memoryCtx := a.buildUserMemoryContext(ctx, 8); memoryCtx != "" {
+		memoryMsg := core.Message{
+			Role:    "system",
+			Content: "Known user preferences and durable memories. Use these quietly for personalization; do not mention them unless relevant:\n\n" + memoryCtx,
+		}
+		enriched = append(enriched[:len(enriched)-1], memoryMsg, enriched[len(enriched)-1])
+	}
+
 	// If the question likely needs current info, search the web first
 	if a.shouldSearch(lastMsg) {
 		if searchSkill, ok := a.skills.Get("search"); ok {
@@ -331,6 +440,114 @@ func (a *KrillAgent) handleChat(ctx context.Context) (string, error) {
 	return resp.Content, nil
 }
 
+func (a *KrillAgent) maybeStoreUserPreference(ctx context.Context, input string) {
+	mem := a.brain.Memory()
+	if mem == nil {
+		return
+	}
+	text := strings.TrimSpace(input)
+	if text == "" {
+		return
+	}
+	lower := strings.ToLower(text)
+	for _, explicit := range []string{"remember ", "remember that ", "learn ", "learn that ", "note ", "note that ", "memorize ", "memorize that "} {
+		if strings.HasPrefix(lower, explicit) {
+			return
+		}
+	}
+	triggers := []string{
+		"my name is ",
+		"call me ",
+		"i prefer ",
+		"i like ",
+		"i usually ",
+		"please always ",
+		"please don't ",
+		"do not ",
+	}
+	matched := false
+	for _, trigger := range triggers {
+		if strings.Contains(lower, trigger) {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return
+	}
+
+	key := "user_pref_" + memoryKey(text)
+	entry := core.MemoryEntry{
+		Key:        key,
+		Value:      text,
+		Tags:       []string{"user-preference", "auto-learned"},
+		CreatedAt:  time.Now(),
+		AccessedAt: time.Now(),
+	}
+	if err := mem.Store(ctx, entry); err != nil {
+		log.Warn("failed to store user preference", "error", err)
+	}
+}
+
+func (a *KrillAgent) buildUserMemoryContext(ctx context.Context, limit int) string {
+	mem := a.brain.Memory()
+	if mem == nil || limit <= 0 {
+		return ""
+	}
+	entries, err := mem.List(ctx)
+	if err != nil || len(entries) == 0 {
+		return ""
+	}
+	var lines []string
+	for i := len(entries) - 1; i >= 0 && len(lines) < limit; i-- {
+		entry := entries[i]
+		if !hasAnyTag(entry.Tags, "user-preference", "self-learned") {
+			continue
+		}
+		value := strings.TrimSpace(entry.Value)
+		if value != "" {
+			lines = append(lines, "- "+value)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func hasAnyTag(tags []string, expected ...string) bool {
+	for _, tag := range tags {
+		for _, want := range expected {
+			if tag == want {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func memoryKey(s string) string {
+	s = strings.ToLower(s)
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore {
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
+		if b.Len() >= 48 {
+			break
+		}
+	}
+	key := strings.Trim(b.String(), "_")
+	if key == "" {
+		key = fmt.Sprintf("%d", time.Now().Unix())
+	}
+	return key
+}
+
 // detectSelfSkill checks if the message is about the krill itself and maps
 // it to the appropriate self:* skill. Returns ("", "") if not self-referential.
 // Krill have compound eyes with 7 visual pigments - these detect self-references.
@@ -354,7 +571,7 @@ func (a *KrillAgent) detectSelfSkill(msg string) (skillName, skillInput string) 
 		{[]string{"evolve your", "update your personality", "change your style", "change your trait", "add trait", "be more", "be less"}, "self:evolve"},
 		{[]string{"add a skill", "create a skill", "new skill", "add skill"}, "self:add-skill"},
 		{[]string{"heal yourself", "fix yourself", "self heal", "self-heal", "repair yourself"}, "self:heal"},
-		{[]string{"switch to ollama", "switch to openai", "switch to anthropic", "switch to google", "auto approve", "require approval", "log level"}, "self:configure"},
+		{[]string{"switch to ollama", "switch to codex", "switch to claude", "switch to openai", "switch to anthropic", "switch to google", "auto approve", "require approval", "log level"}, "self:configure"},
 		{[]string{"reflect on yourself", "reflect on our conversations", "evolve yourself", "how have i changed you", "what have you learned about me"}, "self:reflect"},
 	}
 

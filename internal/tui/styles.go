@@ -4,10 +4,11 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/srvsngh99/mini-krill/internal/brand"
 )
 
 // ---------------------------------------------------------------------------
@@ -15,15 +16,15 @@ import (
 // ---------------------------------------------------------------------------
 
 const (
-	ColorOceanBg  = lipgloss.Color("#0a1628") // deep ocean background
-	ColorCyan     = lipgloss.Color("#00d4ff") // primary - sonar pulse
+	ColorOceanBg   = lipgloss.Color("#0a1628") // deep ocean background
+	ColorCyan      = lipgloss.Color("#00d4ff") // primary - sonar pulse
 	ColorLightBlue = lipgloss.Color("#7ec8e3") // secondary - shallow waters
-	ColorGreen    = lipgloss.Color("#00ff88") // bioluminescent accent
-	ColorAmber    = lipgloss.Color("#ffaa00") // warning - surface light
-	ColorCoral    = lipgloss.Color("#ff6b6b") // error - coral reef
-	ColorDimBlue  = lipgloss.Color("#1e3a5f") // borders - twilight zone
-	ColorMuted    = lipgloss.Color("#6b7b8d") // muted text - deep silt
-	ColorWhite    = lipgloss.Color("#e8f4f8") // bright text - foam
+	ColorGreen     = lipgloss.Color("#00ff88") // bioluminescent accent
+	ColorAmber     = lipgloss.Color("#ffaa00") // warning - surface light
+	ColorCoral     = lipgloss.Color("#ff6b6b") // error - coral reef
+	ColorDimBlue   = lipgloss.Color("#1e3a5f") // borders - twilight zone
+	ColorMuted     = lipgloss.Color("#6b7b8d") // muted text - deep silt
+	ColorWhite     = lipgloss.Color("#e8f4f8") // bright text - foam
 )
 
 // ---------------------------------------------------------------------------
@@ -62,11 +63,11 @@ var (
 
 	// KrillBubbleStyle for krill messages in chat (left-aligned).
 	KrillBubbleStyle = lipgloss.NewStyle().
-			Foreground(ColorGreen).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ColorDimBlue).
-			Padding(0, 1).
-			MarginRight(4)
+				Foreground(ColorGreen).
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(ColorDimBlue).
+				Padding(0, 1).
+				MarginRight(4)
 
 	// StatusOK renders a green LIVE badge.
 	StatusOK = lipgloss.NewStyle().
@@ -142,6 +143,10 @@ var (
 	// AccentStyle for highlighted text.
 	AccentStyle = lipgloss.NewStyle().
 			Foreground(ColorGreen)
+
+	// BrandStyle for Sourav AI Labs attribution.
+	BrandStyle = lipgloss.NewStyle().
+			Foreground(ColorCoral)
 )
 
 // ---------------------------------------------------------------------------
@@ -149,16 +154,25 @@ var (
 // ---------------------------------------------------------------------------
 
 // RenderHeader renders the full header banner with the ASCII krill logo.
-func RenderHeader(version string) string {
-	lines := []string{
-		"   ~~~~",
-		fmt.Sprintf("  >=\\'>    Mini Krill v%s", version),
-		"   ~~~~    Your crustaceous AI buddy",
+func RenderHeader(version string, width int) string {
+	compact := width > 0 && width < 72
+	markLen := len(brand.Mark)
+	if compact {
+		markLen = len(brand.MarkCompact)
 	}
 
+	lines := brand.BannerLines(version, compact)
+
 	var styled []string
-	for _, line := range lines {
-		styled = append(styled, HeaderStyle.Render(line))
+	for i, line := range lines {
+		switch {
+		case i < markLen:
+			styled = append(styled, HeaderStyle.Render(line))
+		case strings.Contains(line, brand.Studio):
+			styled = append(styled, BrandStyle.Bold(true).Padding(0, 1).Render(line))
+		default:
+			styled = append(styled, DimStyle.Padding(0, 1).Render(line))
+		}
 	}
 
 	return strings.Join(styled, "\n")

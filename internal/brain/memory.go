@@ -29,9 +29,9 @@ func sanitizeKey(key string) string {
 // Each memory entry is stored as an individual JSON file in the memories
 // subdirectory, named by its sanitized key. Thread-safe via sync.RWMutex.
 type FileMemory struct {
-	dir     string
-	mu      sync.RWMutex
-	maxMem  int
+	dir    string
+	mu     sync.RWMutex
+	maxMem int
 }
 
 // NewFileMemory creates a new FileMemory rooted at the given directory.
@@ -72,7 +72,7 @@ func (m *FileMemory) Store(_ context.Context, entry core.MemoryEntry) error {
 	}
 
 	path := m.entryPath(entry.Key)
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write memory %q: %w", entry.Key, err)
 	}
 
@@ -103,7 +103,7 @@ func (m *FileMemory) Recall(_ context.Context, key string) (*core.MemoryEntry, e
 	// Update access time (best-effort)
 	entry.AccessedAt = time.Now().UTC()
 	if updated, err := json.MarshalIndent(entry, "", "  "); err == nil {
-		_ = os.WriteFile(path, updated, 0644)
+		_ = os.WriteFile(path, updated, 0600)
 	}
 
 	return &entry, nil

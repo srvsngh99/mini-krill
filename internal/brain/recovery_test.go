@@ -9,7 +9,7 @@ func TestBuildRecoveryContextEmpty(t *testing.T) {
 	store := newTestStore(t)
 	got := BuildRecoveryContext(store, "cli", 10)
 	if got != "" {
-		t.Errorf("expected empty string for empty DB, got %q", got)
+		t.Errorf("expected empty string for empty store, got %q", got)
 	}
 }
 

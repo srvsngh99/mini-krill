@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/srvsngh99/mini-krill/internal/brand"
 	"github.com/srvsngh99/mini-krill/internal/core"
 	log "github.com/srvsngh99/mini-krill/internal/log"
 )
@@ -516,7 +517,8 @@ func (h *HelpView) View() string {
 
 	// --- About ---
 	aboutText := lipgloss.JoinVertical(lipgloss.Left,
-		AccentStyle.Render("  Mini Krill"),
+		AccentStyle.Render("  "+brand.Name),
+		BrandStyle.Render("  "+brand.Attribution),
 		"",
 		ValueStyle.Render("  A tiny, crustaceous AI agent that lives in your terminal."),
 		ValueStyle.Render("  Local-first with Ollama, but can connect to cloud LLMs too."),
