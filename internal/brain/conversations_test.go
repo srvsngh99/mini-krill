@@ -95,7 +95,7 @@ func TestConcurrentSaves(t *testing.T) {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			store.SaveTurn("cli", "user", "concurrent message")
+			_ = store.SaveTurn("cli", "user", "concurrent message")
 		}(i)
 	}
 	wg.Wait()
