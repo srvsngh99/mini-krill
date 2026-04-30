@@ -44,7 +44,11 @@ var initCmd = &cobra.Command{
 		fmt.Println(cDim + "  Recommended local model: gemma3:4b. Low-memory fallback: llama3.2:3b." + cReset)
 		fmt.Println()
 
-		cfg := config.DefaultConfig()
+		// Load existing config so tokens and other settings survive re-init.
+		cfg, _ := config.Load()
+		if cfg == nil {
+			cfg = config.DefaultConfig()
+		}
 		scanner := bufio.NewScanner(os.Stdin)
 
 		fmt.Println(cBCyan + "  Choose your LLM provider:" + cReset)
@@ -182,21 +186,44 @@ var initCmd = &cobra.Command{
 		}
 
 		fmt.Println()
-		if ans := ask(scanner, cCyan+"  Enable Telegram bot? "+cDim+"[y/N]"+cReset+" "); strings.HasPrefix(strings.ToLower(ans), "y") {
+		// Telegram setup - preserve existing token if user skips
+		if cfg.Telegram.Token != "" {
+			fmt.Println(cDim + "  Telegram bot token already configured." + cReset)
+			if ans := ask(scanner, cCyan+"  Replace Telegram token? "+cDim+"[y/N]"+cReset+" "); strings.HasPrefix(strings.ToLower(ans), "y") {
+				fmt.Println(cDim + "  To get a bot token, message @BotFather on Telegram → /newbot → follow the prompts." + cReset)
+				token := ask(scanner, cCyan+"  Bot token: "+cReset)
+				if token != "" {
+					cfg.Telegram.Token = token
+				}
+			}
+			cfg.Telegram.Enabled = true
+		} else if ans := ask(scanner, cCyan+"  Enable Telegram bot? "+cDim+"[y/N]"+cReset+" "); strings.HasPrefix(strings.ToLower(ans), "y") {
 			fmt.Println(cDim + "  To get a bot token, message @BotFather on Telegram → /newbot → follow the prompts." + cReset)
 			cfg.Telegram.Token = ask(scanner, cCyan+"  Bot token: "+cReset)
 			cfg.Telegram.Enabled = cfg.Telegram.Token != ""
-			if cfg.Telegram.Enabled {
-				fmt.Println(cDim + "  Bot saved! Run " + cReset + "minikrill dive" + cDim + " to start it, then send " + cReset + "/start" + cDim + " to your bot on Telegram." + cReset)
-			}
 		}
-		if ans := ask(scanner, cCyan+"  Enable Discord bot? "+cDim+"[y/N]"+cReset+" "); strings.HasPrefix(strings.ToLower(ans), "y") {
+		if cfg.Telegram.Enabled {
+			fmt.Println(cDim + "  Telegram bot saved! Run " + cReset + "minikrill dive" + cDim + " to start it, then send " + cReset + "/start" + cDim + " to your bot on Telegram." + cReset)
+		}
+
+		// Discord setup - preserve existing token if user skips
+		if cfg.Discord.Token != "" {
+			fmt.Println(cDim + "  Discord bot token already configured." + cReset)
+			if ans := ask(scanner, cCyan+"  Replace Discord token? "+cDim+"[y/N]"+cReset+" "); strings.HasPrefix(strings.ToLower(ans), "y") {
+				fmt.Println(cDim + "  Create a bot at https://discord.com/developers/applications → Bot → Copy token." + cReset)
+				token := ask(scanner, cCyan+"  Bot token: "+cReset)
+				if token != "" {
+					cfg.Discord.Token = token
+				}
+			}
+			cfg.Discord.Enabled = true
+		} else if ans := ask(scanner, cCyan+"  Enable Discord bot? "+cDim+"[y/N]"+cReset+" "); strings.HasPrefix(strings.ToLower(ans), "y") {
 			fmt.Println(cDim + "  Create a bot at https://discord.com/developers/applications → Bot → Copy token." + cReset)
 			cfg.Discord.Token = ask(scanner, cCyan+"  Bot token: "+cReset)
 			cfg.Discord.Enabled = cfg.Discord.Token != ""
-			if cfg.Discord.Enabled {
-				fmt.Println(cDim + "  Bot saved! Run " + cReset + "minikrill dive" + cDim + " to start it." + cReset)
-			}
+		}
+		if cfg.Discord.Enabled {
+			fmt.Println(cDim + "  Discord bot saved! Run " + cReset + "minikrill dive" + cDim + " to start it." + cReset)
 		}
 
 		if err := config.EnsureDataDir(); err != nil {
@@ -287,40 +314,19 @@ var diveCmd = &cobra.Command{
 		fmt.Printf("  "+cDim+"Brain:"+cReset+"    %d memories\n", stack.brain.Memory().Count())
 		fmt.Printf("  "+cDim+"Skills:"+cReset+"   %d registered\n", len(stack.skills.List()))
 
+		bs := startBots(ctx, stack)
 		if stack.cfg.Telegram.Enabled {
-			tgBot, err := chat.NewTelegramBot(stack.cfg.Telegram, stack.handler)
-			if err != nil {
-				fmt.Printf("  "+cRed+"Telegram: %s\n"+cReset, friendlyError(err))
-			} else {
-				tgBot.SetProviderManager(stack.llm)
-				tgBot.SetLearnFunc(func(ctx context.Context, key, value string) error {
-					return stack.brain.Memory().Store(ctx, core.MemoryEntry{
-						Key:        key,
-						Value:      value,
-						Tags:       []string{"group-learned", "telegram"},
-						CreatedAt:  time.Now(),
-						AccessedAt: time.Now(),
-					})
-				})
-				go func() {
-					if err := tgBot.Start(ctx); err != nil {
-						klog.Error("telegram error", "error", err)
-					}
-				}()
+			if bs.TelegramOK {
 				fmt.Println("  " + cGreen + "Telegram: swimming" + cReset)
+			} else {
+				fmt.Printf("  "+cRed+"Telegram: %s\n"+cReset, friendlyError(bs.TelegramErr))
 			}
 		}
 		if stack.cfg.Discord.Enabled {
-			dcBot, err := chat.NewDiscordBot(stack.cfg.Discord, stack.handler)
-			if err != nil {
-				fmt.Printf("  "+cRed+"Discord: %s\n"+cReset, friendlyError(err))
-			} else {
-				go func() {
-					if err := dcBot.Start(ctx); err != nil {
-						klog.Error("discord error", "error", err)
-					}
-				}()
+			if bs.DiscordOK {
 				fmt.Println("  " + cGreen + "Discord:  swimming" + cReset)
+			} else {
+				fmt.Printf("  "+cRed+"Discord: %s\n"+cReset, friendlyError(bs.DiscordErr))
 			}
 		}
 		if reminderStore, err := newReminderStore(); err == nil {
@@ -442,6 +448,61 @@ var surfaceCmd = &cobra.Command{
 	},
 }
 
+// botStatus holds the result of starting chat bots.
+type botStatus struct {
+	TelegramOK bool
+	TelegramErr error
+	DiscordOK  bool
+	DiscordErr error
+}
+
+// startBots launches Telegram and Discord bots in the background when enabled.
+// Bots are tied to ctx and will shut down when the context is cancelled.
+func startBots(ctx context.Context, stack *krillStack) botStatus {
+	var s botStatus
+	if stack.cfg.Telegram.Enabled {
+		tgBot, err := chat.NewTelegramBot(stack.cfg.Telegram, stack.handler)
+		if err != nil {
+			s.TelegramErr = err
+			klog.Warn("telegram bot failed to start", "error", err)
+		} else {
+			tgBot.SetProviderManager(stack.llm)
+			tgBot.SetLearnFunc(func(ctx context.Context, key, value string) error {
+				return stack.brain.Memory().Store(ctx, core.MemoryEntry{
+					Key:        key,
+					Value:      value,
+					Tags:       []string{"group-learned", "telegram"},
+					CreatedAt:  time.Now(),
+					AccessedAt: time.Now(),
+				})
+			})
+			go func() {
+				if err := tgBot.Start(ctx); err != nil {
+					klog.Error("telegram error", "error", err)
+				}
+			}()
+			s.TelegramOK = true
+			klog.Info("telegram bot started")
+		}
+	}
+	if stack.cfg.Discord.Enabled {
+		dcBot, err := chat.NewDiscordBot(stack.cfg.Discord, stack.handler)
+		if err != nil {
+			s.DiscordErr = err
+			klog.Warn("discord bot failed to start", "error", err)
+		} else {
+			go func() {
+				if err := dcBot.Start(ctx); err != nil {
+					klog.Error("discord error", "error", err)
+				}
+			}()
+			s.DiscordOK = true
+			klog.Info("discord bot started")
+		}
+	}
+	return s
+}
+
 // ---------------------------------------------------------------------------
 // chat command
 // ---------------------------------------------------------------------------
@@ -459,6 +520,8 @@ var chatCmd = &cobra.Command{
 		defer cancel()
 		_ = stack.hb.Start(ctx)
 		defer func() { _ = stack.hb.Stop() }()
+
+		startBots(ctx, stack)
 
 		app := tui.NewApp(stack.agent, stack.brain, stack.hb, core.Version, stack.cfg.Log.File)
 		app.SetInitialTab(tui.TabChat)
@@ -483,6 +546,8 @@ var tuiCmd = &cobra.Command{
 		defer cancel()
 		_ = stack.hb.Start(ctx)
 		defer func() { _ = stack.hb.Stop() }()
+
+		startBots(ctx, stack)
 
 		app := tui.NewApp(stack.agent, stack.brain, stack.hb, core.Version, stack.cfg.Log.File)
 		return app.Run()
