@@ -78,6 +78,13 @@ func NewApp(agent core.Agent, brain core.Brain, heartbeat core.Heartbeat, versio
 	}
 }
 
+// SetInitialTab selects which tab is active when the TUI starts.
+func (a *App) SetInitialTab(tab int) {
+	if tab >= 0 && tab < len(a.tabs) {
+		a.activeTab = tab
+	}
+}
+
 // Init returns the initial command batch - starts the tick loop.
 func (a *App) Init() tea.Cmd {
 	cmds := []tea.Cmd{tickCmd()}
@@ -172,13 +179,6 @@ func (a *App) View() string {
 	)
 }
 
-// SetInitialTab selects which tab is active when the TUI starts.
-func (a *App) SetInitialTab(tab int) {
-	if tab >= 0 && tab < len(a.tabs) {
-		a.activeTab = tab
-	}
-}
-
 // Run starts the Bubble Tea program with alt screen.
 func (a *App) Run() error {
 	log.Info("starting TUI", "version", a.version)
@@ -196,7 +196,7 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
 
 	// In chat tab with focused input, only intercept global quit keys
-	inChat := a.activeTab == 1 && a.chat.Focused()
+	inChat := a.activeTab == TabChat && a.chat.Focused()
 
 	switch key {
 	case "ctrl+c":
@@ -225,32 +225,32 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	case "1":
 		if !inChat {
-			a.activeTab = 0
+			a.activeTab = TabDashboard
 			a.onTabSwitch()
 			return nil
 		}
 	case "2":
 		if !inChat {
-			a.activeTab = 1
+			a.activeTab = TabChat
 			a.onTabSwitch()
 			return nil
 		}
 	case "3":
 		if !inChat {
-			a.activeTab = 2
+			a.activeTab = TabLogs
 			a.onTabSwitch()
 			return nil
 		}
 	case "4":
 		if !inChat {
-			a.activeTab = 3
+			a.activeTab = TabHelp
 			a.onTabSwitch()
 			return nil
 		}
 
 	case "?":
 		if !inChat {
-			a.activeTab = 3 // jump to help
+			a.activeTab = TabHelp
 			a.onTabSwitch()
 			return nil
 		}
@@ -262,14 +262,14 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 // onTabSwitch handles focus changes when switching tabs.
 func (a *App) onTabSwitch() {
-	if a.activeTab == 1 {
+	if a.activeTab == TabChat {
 		a.chat.Focus()
 	} else {
 		a.chat.Blur()
 	}
 
 	// Refresh logs when switching to logs tab
-	if a.activeTab == 2 {
+	if a.activeTab == TabLogs {
 		a.logs.RefreshLogs()
 	}
 }
@@ -285,7 +285,7 @@ func (a *App) onTick() {
 	a.dashboard.fact = randomKrillFact()
 
 	// Refresh logs if on logs tab
-	if a.activeTab == 2 {
+	if a.activeTab == TabLogs {
 		a.logs.RefreshLogs()
 	}
 }
@@ -293,13 +293,13 @@ func (a *App) onTick() {
 // updateActiveView forwards a message to whichever view is active.
 func (a *App) updateActiveView(msg tea.Msg) tea.Cmd {
 	switch a.activeTab {
-	case 0:
+	case TabDashboard:
 		return a.dashboard.Update(msg)
-	case 1:
+	case TabChat:
 		return a.chat.Update(msg)
-	case 2:
+	case TabLogs:
 		return a.logs.Update(msg)
-	case 3:
+	case TabHelp:
 		return a.help.Update(msg)
 	}
 	return nil
@@ -352,13 +352,13 @@ func (a *App) renderTabBar() string {
 // renderBody returns the active view's rendered content.
 func (a *App) renderBody() string {
 	switch a.activeTab {
-	case 0:
+	case TabDashboard:
 		return a.dashboard.View()
-	case 1:
+	case TabChat:
 		return a.chat.View()
-	case 2:
+	case TabLogs:
 		return a.logs.View()
-	case 3:
+	case TabHelp:
 		return a.help.View()
 	default:
 		return ""
