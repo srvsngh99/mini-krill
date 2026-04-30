@@ -118,8 +118,8 @@ func (p *CLIProvider) runClaude(ctx context.Context, model, prompt string) ([]by
 	if model != "" && model != "auto" {
 		args = append(args, "--model", model)
 	}
-	args = append(args, prompt)
-	return runCLI(ctx, "claude", args, "")
+	// Pass prompt via stdin to avoid exceeding OS ARG_MAX limits
+	return runCLI(ctx, "claude", args, prompt)
 }
 
 func runCLI(ctx context.Context, name string, args []string, stdin string) ([]byte, error) {

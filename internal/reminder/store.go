@@ -170,6 +170,10 @@ func (s *Store) rewriteLocked(reminders []Reminder) error {
 		return fmt.Errorf("open reminder temp store: %w", err)
 	}
 	for _, r := range reminders {
+		// Skip explicitly deleted reminders (both DoneAt and FiredAt set by Delete)
+		if r.DoneAt != nil && r.FiredAt != nil {
+			continue
+		}
 		data, err := json.Marshal(r)
 		if err != nil {
 			_ = f.Close()
