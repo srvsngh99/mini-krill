@@ -636,33 +636,64 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%dh %dm", h, m)
 }
 
-// wordWrap performs simple word wrapping at the given width.
+// wordWrap wraps text to the given width while preserving paragraph breaks,
+// list items (- or *), numbered lines (1. 2.), and blank-line separators.
 func wordWrap(text string, width int) string {
 	if width <= 0 {
 		return text
 	}
 
-	var result strings.Builder
-	words := strings.Fields(text)
-	lineLen := 0
+	paragraphs := strings.Split(text, "\n")
+	var out []string
 
-	for i, word := range words {
-		wLen := len(word)
-
-		if i == 0 {
-			result.WriteString(word)
-			lineLen = wLen
+	for _, para := range paragraphs {
+		// Preserve blank lines as paragraph separators
+		if strings.TrimSpace(para) == "" {
+			out = append(out, "")
 			continue
 		}
 
-		if lineLen+1+wLen > width {
+		// Detect indent/prefix for list items, numbered items, headings
+		trimmed := strings.TrimLeft(para, " ")
+		indent := len(para) - len(trimmed)
+		prefix := strings.Repeat(" ", indent)
+
+		// Wrap the paragraph at width, keeping the original indent
+		out = append(out, wrapLine(trimmed, width, prefix))
+	}
+
+	return strings.Join(out, "\n")
+}
+
+// wrapLine wraps a single line of text at width, using prefix for continuation lines.
+func wrapLine(text string, width int, prefix string) string {
+	if len(text) <= width {
+		return prefix + text
+	}
+
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return prefix
+	}
+
+	var result strings.Builder
+	result.WriteString(prefix)
+	result.WriteString(words[0])
+	lineLen := len(prefix) + len(words[0])
+
+	// Continuation indent: add 2 extra spaces for wrapped lines
+	contPrefix := prefix + "  "
+
+	for _, word := range words[1:] {
+		if lineLen+1+len(word) > width {
 			result.WriteString("\n")
+			result.WriteString(contPrefix)
 			result.WriteString(word)
-			lineLen = wLen
+			lineLen = len(contPrefix) + len(word)
 		} else {
 			result.WriteString(" ")
 			result.WriteString(word)
-			lineLen += 1 + wLen
+			lineLen += 1 + len(word)
 		}
 	}
 

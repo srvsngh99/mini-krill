@@ -4,6 +4,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -152,6 +153,21 @@ var (
 // ---------------------------------------------------------------------------
 // ASCII art and rendering
 // ---------------------------------------------------------------------------
+
+// RenderCompactHeader renders a single-line subtle branding bar for chat mode.
+func RenderCompactHeader(version string, width int) string {
+	left := HeaderStyle.Render(fmt.Sprintf("%s v%s", brand.Name, version))
+	right := DimStyle.Render(brand.Attribution)
+
+	leftW := lipgloss.Width(left)
+	rightW := lipgloss.Width(right)
+	gap := width - leftW - rightW - 2
+	if gap < 1 {
+		return left
+	}
+
+	return left + strings.Repeat(" ", gap) + right
+}
 
 // RenderHeader renders the full header banner with the ASCII krill logo.
 func RenderHeader(version string, width int) string {

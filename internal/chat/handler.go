@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"regexp"
 	"strings"
 	"time"
 
@@ -57,6 +58,9 @@ func (h *ChatHandlerImpl) HandleMessage(ctx context.Context, msg core.ChatMessag
 		return "Bubbles! Something went wrong in the deep... (" + err.Error() + ")", nil
 	}
 
+	// Strip internal reasoning prefixes that some LLMs emit.
+	resp = cleanInternalPrefixes(resp)
+
 	// Never send an empty message - surface a krill fact instead.
 	if strings.TrimSpace(resp) == "" {
 		log.Warn("agent returned empty response, sending krill fact",
@@ -90,6 +94,28 @@ func (h *ChatHandlerImpl) handleReminder(input string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// internalPrefixRe matches a leading reasoning preamble from the LLM.
+// Pattern: starts with Plan:/Thinking:/Internal: (case-insensitive), followed
+// by a short reasoning sentence ending with . or !, then the real response.
+// Only matches if the preamble sentence is <=200 chars — avoids stripping
+// legitimate multi-sentence content that happens to start with "Plan:".
+var internalPrefixRe = regexp.MustCompile(`(?i)^(plan|thinking|internal):\s[^.!]{0,200}[.!]\s+`)
+
+// cleanInternalPrefixes strips internal reasoning markers that LLMs sometimes
+// emit as part of their response (e.g. "Plan: greet the user. Hi there!").
+// Only strips when the prefix is followed by a sentence boundary and there is
+// remaining content — never strips the entire response.
+func cleanInternalPrefixes(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if loc := internalPrefixRe.FindStringIndex(trimmed); loc != nil {
+		remainder := strings.TrimSpace(trimmed[loc[1]:])
+		if remainder != "" {
+			return remainder
+		}
+	}
+	return text
 }
 
 // randomFact picks a random entry from core.KrillFacts.
