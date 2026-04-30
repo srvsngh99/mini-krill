@@ -75,7 +75,7 @@ func (m selectModel) View() string {
 				cDim, pad, item.label, item.desc, cReset))
 		}
 	}
-	b.WriteString("\n    " + cDim + "↑/↓ navigate • enter select" + cReset)
+	b.WriteString("\n    " + cDim + "↑/↓ navigate • enter select • esc cancel" + cReset)
 	return b.String()
 }
 
