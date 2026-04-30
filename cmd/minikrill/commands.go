@@ -186,7 +186,7 @@ var initCmd = &cobra.Command{
 		}
 
 		fmt.Println()
-		// Telegram setup - preserve existing token if user skips
+		// Telegram setup - preserve existing token and enabled state if user skips
 		if cfg.Telegram.Token != "" {
 			fmt.Println(cDim + "  Telegram bot token already configured." + cReset)
 			if ans := ask(scanner, cCyan+"  Replace Telegram token? "+cDim+"[y/N]"+cReset+" "); strings.HasPrefix(strings.ToLower(ans), "y") {
@@ -194,9 +194,9 @@ var initCmd = &cobra.Command{
 				token := ask(scanner, cCyan+"  Bot token: "+cReset)
 				if token != "" {
 					cfg.Telegram.Token = token
+					cfg.Telegram.Enabled = true
 				}
 			}
-			cfg.Telegram.Enabled = true
 		} else if ans := ask(scanner, cCyan+"  Enable Telegram bot? "+cDim+"[y/N]"+cReset+" "); strings.HasPrefix(strings.ToLower(ans), "y") {
 			fmt.Println(cDim + "  To get a bot token, message @BotFather on Telegram → /newbot → follow the prompts." + cReset)
 			cfg.Telegram.Token = ask(scanner, cCyan+"  Bot token: "+cReset)
@@ -206,7 +206,7 @@ var initCmd = &cobra.Command{
 			fmt.Println(cDim + "  Telegram bot saved! Run " + cReset + "minikrill dive" + cDim + " to start it, then send " + cReset + "/start" + cDim + " to your bot on Telegram." + cReset)
 		}
 
-		// Discord setup - preserve existing token if user skips
+		// Discord setup - preserve existing token and enabled state if user skips
 		if cfg.Discord.Token != "" {
 			fmt.Println(cDim + "  Discord bot token already configured." + cReset)
 			if ans := ask(scanner, cCyan+"  Replace Discord token? "+cDim+"[y/N]"+cReset+" "); strings.HasPrefix(strings.ToLower(ans), "y") {
@@ -214,9 +214,9 @@ var initCmd = &cobra.Command{
 				token := ask(scanner, cCyan+"  Bot token: "+cReset)
 				if token != "" {
 					cfg.Discord.Token = token
+					cfg.Discord.Enabled = true
 				}
 			}
-			cfg.Discord.Enabled = true
 		} else if ans := ask(scanner, cCyan+"  Enable Discord bot? "+cDim+"[y/N]"+cReset+" "); strings.HasPrefix(strings.ToLower(ans), "y") {
 			fmt.Println(cDim + "  Create a bot at https://discord.com/developers/applications → Bot → Copy token." + cReset)
 			cfg.Discord.Token = ask(scanner, cCyan+"  Bot token: "+cReset)
@@ -450,10 +450,10 @@ var surfaceCmd = &cobra.Command{
 
 // botStatus holds the result of starting chat bots.
 type botStatus struct {
-	TelegramOK bool
+	TelegramOK  bool
 	TelegramErr error
-	DiscordOK  bool
-	DiscordErr error
+	DiscordOK   bool
+	DiscordErr  error
 }
 
 // startBots launches Telegram and Discord bots in the background when enabled.

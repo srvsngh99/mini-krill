@@ -91,6 +91,25 @@ func TestEscBlursChatInput(t *testing.T) {
 	}
 }
 
+// TestUpdateKeyMsgNotDoubleDispatched verifies that App.Update returns after
+// handleKey without forwarding the same KeyMsg to updateActiveView a second
+// time. This is a regression test for the double-character-input bug.
+func TestUpdateKeyMsgNotDoubleDispatched(t *testing.T) {
+	app := newSizedApp()
+	app.activeTab = TabChat
+	app.chat.Focus()
+	// Resize so the chat view is ready
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+
+	// Type a character via Update (not handleKey) to exercise the full path.
+	app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+
+	got := app.chat.input.Value()
+	if got != "a" {
+		t.Errorf("expected input value %q after one keypress, got %q (double dispatch?)", "a", got)
+	}
+}
+
 func TestEscDoesNotForwardWhenNotInChat(t *testing.T) {
 	app := newSizedApp()
 	app.activeTab = TabDashboard
