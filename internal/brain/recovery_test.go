@@ -22,9 +22,9 @@ func TestBuildRecoveryContextNilStore(t *testing.T) {
 
 func TestBuildRecoveryContextFormatting(t *testing.T) {
 	store := newTestStore(t)
-	store.SaveTurn("cli", "user", "hello there")
-	store.SaveTurn("cli", "assistant", "greetings!")
-	store.SaveTurn("cli", "user", "what is krill?")
+	_ = store.SaveTurn("cli", "user", "hello there")
+	_ = store.SaveTurn("cli", "assistant", "greetings!")
+	_ = store.SaveTurn("cli", "user", "what is krill?")
 
 	got := BuildRecoveryContext(store, "cli", 10)
 
@@ -42,7 +42,7 @@ func TestBuildRecoveryContextFormatting(t *testing.T) {
 func TestBuildRecoveryContextTruncation(t *testing.T) {
 	store := newTestStore(t)
 	longMsg := strings.Repeat("x", 500)
-	store.SaveTurn("cli", "user", longMsg)
+	_ = store.SaveTurn("cli", "user", longMsg)
 
 	got := BuildRecoveryContext(store, "cli", 10)
 
