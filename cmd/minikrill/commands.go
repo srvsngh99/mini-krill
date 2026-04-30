@@ -49,14 +49,20 @@ var initCmd = &cobra.Command{
 
 		fmt.Println(cBCyan + "  Choose your LLM provider:" + cReset)
 		fmt.Println()
-		fmt.Println("    " + cBGreen + "[1]" + cReset + " Ollama        " + cDim + "local, free, private; pulls gemma3:4b" + cReset)
-		fmt.Println("    " + cBBlue + "[2]" + cReset + " Codex         " + cDim + "optional; ChatGPT subscription via official Codex CLI" + cReset)
-		fmt.Println("    " + cBBlue + "[3]" + cReset + " Claude Code   " + cDim + "optional; Claude Pro/Max via official Claude CLI" + cReset)
-		fmt.Println()
-		choice := ask(scanner, cCyan+"  > "+cReset)
+		providerIdx, err := promptSelect([]selectItem{
+			{label: "Ollama", desc: "local, free, private; pulls gemma3:4b"},
+			{label: "Codex", desc: "ChatGPT subscription via official Codex CLI"},
+			{label: "Claude Code", desc: "Claude Pro/Max via official Claude CLI"},
+		})
+		if err != nil {
+			return err
+		}
+		if providerIdx < 0 {
+			return nil
+		}
 
-		switch choice {
-		case "2", "codex", "chatgpt":
+		switch providerIdx {
+		case 1: // Codex
 			cfg.LLM.Provider = "codex"
 			cfg.LLM.Model = "auto"
 			fmt.Println()
@@ -74,7 +80,7 @@ var initCmd = &cobra.Command{
 					_ = cmd.Run()
 				}
 			}
-		case "3", "claude", "claude code", "claude-code":
+		case 2: // Claude Code
 			cfg.LLM.Provider = "claude"
 			cfg.LLM.Model = "auto"
 			fmt.Println()
@@ -92,7 +98,7 @@ var initCmd = &cobra.Command{
 					_ = cmd.Run()
 				}
 			}
-		default:
+		default: // Ollama (index 0)
 			cfg.LLM.Provider = "ollama"
 			fmt.Println()
 			mgr := ollama.NewManager(cfg.Ollama)
