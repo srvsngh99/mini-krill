@@ -39,7 +39,7 @@ func (m selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chosen = m.cursor
 			m.quitting = true
 			return m, tea.Quit
-		case "ctrl+c":
+		case "ctrl+c", "esc":
 			m.chosen = -1
 			m.quitting = true
 			return m, tea.Quit
@@ -57,14 +57,22 @@ func (m selectModel) View() string {
 		return ""
 	}
 
+	maxLen := 0
+	for _, item := range m.items {
+		if len(item.label) > maxLen {
+			maxLen = len(item.label)
+		}
+	}
+	pad := maxLen + 2
+
 	var b strings.Builder
 	for i, item := range m.items {
 		if i == m.cursor {
-			b.WriteString(fmt.Sprintf("    %s▸ %-14s %s%s\n",
-				cBCyan, item.label, item.desc, cReset))
+			b.WriteString(fmt.Sprintf("    %s▸ %-*s %s%s\n",
+				cBCyan, pad, item.label, item.desc, cReset))
 		} else {
-			b.WriteString(fmt.Sprintf("    %s  %-14s %s%s\n",
-				cDim, item.label, item.desc, cReset))
+			b.WriteString(fmt.Sprintf("    %s  %-*s %s%s\n",
+				cDim, pad, item.label, item.desc, cReset))
 		}
 	}
 	b.WriteString("\n    " + cDim + "↑/↓ navigate • enter select" + cReset)
