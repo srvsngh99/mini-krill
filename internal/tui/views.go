@@ -478,9 +478,10 @@ func (h *HelpView) View() string {
 
 	// --- Keyboard Shortcuts ---
 	shortcuts := []struct{ key, desc string }{
-		{"Tab / Shift+Tab", "Switch between tabs"},
+		{"Tab / Shift+Tab", "Switch between tabs (always works)"},
 		{"1 2 3 4", "Jump directly to tab"},
 		{"Right / Left", "Next / previous tab"},
+		{"Esc", "Unfocus chat input"},
 		{"j / k", "Scroll down / up (logs)"},
 		{"Enter", "Send message (chat)"},
 		{"q / Ctrl+C", "Quit (not in chat input)"},
