@@ -92,7 +92,7 @@ func init() {
 
 	rootCmd.AddCommand(initCmd, diveCmd, surfaceCmd, chatCmd, tuiCmd,
 		doctorCmd, sonarCmd, versionCmd, ollamaCmd, skillCmd, brainCmd, personalityCmd,
-		runCmd, notifyCmd, remindCmd, remindersCmd, summarizeCmd, webCmd, researchCmd)
+		runCmd, notifyCmd, remindCmd, remindersCmd, summarizeCmd, webCmd, researchCmd, youtubeCmd)
 }
 
 // ---------------------------------------------------------------------------
