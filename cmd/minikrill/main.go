@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	klog "github.com/srvsngh99/mini-krill/internal/log"
 	"github.com/srvsngh99/mini-krill/internal/ollama"
 	"github.com/srvsngh99/mini-krill/internal/plugin"
+	"github.com/srvsngh99/mini-krill/internal/reminder"
 )
 
 // ANSI color codes - ocean palette
@@ -90,7 +92,7 @@ func init() {
 
 	rootCmd.AddCommand(initCmd, diveCmd, surfaceCmd, chatCmd, tuiCmd,
 		doctorCmd, sonarCmd, versionCmd, ollamaCmd, skillCmd, brainCmd, personalityCmd,
-		runCmd, notifyCmd)
+		runCmd, notifyCmd, remindCmd, remindersCmd, summarizeCmd, webCmd, researchCmd)
 }
 
 // ---------------------------------------------------------------------------
@@ -167,7 +169,8 @@ func initStack(quiet bool) (*krillStack, error) {
 	cfg.Agent.RecoveryTurns = cfg.Brain.RecoveryTurns
 
 	krillAgent := agent.New(cfg.Agent, providerMgr, krillBrain, skillReg, mcpReg)
-	chatHandler := chat.NewHandler(krillAgent)
+	reminderStore, _ := reminder.NewStore(filepath.Join(config.DataDir(), "reminders.jsonl"))
+	chatHandler := chat.NewHandler(krillAgent, reminderStore)
 
 	return &krillStack{
 		cfg:     cfg,

@@ -57,6 +57,9 @@ One-shot CLI usage:
 minikrill run "summarize this repo"
 minikrill run "remember that I prefer concise replies"
 minikrill run "what do you remember"
+minikrill remind "check the build in 10 minutes"
+minikrill summarize README.md
+minikrill research "best local model for 8GB RAM"
 ```
 
 ## Telegram
