@@ -128,6 +128,8 @@ func newSafeHTTPClient(timeout time.Duration) *http.Client {
 	return &http.Client{
 		Timeout:   timeout,
 		Transport: transport,
+		// CheckRedirect catches literal-IP redirects early. Hostname-based redirects
+		// to private IPs are still blocked by the DialContext hook above during DNS resolution.
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return fmt.Errorf("too many redirects")
@@ -215,7 +217,7 @@ func Search(ctx context.Context, query string, limit int) ([]SearchResult, error
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "MiniKrill/0.1")
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	resp, err := newSafeHTTPClient(15 * time.Second).Do(req)
 	if err != nil {
 		return nil, err
 	}
