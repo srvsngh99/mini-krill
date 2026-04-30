@@ -2,6 +2,7 @@ package content
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -12,10 +13,8 @@ import (
 	"time"
 )
 
-// youtubeIDPatterns matches the common YouTube URL formats and extracts the video ID.
-var youtubeIDPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?:youtube\.com/watch\?.*v=|youtu\.be/|youtube\.com/embed/|youtube\.com/v/|youtube\.com/shorts/)([a-zA-Z0-9_-]{11})`),
-}
+// youtubeIDPattern matches the common YouTube URL formats and extracts the video ID.
+var youtubeIDPattern = regexp.MustCompile(`(?:youtube\.com/watch\?.*v=|youtu\.be/|youtube\.com/embed/|youtube\.com/v/|youtube\.com/shorts/)([a-zA-Z0-9_-]{11})`)
 
 // IsYouTubeURL returns true if the URL points to a YouTube video.
 func IsYouTubeURL(rawURL string) bool {
@@ -24,10 +23,8 @@ func IsYouTubeURL(rawURL string) bool {
 
 // extractVideoID pulls the 11-character video ID from a YouTube URL.
 func extractVideoID(rawURL string) string {
-	for _, pat := range youtubeIDPatterns {
-		if m := pat.FindStringSubmatch(rawURL); len(m) >= 2 {
-			return m[1]
-		}
+	if m := youtubeIDPattern.FindStringSubmatch(rawURL); len(m) >= 2 {
+		return m[1]
 	}
 	return ""
 }
@@ -110,7 +107,10 @@ func extractCaptionURL(page string) string {
 	}
 	tracks := m[1]
 
-	// Split into individual track objects (heuristic: split on },{)
+	// Split into individual track objects. This is a heuristic: it assumes
+	// },{ never appears inside a JSON string value. In practice YouTube's
+	// caption track objects contain only simple key-value pairs, so this
+	// holds for real-world responses.
 	parts := strings.Split(tracks, "},{")
 
 	// First pass: look for English.
@@ -169,15 +169,15 @@ func formatVideoMeta(title, desc, videoID string) string {
 	return b.String()
 }
 
-// unescapeJSON handles the common JSON string escapes found in YouTube's inline JS.
+// unescapeJSON decodes a JSON-encoded string value. The input is expected to be
+// the content between quotes (not including the quotes themselves) from YouTube's
+// inline player response JSON.
 func unescapeJSON(s string) string {
-	s = strings.ReplaceAll(s, `\\`, `\`)
-	s = strings.ReplaceAll(s, `\"`, `"`)
-	s = strings.ReplaceAll(s, `\/`, `/`)
-	s = strings.ReplaceAll(s, `\n`, "\n")
-	s = strings.ReplaceAll(s, `\t`, "\t")
-	s = strings.ReplaceAll(s, `\u0026`, "&")
-	return s
+	var out string
+	if err := json.Unmarshal([]byte(`"`+s+`"`), &out); err != nil {
+		return s
+	}
+	return out
 }
 
 // timedText is the XML structure YouTube returns for captions.
