@@ -257,11 +257,14 @@ func (c *ChatView) Update(msg tea.Msg) tea.Cmd {
 	c.viewport, cmd = c.viewport.Update(msg)
 	cmds = append(cmds, cmd)
 
-	// Animate spinner while waiting for response
+	// Animate spinner while waiting for response — only refresh viewport on
+	// spinner ticks to avoid rebuilding chat content on every message.
 	if c.waiting {
-		c.spinner, cmd = c.spinner.Update(msg)
-		cmds = append(cmds, cmd)
-		c.refreshViewport()
+		if _, ok := msg.(spinner.TickMsg); ok {
+			c.spinner, cmd = c.spinner.Update(msg)
+			cmds = append(cmds, cmd)
+			c.refreshViewport()
+		}
 	}
 
 	return tea.Batch(cmds...)
