@@ -117,6 +117,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.quitting {
 			return a, tea.Quit
 		}
+		// handleKey already forwards unhandled keys to updateActiveView,
+		// so return here to avoid processing the same key twice.
+		return a, tea.Batch(cmds...)
 
 	case tickMsg:
 		a.onTick()
