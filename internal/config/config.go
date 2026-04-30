@@ -16,7 +16,7 @@ import (
 // Config is the root configuration for Mini Krill.
 type Config struct {
 	Agent    AgentConfig    `yaml:"agent"`
-	LLM      LLMConfig     `yaml:"llm"`
+	LLM      LLMConfig      `yaml:"llm"`
 	Brain    BrainConfig    `yaml:"brain"`
 	Telegram TelegramConfig `yaml:"telegram"`
 	Discord  DiscordConfig  `yaml:"discord"`
@@ -31,15 +31,15 @@ type Config struct {
 // AgentConfig controls the main krill agent behaviour.
 type AgentConfig struct {
 	Name          string `yaml:"name"`
-	Personality   string `yaml:"personality"`  // active personality profile (default: "krill")
+	Personality   string `yaml:"personality"` // active personality profile (default: "krill")
 	MaxSubKrills  int    `yaml:"max_sub_krills"`
-	PlanApproval  bool   `yaml:"plan_approval"` // require user approval before executing plans
+	PlanApproval  bool   `yaml:"plan_approval"`  // require user approval before executing plans
 	RecoveryTurns int    `yaml:"recovery_turns"` // turns to load on cold start (default 10, from brain config)
 }
 
 // LLMConfig selects and configures the LLM provider.
 type LLMConfig struct {
-	Provider    string  `yaml:"provider"` // ollama, openai, anthropic, google
+	Provider    string  `yaml:"provider"` // ollama, codex, claude, openai, anthropic, google
 	Model       string  `yaml:"model"`
 	Temperature float64 `yaml:"temperature"`
 	MaxTokens   int     `yaml:"max_tokens"`
@@ -49,20 +49,20 @@ type LLMConfig struct {
 
 // BrainConfig controls memory, soul, and heartbeat.
 type BrainConfig struct {
-	DataDir          string `yaml:"data_dir"`
-	SoulFile         string `yaml:"soul_file"`
-	Personality      string `yaml:"personality"`  // active personality profile name
-	MaxMemories      int    `yaml:"max_memories"`
-	HeartbeatSec     int    `yaml:"heartbeat_interval_sec"`
-	RecoveryTurns    int    `yaml:"recovery_turns"` // turns to load on cold start (default 10)
+	DataDir       string `yaml:"data_dir"`
+	SoulFile      string `yaml:"soul_file"`
+	Personality   string `yaml:"personality"` // active personality profile name
+	MaxMemories   int    `yaml:"max_memories"`
+	HeartbeatSec  int    `yaml:"heartbeat_interval_sec"`
+	RecoveryTurns int    `yaml:"recovery_turns"` // turns to load on cold start (default 10)
 }
 
 // TelegramConfig for the Telegram bot integration.
 type TelegramConfig struct {
-	Enabled      bool    `yaml:"enabled"`
-	Token        string  `yaml:"token"`
-	AllowedIDs   []int64 `yaml:"allowed_ids"`
-	BotMaxTurns  int     `yaml:"bot_max_turns"`  // max bot-to-bot exchanges before waiting for human (0=unlimited, default 3)
+	Enabled     bool    `yaml:"enabled"`
+	Token       string  `yaml:"token"`
+	AllowedIDs  []int64 `yaml:"allowed_ids"`
+	BotMaxTurns int     `yaml:"bot_max_turns"` // max bot-to-bot exchanges before waiting for human (0=unlimited, default 3)
 }
 
 // DiscordConfig for the Discord bot integration.
@@ -140,7 +140,7 @@ func DefaultConfig() *Config {
 		},
 		LLM: LLMConfig{
 			Provider:    "ollama",
-			Model:       "gemma4:e2b",
+			Model:       "gemma3:4b",
 			Temperature: 0.7,
 			MaxTokens:   2048,
 		},
@@ -154,7 +154,7 @@ func DefaultConfig() *Config {
 			Host:         "http://localhost:11434",
 			AutoInstall:  true,
 			AutoStart:    true,
-			DefaultModel: "gemma4:e2b",
+			DefaultModel: "gemma3:4b",
 		},
 		Plugins: PluginsConfig{
 			Dir: filepath.Join(dataDir, "skills"),
@@ -239,7 +239,7 @@ func Save(cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
-	return os.WriteFile(filepath.Join(dir, "config.yaml"), data, 0644)
+	return os.WriteFile(filepath.Join(dir, "config.yaml"), data, 0600)
 }
 
 // EnsureDataDir creates the data directory tree if it does not exist.

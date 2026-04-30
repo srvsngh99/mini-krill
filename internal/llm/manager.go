@@ -55,7 +55,7 @@ func (m *ProviderManager) Stream(ctx context.Context, messages []core.Message, o
 }
 
 func (m *ProviderManager) Name() string      { return m.Current().Name() }
-func (m *ProviderManager) ModelName() string  { return m.Current().ModelName() }
+func (m *ProviderManager) ModelName() string { return m.Current().ModelName() }
 
 func (m *ProviderManager) Available(ctx context.Context) bool {
 	return m.Current().Available(ctx)
@@ -103,7 +103,13 @@ func (m *ProviderManager) Switch(provider, model string) error {
 	m.mu.Lock()
 	old := m.current
 	m.current = newProvider
+	m.cfg.LLM.Provider = newProvider.Name()
+	m.cfg.LLM.Model = newProvider.ModelName()
 	m.mu.Unlock()
+
+	if err := config.Save(m.cfg); err != nil {
+		log.Warn("failed to persist LLM provider switch", "error", err)
+	}
 
 	log.Info("switched LLM provider",
 		"from", old.Name()+"/"+old.ModelName(),
@@ -115,13 +121,50 @@ func (m *ProviderManager) Switch(provider, model string) error {
 // ListProviders returns all known providers with their availability.
 func (m *ProviderManager) ListProviders() []ProviderInfo {
 	active := m.ActiveInfo()
+
+	// Run external checks concurrently to reduce latency
+	var (
+		ollamaModels []string
+		codexHasKey  bool
+		claudeHasKey bool
+		wg           sync.WaitGroup
+	)
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		ollamaModels = m.discoverOllamaModels()
+	}()
+	go func() {
+		defer wg.Done()
+		codexHasKey = commandOK(context.Background(), "codex", "login", "status")
+	}()
+	go func() {
+		defer wg.Done()
+		claudeHasKey = commandOK(context.Background(), "claude", "auth", "status")
+	}()
+	wg.Wait()
+
 	providers := []ProviderInfo{
 		{
 			Name:     "ollama",
-			Models:   m.discoverOllamaModels(),
+			Models:   ollamaModels,
 			IsActive: active.Provider == "ollama",
 			NeedsKey: false,
 			HasKey:   true,
+		},
+		{
+			Name:     "codex",
+			Models:   []string{"auto", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"},
+			IsActive: active.Provider == "codex",
+			NeedsKey: false,
+			HasKey:   codexHasKey,
+		},
+		{
+			Name:     "claude",
+			Models:   []string{"auto", "opus", "sonnet", "haiku"},
+			IsActive: active.Provider == "claude",
+			NeedsKey: false,
+			HasKey:   claudeHasKey,
 		},
 		{
 			Name:     "openai",
@@ -132,7 +175,7 @@ func (m *ProviderManager) ListProviders() []ProviderInfo {
 		},
 		{
 			Name:     "anthropic",
-			Models:   []string{"claude-sonnet-4-20250514", "claude-haiku-4-5-20251001"},
+			Models:   []string{"claude-sonnet-4-20250514", "claude-opus-4-1-20250805", "claude-3-5-haiku-20241022"},
 			IsActive: active.Provider == "anthropic",
 			NeedsKey: true,
 			HasKey:   m.cfg.LLM.APIKey != "",
@@ -181,13 +224,13 @@ func (m *ProviderManager) discoverOllamaModels() []string {
 		if m.cfg.Ollama.DefaultModel != "" {
 			return []string{m.cfg.Ollama.DefaultModel}
 		}
-		return []string{"llama3.2"}
+		return []string{"gemma3:4b", "llama3.2:3b"}
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return []string{"llama3.2"}
+		return []string{"gemma3:4b", "llama3.2:3b"}
 	}
 
 	var tagsResp struct {
@@ -196,7 +239,7 @@ func (m *ProviderManager) discoverOllamaModels() []string {
 		} `json:"models"`
 	}
 	if err := json.Unmarshal(body, &tagsResp); err != nil {
-		return []string{"llama3.2"}
+		return []string{"gemma3:4b", "llama3.2:3b"}
 	}
 
 	var models []string
@@ -206,7 +249,7 @@ func (m *ProviderManager) discoverOllamaModels() []string {
 		}
 	}
 	if len(models) == 0 {
-		return []string{"llama3.2"}
+		return []string{"gemma3:4b", "llama3.2:3b"}
 	}
 	return models
 }
@@ -218,12 +261,17 @@ func (m *ProviderManager) ResolveTarget(input string) (provider, model string, o
 
 	// Provider aliases
 	aliases := map[string]string{
-		"ollama":    "ollama",
-		"openai":    "openai",
-		"anthropic": "anthropic",
-		"claude":    "anthropic",
-		"google":    "google",
-		"gemini":    "google",
+		"ollama":       "ollama",
+		"local":        "ollama",
+		"codex":        "codex",
+		"chatgpt":      "codex",
+		"openai-codex": "codex",
+		"claude":       "claude",
+		"claude-code":  "claude",
+		"openai":       "openai",
+		"anthropic":    "anthropic",
+		"google":       "google",
+		"gemini":       "google",
 	}
 
 	// Check if it's a provider name/alias
@@ -233,9 +281,17 @@ func (m *ProviderManager) ResolveTarget(input string) (provider, model string, o
 
 	// Check if it's a model name - match to provider
 	modelMap := map[string]string{
-		"gpt-4o":      "openai",
-		"gpt-4o-mini": "openai",
-		"gpt-4":       "openai",
+		"gpt-4o":        "openai",
+		"gpt-4o-mini":   "openai",
+		"gpt-4":         "openai",
+		"gpt-5.2":       "codex",
+		"gpt-5.3-codex": "codex",
+		"gpt-5.4":       "codex",
+		"gpt-5.4-mini":  "codex",
+		"gpt-5.5":       "codex",
+		"sonnet":        "claude",
+		"opus":          "claude",
+		"haiku":         "claude",
 	}
 
 	// Add Ollama models dynamically
@@ -249,11 +305,11 @@ func (m *ProviderManager) ResolveTarget(input string) (provider, model string, o
 		return prov, input, true
 	}
 
-	// Partial match: "sonnet" -> anthropic, "haiku" -> anthropic
+	// Partial match: "sonnet" -> claude, "haiku" -> claude
 	partialMap := map[string]struct{ prov, model string }{
-		"sonnet": {"anthropic", "claude-sonnet-4-20250514"},
-		"haiku":  {"anthropic", "claude-haiku-4-5-20251001"},
-		"opus":   {"anthropic", "claude-opus-4-20250514"},
+		"sonnet": {"claude", "sonnet"},
+		"haiku":  {"claude", "haiku"},
+		"opus":   {"claude", "opus"},
 		"flash":  {"google", "gemini-2.0-flash"},
 	}
 	if pm, found := partialMap[input]; found {

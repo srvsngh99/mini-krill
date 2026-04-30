@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 	"github.com/srvsngh99/mini-krill/internal/agent"
 	"github.com/srvsngh99/mini-krill/internal/brain"
+	"github.com/srvsngh99/mini-krill/internal/brand"
 	"github.com/srvsngh99/mini-krill/internal/chat"
 	"github.com/srvsngh99/mini-krill/internal/config"
 	"github.com/srvsngh99/mini-krill/internal/core"
@@ -20,6 +22,7 @@ import (
 	klog "github.com/srvsngh99/mini-krill/internal/log"
 	"github.com/srvsngh99/mini-krill/internal/ollama"
 	"github.com/srvsngh99/mini-krill/internal/plugin"
+	"github.com/srvsngh99/mini-krill/internal/reminder"
 )
 
 // ANSI color codes - ocean palette
@@ -50,22 +53,32 @@ func main() {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "minikrill",
-	Short: "Mini Krill - Your crustaceous AI buddy",
+	Use:     "minikrill",
+	Short:   "Mini Krill - Your crustaceous AI buddy",
+	Version: core.Version,
 	Long: cBCyan + `
-   ~~~~
-  >=\'>    Mini Krill` + cReset + ` - Your crustaceous AI buddy
-` + cBCyan + `   ~~~~` + cReset + `
+   .-''''-.
+  /  >o  /)    Mini Krill
+ |  /___/ |    by Sourav Singh / Sourav AI Labs
+  \__\_\_/` + cReset + `
 
   A lightweight, open-source AI agent that runs locally via
-  Ollama or connects to cloud providers.
+  Ollama or through subscription-backed Codex/Claude CLIs.
 
   ` + cDim + `Get started:` + cReset + `
     ` + cCyan + `minikrill init` + cReset + `       Setup wizard
     ` + cCyan + `minikrill chat` + cReset + `       Interactive chat
     ` + cCyan + `minikrill dive` + cReset + `       Start background services
     ` + cCyan + `minikrill tui` + cReset + `        Terminal dashboard
-    ` + cCyan + `minikrill doctor` + cReset + `     Health diagnostics`,
+    ` + cCyan + `minikrill doctor` + cReset + `     Health diagnostics
+
+  ` + cDim + `Documentation:` + cReset + `
+    ` + cCyan + `README.md` + cReset + `            Overview and usage
+    ` + cCyan + `docs/INSTALL.md` + cReset + `     Install and setup
+    ` + cCyan + `docs/PROVIDERS.md` + cReset + `   Ollama, Codex, Claude
+    ` + cCyan + `docs/MEMORY.md` + cReset + `      Memory and preferences
+    ` + cCyan + `docs/INTERFACES.md` + cReset + `  CLI, Telegram, Discord
+    ` + cCyan + `docs/TESTING.md` + cReset + `     Feature test checklist`,
 }
 
 func init() {
@@ -79,7 +92,7 @@ func init() {
 
 	rootCmd.AddCommand(initCmd, diveCmd, surfaceCmd, chatCmd, tuiCmd,
 		doctorCmd, sonarCmd, versionCmd, ollamaCmd, skillCmd, brainCmd, personalityCmd,
-		runCmd, notifyCmd)
+		runCmd, notifyCmd, remindCmd, remindersCmd, summarizeCmd, webCmd, researchCmd)
 }
 
 // ---------------------------------------------------------------------------
@@ -156,7 +169,8 @@ func initStack(quiet bool) (*krillStack, error) {
 	cfg.Agent.RecoveryTurns = cfg.Brain.RecoveryTurns
 
 	krillAgent := agent.New(cfg.Agent, providerMgr, krillBrain, skillReg, mcpReg)
-	chatHandler := chat.NewHandler(krillAgent)
+	reminderStore, _ := reminder.NewStore(filepath.Join(config.DataDir(), "reminders.jsonl"))
+	chatHandler := chat.NewHandler(krillAgent, reminderStore)
 
 	return &krillStack{
 		cfg:     cfg,
@@ -191,9 +205,16 @@ func newOllamaManager() (*ollama.OllamaManager, *config.Config) {
 
 func printBanner() {
 	fmt.Println()
-	fmt.Println(cBCyan + "   ~~~~" + cReset)
-	fmt.Printf(cBCyan+"  >=\\'>"+cReset+"    "+cBold+"Mini Krill"+cReset+" v%s\n", core.Version)
-	fmt.Println(cBCyan + "   ~~~~" + cReset + "    " + cDim + "Your crustaceous AI buddy" + cReset)
+	for i, line := range brand.BannerLines(core.Version, true) {
+		switch {
+		case i < len(brand.MarkCompact):
+			fmt.Println(cBCyan + line + cReset)
+		case i == len(brand.MarkCompact):
+			fmt.Println(cBold + line + cReset)
+		default:
+			fmt.Println(cDim + line + cReset)
+		}
+	}
 	fmt.Println()
 }
 

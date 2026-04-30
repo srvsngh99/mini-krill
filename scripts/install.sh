@@ -155,6 +155,19 @@ main() {
 
   echo "  Run 'minikrill init' to get started."
   echo ""
+  echo "  Setup hints:"
+  echo "    Mandatory: choose one provider in 'minikrill init'."
+  echo "    Recommended local: Ollama + gemma3:4b."
+  echo "    Low-memory local: Ollama + llama3.2:3b."
+  echo "    Optional: Codex subscription via 'codex login'."
+  echo "    Optional: Claude subscription via 'claude auth login'."
+  echo "    Optional: Telegram/Discord bot tokens for chat integrations."
+  echo ""
+  echo "  Test after setup:"
+  echo "    minikrill doctor"
+  echo "    minikrill run /models"
+  echo "    minikrill chat"
+  echo ""
 }
 
 main "$@"

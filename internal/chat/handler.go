@@ -5,22 +5,26 @@ package chat
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"strings"
+	"time"
 
 	"github.com/srvsngh99/mini-krill/internal/core"
 	log "github.com/srvsngh99/mini-krill/internal/log"
+	"github.com/srvsngh99/mini-krill/internal/reminder"
 )
 
 // ChatHandlerImpl implements core.ChatHandler by forwarding messages to the
 // agent and wrapping the result with personality-aware fallbacks.
 type ChatHandlerImpl struct {
-	agent core.Agent
+	agent     core.Agent
+	reminders *reminder.Store
 }
 
 // NewHandler creates a ChatHandlerImpl wired to the given agent.
-func NewHandler(agent core.Agent) *ChatHandlerImpl {
-	return &ChatHandlerImpl{agent: agent}
+func NewHandler(agent core.Agent, reminderStore *reminder.Store) *ChatHandlerImpl {
+	return &ChatHandlerImpl{agent: agent, reminders: reminderStore}
 }
 
 // HandleMessage processes an incoming chat message and returns the agent's
@@ -38,6 +42,10 @@ func (h *ChatHandlerImpl) HandleMessage(ctx context.Context, msg core.ChatMessag
 		"chat_id", msg.ChatID,
 		"text", preview,
 	)
+
+	if response, handled := h.handleReminder(msg.Text); handled {
+		return response, nil
+	}
 
 	resp, err := h.agent.Chat(ctx, msg.Text)
 	if err != nil {
@@ -59,6 +67,29 @@ func (h *ChatHandlerImpl) HandleMessage(ctx context.Context, msg core.ChatMessag
 	}
 
 	return resp, nil
+}
+
+func (h *ChatHandlerImpl) handleReminder(input string) (string, bool) {
+	if h.reminders == nil {
+		return "", false
+	}
+	text := strings.TrimSpace(input)
+	lower := strings.ToLower(text)
+	for _, prefix := range []string{"remind me to ", "remind me ", "remind "} {
+		if strings.HasPrefix(lower, prefix) {
+			text = strings.TrimSpace(text[len(prefix):])
+			task, due, err := reminder.Parse(text, "", time.Now())
+			if err != nil {
+				return "I could not parse the reminder time. Try `remind me to check the build in 10 minutes` or `minikrill remind \"check the build\" --at 30m`.", true
+			}
+			r, err := h.reminders.Add(task, due)
+			if err != nil {
+				return fmt.Sprintf("Reminder failed: %s", err), true
+			}
+			return fmt.Sprintf("Reminder %s set for %s: %s", r.ID, r.DueAt.Local().Format("2006-01-02 15:04"), r.Text), true
+		}
+	}
+	return "", false
 }
 
 // randomFact picks a random entry from core.KrillFacts.
