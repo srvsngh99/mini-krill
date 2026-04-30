@@ -1,6 +1,10 @@
 package content
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -54,7 +58,7 @@ func TestExtractCaptionURL(t *testing.T) {
 	if got == "" {
 		t.Fatal("expected a caption URL, got empty string")
 	}
-	if !containsStr(got, "lang=en") {
+	if !strings.Contains(got, "lang=en") {
 		t.Errorf("expected English caption URL, got %q", got)
 	}
 }
@@ -67,7 +71,7 @@ func TestExtractCaptionURL_FallbackToFirst(t *testing.T) {
 	if got == "" {
 		t.Fatal("expected fallback caption URL, got empty string")
 	}
-	if !containsStr(got, "lang=ja") {
+	if !strings.Contains(got, "lang=ja") {
 		t.Errorf("expected Japanese caption URL, got %q", got)
 	}
 }
@@ -106,15 +110,67 @@ func TestUnescapeJSON(t *testing.T) {
 	}
 }
 
-func containsStr(s, sub string) bool {
-	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsSubstring(s, sub))
-}
+func TestReadYouTube_Integration(t *testing.T) {
+	// Fake caption XML served by the test server.
+	captionXML := `<?xml version="1.0" encoding="utf-8"?>
+<transcript>
+  <text start="0.0" dur="2.5">Hello and welcome</text>
+  <text start="2.5" dur="3.0">to this test video</text>
+  <text start="5.5" dur="2.0">about krill facts</text>
+</transcript>`
 
-func containsSubstring(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
+	// Build a fake YouTube page with embedded player response.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/watch", func(w http.ResponseWriter, r *http.Request) {
+		// The caption URL points back to our test server.
+		captionBase := "http://" + r.Host + "/api/timedtext?v=abc123\\u0026lang=en"
+		page := `<html><head><title>Krill Facts 101 - YouTube</title></head><body>
+		<script>var ytInitialPlayerResponse = {"captions":{"playerCaptionsTracklistRenderer":{
+		"captionTracks":[{"baseUrl":"` + captionBase + `","name":{"simpleText":"English"},"languageCode":"en"}]
+		}}};</script></body></html>`
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(page))
+	})
+	mux.HandleFunc("/api/timedtext", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/xml")
+		w.Write([]byte(captionXML))
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	// ReadYouTube constructs its own URL from the video ID, so we can't
+	// directly point it at our test server. Instead, test the internal
+	// functions that do the heavy lifting.
+
+	// 1. Test caption URL extraction from the fake page.
+	captionBaseExpected := srv.URL + "/api/timedtext?v=abc123&lang=en"
+	fakePage := `<html><head><title>Krill Facts 101 - YouTube</title></head><body>
+	<script>var ytInitialPlayerResponse = {"captions":{"playerCaptionsTracklistRenderer":{
+	"captionTracks":[{"baseUrl":"` + srv.URL + `/api/timedtext?v=abc123\u0026lang=en","name":{"simpleText":"English"},"languageCode":"en"}]
+	}}};</script></body></html>`
+
+	captionURL := extractCaptionURL(fakePage)
+	if captionURL != captionBaseExpected {
+		t.Fatalf("extractCaptionURL = %q, want %q", captionURL, captionBaseExpected)
 	}
-	return false
+
+	// 2. Test title extraction.
+	title := extractVideoTitle(fakePage)
+	if title != "Krill Facts 101" {
+		t.Errorf("extractVideoTitle = %q, want %q", title, "Krill Facts 101")
+	}
+
+	// 3. Test caption XML fetching and parsing.
+	client := &http.Client{}
+	transcript, err := fetchCaptionXML(context.Background(), client, captionURL)
+	if err != nil {
+		t.Fatalf("fetchCaptionXML error: %v", err)
+	}
+	if !strings.Contains(transcript, "Hello and welcome") {
+		t.Errorf("transcript missing expected text, got: %q", transcript)
+	}
+	if !strings.Contains(transcript, "krill facts") {
+		t.Errorf("transcript missing 'krill facts', got: %q", transcript)
+	}
 }
