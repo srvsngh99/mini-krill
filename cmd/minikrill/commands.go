@@ -11,7 +11,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -24,6 +23,7 @@ import (
 	klog "github.com/srvsngh99/mini-krill/internal/log"
 	"github.com/srvsngh99/mini-krill/internal/ollama"
 	"github.com/srvsngh99/mini-krill/internal/plugin"
+	"github.com/srvsngh99/mini-krill/internal/reminder"
 	"github.com/srvsngh99/mini-krill/internal/tui"
 )
 
@@ -242,6 +242,13 @@ var diveCmd = &cobra.Command{
 				fmt.Println("  " + cGreen + "Discord:  swimming" + cReset)
 			}
 		}
+		if reminderStore, err := newReminderStore(); err == nil {
+			go reminder.StartScheduler(ctx, reminderStore, time.Minute, func(r reminder.Reminder) {
+				klog.Info("reminder due", "id", r.ID, "text", r.Text)
+				fmt.Printf("\n%sReminder due:%s %s (%s)\n", cBYellow, cReset, r.Text, r.ID)
+			})
+			fmt.Println("  " + cGreen + "Reminders: watching" + cReset)
+		}
 
 		pidFile := filepath.Join(config.DataDir(), "krill.pid")
 		_ = os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0644)
@@ -254,7 +261,7 @@ var diveCmd = &cobra.Command{
 		fmt.Println(cDimCyan + "  " + randomFact() + cReset)
 
 		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		signal.Notify(sigCh, terminationSignals()...)
 		<-sigCh
 
 		fmt.Println()
@@ -273,7 +280,7 @@ func diveDaemon() error {
 	if data, err := os.ReadFile(pidFile); err == nil {
 		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
 			if proc, err := os.FindProcess(pid); err == nil {
-				if proc.Signal(syscall.Signal(0)) == nil {
+				if processRunning(proc) {
 					return fmt.Errorf("Mini Krill is already diving (PID %d). Run 'minikrill surface' first", pid)
 				}
 			}
@@ -302,7 +309,7 @@ func diveDaemon() error {
 	child := exec.Command(exe, childArgs...)
 	child.Stdout = out
 	child.Stderr = out
-	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	detachCommand(child)
 
 	if err := child.Start(); err != nil {
 		out.Close()
@@ -345,7 +352,7 @@ var surfaceCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("process %d not found", pid)
 		}
-		if err := proc.Signal(syscall.SIGTERM); err != nil {
+		if err := terminateProcess(proc); err != nil {
 			_ = proc.Kill()
 		}
 		_ = os.Remove(pidFile)
@@ -426,7 +433,10 @@ var chatCmd = &cobra.Command{
 			done := make(chan struct{})
 			go spinner(done)
 
-			resp, err := stack.agent.Chat(ctx, input)
+			resp, err := stack.handler.HandleMessage(ctx, core.ChatMessage{
+				Platform: "cli",
+				Text:     input,
+			})
 			close(done)
 
 			fmt.Println()
@@ -462,6 +472,8 @@ func printChatHelp() {
 	fmt.Println(cDim + "    Ask anything" + cReset + " - I'll chat naturally")
 	fmt.Println(cDim + "    Give me a task" + cReset + " - I'll show a dive plan for your approval")
 	fmt.Println(cDim + "    Say" + cReset + " 'remember that ...'" + cDim + " to save a preference locally" + cReset)
+	fmt.Println(cDim + "    Use" + cReset + " minikrill remind" + cDim + " for durable local reminders" + cReset)
+	fmt.Println(cDim + "    Use" + cReset + " minikrill summarize/research" + cDim + " for files, web pages, and research" + cReset)
 	fmt.Println(cDim + "    Say" + cReset + " 'yes'" + cDim + " to approve," + cReset + " 'no'" + cDim + " to reject a plan" + cReset)
 	fmt.Println(cDim + "    Read docs/INTERFACES.md for CLI, Telegram, and Discord setup" + cReset)
 	fmt.Println(cDim + "    Read docs/TESTING.md for the full feature checklist" + cReset)

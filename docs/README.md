@@ -18,6 +18,9 @@ minikrill init
 minikrill doctor
 minikrill run /models
 minikrill chat
+minikrill remind "stand up in 30 minutes"
+minikrill summarize README.md
+minikrill research "best local LLM for 8GB RAM"
 ```
 
 Inside chat:

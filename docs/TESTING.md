@@ -44,12 +44,41 @@ Expected:
 - The preference appears in memory.
 - A later chat can use that preference.
 
+## Reminders
+
+```bash
+minikrill remind "check the build in 10 minutes"
+minikrill reminders list
+minikrill reminders due
+```
+
+Expected:
+
+- The reminder is stored under `~/.mini-krill/reminders.jsonl`.
+- `minikrill dive --foreground` watches due reminders and logs/fires them once.
+
+## File, Web, And Research
+
+```bash
+minikrill summarize README.md
+minikrill web read https://example.com
+minikrill web summarize https://example.com
+minikrill research "Mini Krill local first agent"
+```
+
+Expected:
+
+- Local files and web pages are wrapped as untrusted content before summarization.
+- Web research includes source URLs where available.
+- Retrieved content cannot directly trigger tools or reminders.
+
 ## Build Checks
 
 ```bash
 go test ./...
 go vet ./...
 CGO_ENABLED=0 go build -o /tmp/minikrill-static-review ./cmd/minikrill
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/minikrill-windows-review.exe ./cmd/minikrill
 ```
 
 ## Website

@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/srvsngh99/mini-krill/internal/core"
 )
 
 var runTimeout time.Duration
@@ -27,7 +29,10 @@ var runCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
 		defer cancel()
 
-		resp, err := stack.agent.Chat(ctx, prompt)
+		resp, err := stack.handler.HandleMessage(ctx, core.ChatMessage{
+			Platform: "cli",
+			Text:     prompt,
+		})
 		if err != nil {
 			return fmt.Errorf("chat: %w", err)
 		}

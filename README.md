@@ -192,6 +192,7 @@ Dedicated docs live in [`docs/`](docs/):
 - [Provider switching](docs/PROVIDERS.md)
 - [Memory and preferences](docs/MEMORY.md)
 - [Interfaces: CLI, Telegram, Discord](docs/INTERFACES.md)
+- [Automation workflows](docs/AUTOMATION.md)
 - [Testing checklist](docs/TESTING.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 
@@ -232,6 +233,22 @@ One-shot mode:
 minikrill run "remember that I prefer short answers"
 minikrill run "what do you remember"
 ```
+
+### Automation Quickstart
+
+```bash
+minikrill remind "check the build in 10 minutes"
+minikrill reminders list
+minikrill dive --foreground
+```
+
+```bash
+minikrill summarize README.md
+minikrill web summarize https://example.com
+minikrill research "best local model for 8GB RAM"
+```
+
+Files, web pages, and search results are treated as untrusted content. Mini Krill summarizes them as data and does not let retrieved text trigger tools or scheduled tasks.
 
 ### `minikrill init`
 
@@ -559,7 +576,7 @@ mcp:
         GITHUB_TOKEN: "your-token"
 ```
 
-MCP server registration is available, but full tool invocation from plans is still being hardened for the production release.
+MCP server registration is available. Full tool invocation from plans is tracked as a future capability.
 
 ---
 

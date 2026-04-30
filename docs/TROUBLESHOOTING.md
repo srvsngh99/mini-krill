@@ -52,3 +52,18 @@ For isolated testing, use a temporary data directory:
 KRILL_DATA_DIR=/tmp/minikrill-test minikrill run "remember that I prefer short answers"
 KRILL_DATA_DIR=/tmp/minikrill-test minikrill run "what do you remember"
 ```
+
+## Reminder did not fire
+
+Run the scheduler:
+
+```bash
+minikrill dive --foreground
+```
+
+Check local reminder state:
+
+```bash
+minikrill reminders list
+minikrill reminders due
+```
