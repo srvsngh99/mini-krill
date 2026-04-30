@@ -132,16 +132,13 @@ var initCmd = &cobra.Command{
 
 			if !localSet[selectedModel] {
 				fmt.Printf(cDim+"  Pulling %s in background..."+cReset+"\n", selectedModel)
+				fmt.Println(cDim + "  Run " + cReset + "minikrill doctor" + cDim + " to check pull status." + cReset)
+				ctx := cmd.Context()
 				go func(model string) {
-					if err := mgr.EnsureRunning(context.Background()); err != nil {
-						fmt.Printf("\n"+cRed+"  Background pull: could not start Ollama: %v"+cReset+"\n", err)
+					if err := mgr.EnsureRunning(ctx); err != nil {
 						return
 					}
-					if err := mgr.Pull(context.Background(), model); err != nil {
-						fmt.Printf("\n"+cRed+"  Background pull of %s failed: %v"+cReset+"\n", model, err)
-					} else {
-						fmt.Printf("\n"+cGreen+"  Model %s is ready!"+cReset+"\n", model)
-					}
+					_ = mgr.Pull(ctx, model)
 				}(selectedModel)
 			}
 		case 1: // Codex
