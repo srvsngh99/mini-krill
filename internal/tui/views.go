@@ -354,17 +354,20 @@ func (c *ChatView) sendChat(text string) tea.Cmd {
 // logsCopiedMsg signals that logs were copied to clipboard.
 type logsCopiedMsg struct{ err error }
 
+// clearCopiedMsg clears the "copied" badge after a delay.
+type clearCopiedMsg struct{}
+
 // LogsView displays a scrollable view of log file contents.
 type LogsView struct {
-	viewport  viewport.Model
-	content   string
-	logFile   string
-	rawLines  []string // plain text lines (unstyled) for clipboard
-	width     int
-	height    int
-	ready     bool
-	copied    bool
-	copiedAt  time.Time
+	viewport viewport.Model
+	content  string
+	logFile  string
+	rawLines []string // plain text lines (unstyled) for clipboard
+	width    int
+	height   int
+	ready    bool
+	copied   bool
+	copyErr  string
 }
 
 // NewLogsView creates a log viewer for the given file path.
@@ -451,16 +454,20 @@ func (l *LogsView) Update(msg tea.Msg) tea.Cmd {
 			}
 		}
 	case logsCopiedMsg:
-		if msg.err == nil {
+		if msg.err != nil {
+			log.Warn("clipboard copy failed", "error", msg.err)
+			l.copyErr = "copy failed"
+		} else {
 			l.copied = true
-			l.copiedAt = time.Now()
+			l.copyErr = ""
 		}
-		return nil
-	}
-
-	// Clear "copied" badge after 3 seconds
-	if l.copied && time.Since(l.copiedAt) > 3*time.Second {
+		return tea.Tick(3*time.Second, func(time.Time) tea.Msg {
+			return clearCopiedMsg{}
+		})
+	case clearCopiedMsg:
 		l.copied = false
+		l.copyErr = ""
+		return nil
 	}
 
 	var cmd tea.Cmd
@@ -477,6 +484,8 @@ func (l *LogsView) View() string {
 	hint := "scroll: j/k  copy: c"
 	if l.copied {
 		hint = "scroll: j/k  copy: c  " + AccentStyle.Render("✓ copied!")
+	} else if l.copyErr != "" {
+		hint = "scroll: j/k  copy: c  " + ErrorStyle.Render("✗ " + l.copyErr)
 	}
 	header := DimStyle.Render(fmt.Sprintf("  Log: %s  (%s)", l.logFile, hint))
 	return lipgloss.JoinVertical(lipgloss.Left, header, l.viewport.View())
@@ -539,6 +548,7 @@ func (h *HelpView) View() string {
 		{"Right / Left", "Next / previous tab"},
 		{"Esc", "Unfocus chat input"},
 		{"j / k", "Scroll down / up (logs)"},
+		{"c", "Copy logs to clipboard (logs)"},
 		{"Enter", "Send message (chat)"},
 		{"q / Ctrl+C", "Quit (not in chat input)"},
 		{"?", "Show this help"},
