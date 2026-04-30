@@ -212,15 +212,20 @@ var initCmd = &cobra.Command{
 		fmt.Println()
 		fmt.Printf(cDimCyan+"  Fun fact: %s\n"+cReset, randomFact())
 		fmt.Println()
-		fmt.Println(cBold + "  Next steps:" + cReset)
-		fmt.Println("    " + cCyan + "go run ./cmd/minikrill chat" + cReset + "     Start chatting")
-		fmt.Println("    " + cCyan + "go run ./cmd/minikrill tui" + cReset + "      Terminal dashboard")
-		fmt.Println("    " + cCyan + "go run ./cmd/minikrill doctor" + cReset + "   Health check")
-		if cfg.Telegram.Enabled || cfg.Discord.Enabled {
-			fmt.Println("    " + cCyan + "go run ./cmd/minikrill dive" + cReset + "     Start Telegram/Discord bots")
-		}
+		fmt.Println(cDim + "  Install with " + cReset + "go install ./cmd/minikrill" + cDim + " to use " + cReset + "minikrill" + cDim + " directly," + cReset)
+		fmt.Println(cDim + "  or run immediately with " + cReset + "go run ./cmd/minikrill <command>" + cDim + "." + cReset)
 		fmt.Println()
-		fmt.Println(cDim + "  Tip: run " + cReset + "go install ./cmd/minikrill" + cDim + " to use " + cReset + "minikrill" + cDim + " directly from anywhere." + cReset)
+		fmt.Println(cBold + "  Next steps:" + cReset)
+		fmt.Println("    " + cCyan + "minikrill chat" + cReset + "     Start chatting")
+		fmt.Println("    " + cCyan + "minikrill tui" + cReset + "      Terminal dashboard")
+		fmt.Println("    " + cCyan + "minikrill doctor" + cReset + "   Health check")
+		if cfg.Telegram.Enabled && cfg.Discord.Enabled {
+			fmt.Println("    " + cCyan + "minikrill dive" + cReset + "     Start Telegram and Discord bots")
+		} else if cfg.Telegram.Enabled {
+			fmt.Println("    " + cCyan + "minikrill dive" + cReset + "     Start Telegram bot")
+		} else if cfg.Discord.Enabled {
+			fmt.Println("    " + cCyan + "minikrill dive" + cReset + "     Start Discord bot")
+		}
 		fmt.Println()
 		return nil
 	},
@@ -456,7 +461,7 @@ var chatCmd = &cobra.Command{
 		defer func() { _ = stack.hb.Stop() }()
 
 		app := tui.NewApp(stack.agent, stack.brain, stack.hb, core.Version, stack.cfg.Log.File)
-		app.SetInitialTab(1) // Open directly on Chat tab
+		app.SetInitialTab(tui.TabChat)
 		return app.Run()
 	},
 }

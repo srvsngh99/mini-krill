@@ -26,6 +26,17 @@ type chatResponseMsg struct {
 }
 
 // ---------------------------------------------------------------------------
+// Tab indices - use these instead of magic numbers
+// ---------------------------------------------------------------------------
+
+const (
+	TabDashboard = 0
+	TabChat      = 1
+	TabLogs      = 2
+	TabHelp      = 3
+)
+
+// ---------------------------------------------------------------------------
 // App - main Bubble Tea model
 // ---------------------------------------------------------------------------
 
@@ -70,7 +81,7 @@ func NewApp(agent core.Agent, brain core.Brain, heartbeat core.Heartbeat, versio
 // Init returns the initial command batch - starts the tick loop.
 func (a *App) Init() tea.Cmd {
 	cmds := []tea.Cmd{tickCmd()}
-	if a.activeTab == 1 {
+	if a.activeTab == TabChat {
 		cmds = append(cmds, a.chat.input.Focus())
 	}
 	return tea.Batch(cmds...)
