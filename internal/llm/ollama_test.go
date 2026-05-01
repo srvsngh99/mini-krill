@@ -91,13 +91,15 @@ func TestAvailableServerError(t *testing.T) {
 
 func TestAvailableNormalizesModelName(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(ollamaTagsResponse{
+		if err := json.NewEncoder(w).Encode(ollamaTagsResponse{
 			Models: []struct {
 				Name string `json:"name"`
 			}{
 				{Name: "gemma3:latest"},
 			},
-		})
+		}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
 	}))
 	defer srv.Close()
 
