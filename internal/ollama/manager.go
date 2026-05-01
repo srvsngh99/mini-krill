@@ -232,9 +232,18 @@ func (m *OllamaManager) Stop() error {
 
 // Pull downloads a model from the Ollama registry. It reads the streaming
 // progress response and logs status updates.
-func (m *OllamaManager) Pull(ctx context.Context, model string) error {
-	log.Info("pulling ollama model", "model", model)
+// pullProgress holds a single progress event from the Ollama pull stream.
+type pullProgress struct {
+	Status    string `json:"status"`
+	Digest    string `json:"digest"`
+	Total     int64  `json:"total"`
+	Completed int64  `json:"completed"`
+	Error     string `json:"error"`
+}
 
+// pullStream sends a pull request and feeds each progress event to onProgress.
+// Shared by Pull (log-only) and PullWithProgress (interactive).
+func (m *OllamaManager) pullStream(ctx context.Context, model string, onProgress func(pullProgress)) error {
 	reqBody, err := json.Marshal(map[string]string{"name": model})
 	if err != nil {
 		return fmt.Errorf("marshal pull request: %w", err)
@@ -247,7 +256,6 @@ func (m *OllamaManager) Pull(ctx context.Context, model string) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	// Use a client with no timeout since model downloads can take a long time
 	pullClient := &http.Client{}
 	resp, err := pullClient.Do(req)
 	if err != nil {
@@ -260,12 +268,9 @@ func (m *OllamaManager) Pull(ctx context.Context, model string) error {
 		return fmt.Errorf("pull returned status %d: %s", resp.StatusCode, string(errBody))
 	}
 
-	// Read streaming NDJSON progress
 	scanner := bufio.NewScanner(resp.Body)
-	// Allow large lines for download progress messages
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
-	var lastStatus string
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
@@ -278,34 +283,71 @@ func (m *OllamaManager) Pull(ctx context.Context, model string) error {
 			continue
 		}
 
-		var progress struct {
-			Status    string `json:"status"`
-			Digest    string `json:"digest"`
-			Total     int64  `json:"total"`
-			Completed int64  `json:"completed"`
-			Error     string `json:"error"`
-		}
-		if err := json.Unmarshal([]byte(line), &progress); err != nil {
-			// Skip malformed lines gracefully
+		var p pullProgress
+		if err := json.Unmarshal([]byte(line), &p); err != nil {
 			continue
 		}
 
-		if progress.Error != "" {
-			return fmt.Errorf("ollama pull error: %s", progress.Error)
+		if p.Error != "" {
+			return fmt.Errorf("ollama pull error: %s", p.Error)
 		}
 
-		// Log status changes (not every progress tick)
-		if progress.Status != lastStatus {
-			log.Info("pull progress", "model", model, "status", progress.Status)
-			lastStatus = progress.Status
-		}
+		onProgress(p)
 	}
 
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("reading pull response: %w", err)
 	}
 
+	return nil
+}
+
+func (m *OllamaManager) Pull(ctx context.Context, model string) error {
+	log.Info("pulling ollama model", "model", model)
+
+	var lastStatus string
+	err := m.pullStream(ctx, model, func(p pullProgress) {
+		if p.Status != lastStatus {
+			log.Info("pull progress", "model", model, "status", p.Status)
+			lastStatus = p.Status
+		}
+	})
+	if err != nil {
+		return err
+	}
+
 	log.Info("model pulled successfully", "model", model)
+	return nil
+}
+
+// PullWithProgress pulls a model and writes human-readable progress to w.
+// Designed for interactive use (e.g. init wizard).
+func (m *OllamaManager) PullWithProgress(ctx context.Context, model string, w io.Writer) error {
+	log.Info("pulling ollama model with progress", "model", model)
+
+	err := m.pullStream(ctx, model, func(p pullProgress) {
+		if p.Total > 0 {
+			pct := float64(p.Completed) / float64(p.Total) * 100
+			completedMB := float64(p.Completed) / (1024 * 1024)
+			totalMB := float64(p.Total) / (1024 * 1024)
+			if totalMB >= 1024 {
+				fmt.Fprintf(w, "\r\033[2K  Pulling %s... %.0f%% (%.1f GB / %.1f GB)",
+					model, pct, completedMB/1024, totalMB/1024)
+			} else {
+				fmt.Fprintf(w, "\r\033[2K  Pulling %s... %.0f%% (%.0f MB / %.0f MB)",
+					model, pct, completedMB, totalMB)
+			}
+		} else if p.Status != "" {
+			fmt.Fprintf(w, "\r\033[2K  Pulling %s... %s", model, p.Status)
+		}
+	})
+	if err != nil {
+		fmt.Fprintf(w, "\n")
+		return err
+	}
+
+	fmt.Fprintf(w, "\r\033[2K  Pulled %s successfully.\n", model)
+	log.Info("model pulled successfully (with progress)", "model", model)
 	return nil
 }
 
@@ -393,16 +435,9 @@ func (m *OllamaManager) HasModel(ctx context.Context, model string) bool {
 	if err != nil {
 		return false
 	}
-	normalize := func(s string) string {
-		s = strings.ToLower(s)
-		if !strings.Contains(s, ":") {
-			s += ":latest"
-		}
-		return s
-	}
-	target := normalize(model)
+	target := NormalizeModelName(model)
 	for _, mi := range models {
-		if normalize(mi.Name) == target {
+		if NormalizeModelName(mi.Name) == target {
 			return true
 		}
 	}
@@ -499,4 +534,14 @@ func (m *OllamaManager) healthMonitorLoop(ctx context.Context) {
 			backoff = backoffMax
 		}
 	}
+}
+
+// NormalizeModelName lowercases a model name and appends ":latest" if no tag
+// is specified, matching Ollama's own normalization rules.
+func NormalizeModelName(name string) string {
+	name = strings.ToLower(name)
+	if !strings.Contains(name, ":") {
+		name += ":latest"
+	}
+	return name
 }
