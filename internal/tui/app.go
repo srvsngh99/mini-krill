@@ -225,14 +225,18 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	case "right":
-		a.activeTab = (a.activeTab + 1) % len(a.tabs)
-		a.onTabSwitch()
-		return nil
+		if !inChat {
+			a.activeTab = (a.activeTab + 1) % len(a.tabs)
+			a.onTabSwitch()
+			return nil
+		}
 
 	case "left":
-		a.activeTab = (a.activeTab - 1 + len(a.tabs)) % len(a.tabs)
-		a.onTabSwitch()
-		return nil
+		if !inChat {
+			a.activeTab = (a.activeTab - 1 + len(a.tabs)) % len(a.tabs)
+			a.onTabSwitch()
+			return nil
+		}
 
 	case "1":
 		if !inChat {
@@ -272,14 +276,11 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 // onTabSwitch handles focus changes when switching tabs.
+// Chat input is NOT auto-focused on switch so that left/right arrows
+// remain available for tab navigation. Press Enter to focus the input.
 func (a *App) onTabSwitch() {
-	if a.activeTab == TabChat {
-		a.chat.Focus()
-	} else {
-		a.chat.Blur()
-	}
+	a.chat.Blur()
 
-	// Recalculate view sizes since chat tab uses a compact header.
 	a.resizeViews()
 
 	// Refresh logs when switching to logs tab

@@ -136,14 +136,20 @@ var initCmd = &cobra.Command{
 
 			if !localSet[selectedModel] {
 				fmt.Println()
-				pullCtx := context.Background()
+				pullCtx, pullStop := signal.NotifyContext(context.Background(), os.Interrupt)
+				defer pullStop()
 				if err := mgr.EnsureRunning(pullCtx); err != nil {
 					fmt.Printf(cYellow+"  Could not start Ollama: %v\n"+cReset, err)
 					fmt.Println(cDim + "  You can pull the model later with: ollama pull " + selectedModel + cReset)
 				} else if err := mgr.PullWithProgress(pullCtx, selectedModel, os.Stdout); err != nil {
-					fmt.Printf(cYellow+"  Pull failed: %v\n"+cReset, err)
+					if pullCtx.Err() != nil {
+						fmt.Println(cDim + "\n  Download interrupted." + cReset)
+					} else {
+						fmt.Printf(cYellow+"  Pull failed: %v\n"+cReset, err)
+					}
 					fmt.Println(cDim + "  You can retry with: ollama pull " + selectedModel + cReset)
 				}
+				pullStop()
 			}
 		case 1: // Codex
 			cfg.LLM.Provider = "codex"

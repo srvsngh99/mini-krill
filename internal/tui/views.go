@@ -200,6 +200,11 @@ func (c *ChatView) Update(msg tea.Msg) tea.Cmd {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "enter":
+			// If input is blurred, focus it instead of sending.
+			if !c.input.Focused() {
+				c.input.Focus()
+				return nil
+			}
 			if c.waiting {
 				return nil
 			}

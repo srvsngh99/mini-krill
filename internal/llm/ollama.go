@@ -13,6 +13,7 @@ import (
 	"github.com/srvsngh99/mini-krill/internal/config"
 	"github.com/srvsngh99/mini-krill/internal/core"
 	log "github.com/srvsngh99/mini-krill/internal/log"
+	"github.com/srvsngh99/mini-krill/internal/ollama"
 )
 
 // OllamaProvider talks to a local Ollama instance over its REST API.
@@ -265,24 +266,15 @@ func (o *OllamaProvider) Available(ctx context.Context) bool {
 		return false
 	}
 
-	target := normalizeModelName(o.model)
+	target := ollama.NormalizeModelName(o.model)
 	for _, m := range tags.Models {
-		if normalizeModelName(m.Name) == target {
+		if ollama.NormalizeModelName(m.Name) == target {
 			return true
 		}
 	}
 
 	log.Debug("ollama model not found locally", "model", o.model, "available", len(tags.Models))
 	return false
-}
-
-// normalizeModelName lowercases and appends ":latest" if no tag is specified.
-func normalizeModelName(name string) string {
-	name = strings.ToLower(name)
-	if !strings.Contains(name, ":") {
-		name += ":latest"
-	}
-	return name
 }
 
 func isConnectionRefused(err error) bool {

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/srvsngh99/mini-krill/internal/config"
+	"github.com/srvsngh99/mini-krill/internal/ollama"
 )
 
 func newTestOllamaProvider(serverURL, model string) *OllamaProvider {
@@ -113,9 +114,9 @@ func TestNormalizeModelName(t *testing.T) {
 		{"model:latest", "model:latest"},
 	}
 	for _, tt := range tests {
-		got := normalizeModelName(tt.input)
+		got := ollama.NormalizeModelName(tt.input)
 		if got != tt.want {
-			t.Errorf("normalizeModelName(%q) = %q, want %q", tt.input, got, tt.want)
+			t.Errorf("NormalizeModelName(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
 }
