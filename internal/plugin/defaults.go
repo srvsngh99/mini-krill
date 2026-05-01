@@ -25,7 +25,10 @@ func SeedDefaultSkills(dir string) {
 		return
 	}
 
-	_ = os.MkdirAll(dir, 0755)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		log.Warn("could not create skills directory", "path", dir, "error", err)
+		return
+	}
 
 	seeded := 0
 	for _, entry := range entries {

@@ -25,16 +25,18 @@ import (
 // SkillRegistryImpl is the concrete implementation of core.SkillRegistry.
 // Thread-safe via sync.RWMutex.
 type SkillRegistryImpl struct {
-	mu       sync.RWMutex
-	skills   map[string]core.Skill
-	disabled map[string]bool // tracks runtime-disabled skills
+	mu         sync.RWMutex
+	skills     map[string]core.Skill
+	disabled   map[string]bool   // tracks runtime-disabled skills
+	categories map[string]string // tracks skill category (source)
 }
 
 // NewRegistry creates a new, empty skill registry.
 func NewRegistry() *SkillRegistryImpl {
 	return &SkillRegistryImpl{
-		skills:   make(map[string]core.Skill),
-		disabled: make(map[string]bool),
+		skills:     make(map[string]core.Skill),
+		disabled:   make(map[string]bool),
+		categories: make(map[string]string),
 	}
 }
 
@@ -92,10 +94,15 @@ func (r *SkillRegistryImpl) List() []core.SkillInfo {
 
 	infos := make([]core.SkillInfo, 0, len(r.skills))
 	for _, s := range r.skills {
+		cat := r.categories[s.Name()]
+		if cat == "" {
+			cat = "Custom / YAML"
+		}
 		infos = append(infos, core.SkillInfo{
 			Name:        s.Name(),
 			Description: s.Description(),
 			Enabled:     !r.disabled[s.Name()],
+			Category:    cat,
 		})
 	}
 
