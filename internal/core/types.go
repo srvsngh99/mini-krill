@@ -172,6 +172,8 @@ type SkillRegistry interface {
 	Unregister(name string) error
 	Get(name string) (Skill, bool)
 	List() []SkillInfo
+	SetEnabled(name string, enabled bool) error
+	IsEnabled(name string) bool
 }
 
 // MCPTool describes a tool exposed by an MCP server.
@@ -186,6 +188,7 @@ type MCPServerInfo struct {
 	Name      string `json:"name"`
 	Connected bool   `json:"connected"`
 	ToolCount int    `json:"tool_count"`
+	Enabled   bool   `json:"enabled"`
 }
 
 // MCPServer is the interface for an MCP server connection.
@@ -204,6 +207,8 @@ type MCPRegistry interface {
 	List() []MCPServerInfo
 	AllTools() []MCPTool
 	Close() error
+	SetEnabled(name string, enabled bool) error
+	IsEnabled(name string) bool
 }
 
 // ---------------------------------------------------------------------------

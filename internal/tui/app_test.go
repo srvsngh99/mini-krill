@@ -7,7 +7,7 @@ import (
 )
 
 func TestSetInitialTab(t *testing.T) {
-	app := NewApp(nil, nil, nil, "test", "")
+	app := NewApp(nil, nil, nil, nil, nil, "test", "")
 
 	// Default tab is dashboard
 	if app.activeTab != TabDashboard {
@@ -33,7 +33,7 @@ func TestSetInitialTab(t *testing.T) {
 	}
 
 	// Set to each valid tab
-	for _, tab := range []int{TabDashboard, TabChat, TabLogs, TabHelp} {
+	for _, tab := range []int{TabDashboard, TabChat, TabSkills, TabLogs, TabHelp} {
 		app.SetInitialTab(tab)
 		if app.activeTab != tab {
 			t.Errorf("expected tab %d, got %d", tab, app.activeTab)
@@ -43,7 +43,7 @@ func TestSetInitialTab(t *testing.T) {
 
 // newSizedApp creates an App with dimensions set so handleKey works correctly.
 func newSizedApp() *App {
-	app := NewApp(nil, nil, nil, "test", "")
+	app := NewApp(nil, nil, nil, nil, nil, "test", "")
 	app.width = 100
 	app.height = 40
 	return app
@@ -60,8 +60,8 @@ func TestTabAlwaysSwitchesTabs(t *testing.T) {
 
 	// Tab should switch away from chat even when input is focused
 	app.handleKey(tea.KeyMsg{Type: tea.KeyTab})
-	if app.activeTab != TabLogs {
-		t.Errorf("expected Tab to switch to TabLogs (%d), got %d", TabLogs, app.activeTab)
+	if app.activeTab != TabSkills {
+		t.Errorf("expected Tab to switch to TabSkills (%d), got %d", TabSkills, app.activeTab)
 	}
 }
 
@@ -121,10 +121,10 @@ func TestLeftRightSwitchTabsWhenChatBlurred(t *testing.T) {
 		t.Fatal("expected chat input to be blurred after tab switch")
 	}
 
-	// Right should switch from Chat to Logs when input is blurred
+	// Right should switch from Chat to Skills when input is blurred
 	app.handleKey(tea.KeyMsg{Type: tea.KeyRight})
-	if app.activeTab != TabLogs {
-		t.Errorf("expected Right to switch to TabLogs (%d), got %d", TabLogs, app.activeTab)
+	if app.activeTab != TabSkills {
+		t.Errorf("expected Right to switch to TabSkills (%d), got %d", TabSkills, app.activeTab)
 	}
 
 	// Go back to Chat (blurred)
