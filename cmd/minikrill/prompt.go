@@ -83,7 +83,7 @@ func (m selectModel) View() string {
 // Returns the chosen index, or -1 if cancelled with Ctrl+C.
 func promptSelect(items []selectItem) (int, error) {
 	m := selectModel{items: items, chosen: -1}
-	p := tea.NewProgram(m)
+	p := tea.NewProgram(m, tea.WithInputTTY())
 	result, err := p.Run()
 	if err != nil {
 		return -1, err
