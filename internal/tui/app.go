@@ -33,8 +33,9 @@ const (
 	TabDashboard = 0
 	TabChat      = 1
 	TabSkills    = 2
-	TabLogs      = 3
-	TabHelp      = 4
+	TabMCP       = 3
+	TabLogs      = 4
+	TabHelp      = 5
 
 	// layoutMargins is the vertical breathing room reserved between layout sections.
 	layoutMargins = 3
@@ -52,6 +53,7 @@ type App struct {
 	dashboard DashboardView
 	chat      ChatView
 	skills    SkillsView
+	mcp       MCPView
 	logs      LogsView
 	help      HelpView
 
@@ -69,11 +71,12 @@ type App struct {
 // NewApp creates a fully initialized App ready to run.
 func NewApp(agent core.Agent, brain core.Brain, heartbeat core.Heartbeat, skillReg core.SkillRegistry, mcpReg core.MCPRegistry, version, logFile string) *App {
 	return &App{
-		tabs:      []string{"Dashboard", "Chat", "Skills", "Logs", "Help"},
+		tabs:      []string{"Dashboard", "Chat", "Skills", "MCP", "Logs", "Help"},
 		activeTab: 0,
 		dashboard: NewDashboardView(version),
 		chat:      NewChatView(agent),
-		skills:    NewSkillsView(skillReg, mcpReg),
+		skills:    NewSkillsView(skillReg),
+		mcp:       NewMCPView(mcpReg),
 		logs:      NewLogsView(logFile),
 		help:      NewHelpView(),
 		agent:     agent,
@@ -261,11 +264,17 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	case "4":
 		if !inChat {
-			a.activeTab = TabLogs
+			a.activeTab = TabMCP
 			a.onTabSwitch()
 			return nil
 		}
 	case "5":
+		if !inChat {
+			a.activeTab = TabLogs
+			a.onTabSwitch()
+			return nil
+		}
+	case "6":
 		if !inChat {
 			a.activeTab = TabHelp
 			a.onTabSwitch()
@@ -295,6 +304,8 @@ func (a *App) onTabSwitch() {
 	switch a.activeTab {
 	case TabSkills:
 		a.skills.refreshContent()
+	case TabMCP:
+		a.mcp.refreshContent()
 	case TabLogs:
 		a.logs.RefreshLogs()
 	}
@@ -325,6 +336,8 @@ func (a *App) updateActiveView(msg tea.Msg) tea.Cmd {
 		return a.chat.Update(msg)
 	case TabSkills:
 		return a.skills.Update(msg)
+	case TabMCP:
+		return a.mcp.Update(msg)
 	case TabLogs:
 		return a.logs.Update(msg)
 	case TabHelp:
@@ -339,6 +352,7 @@ func (a *App) resizeViews() {
 	a.dashboard.SetSize(a.width, h)
 	a.chat.SetSize(a.width, h)
 	a.skills.SetSize(a.width, h)
+	a.mcp.SetSize(a.width, h)
 	a.logs.SetSize(a.width, h)
 	a.help.SetSize(a.width, h)
 }
@@ -400,6 +414,8 @@ func (a *App) renderBody() string {
 		return a.chat.View()
 	case TabSkills:
 		return a.skills.View()
+	case TabMCP:
+		return a.mcp.View()
 	case TabLogs:
 		return a.logs.View()
 	case TabHelp:
