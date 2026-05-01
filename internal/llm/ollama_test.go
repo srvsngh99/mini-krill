@@ -17,14 +17,16 @@ func newTestOllamaProvider(serverURL, model string) *OllamaProvider {
 
 func TestAvailableModelPresent(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(ollamaTagsResponse{
+		if err := json.NewEncoder(w).Encode(ollamaTagsResponse{
 			Models: []struct {
 				Name string `json:"name"`
 			}{
 				{Name: "gemma3:4b"},
 				{Name: "llama3.2:3b"},
 			},
-		})
+		}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
 	}))
 	defer srv.Close()
 
@@ -36,13 +38,15 @@ func TestAvailableModelPresent(t *testing.T) {
 
 func TestAvailableModelMissing(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(ollamaTagsResponse{
+		if err := json.NewEncoder(w).Encode(ollamaTagsResponse{
 			Models: []struct {
 				Name string `json:"name"`
 			}{
 				{Name: "llama3.2:3b"},
 			},
-		})
+		}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
 	}))
 	defer srv.Close()
 
@@ -54,7 +58,9 @@ func TestAvailableModelMissing(t *testing.T) {
 
 func TestAvailableEmptyModelList(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(ollamaTagsResponse{})
+		if err := json.NewEncoder(w).Encode(ollamaTagsResponse{}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
 	}))
 	defer srv.Close()
 
