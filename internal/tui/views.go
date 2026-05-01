@@ -516,14 +516,15 @@ type registryItem struct {
 
 // SkillsView displays skills and MCP servers with enable/disable toggle.
 type SkillsView struct {
-	registry core.SkillRegistry
-	mcpReg   core.MCPRegistry
-	viewport viewport.Model
-	items    []registryItem
-	cursor   int
-	ready    bool
-	width    int
-	height   int
+	registry  core.SkillRegistry
+	mcpReg    core.MCPRegistry
+	viewport  viewport.Model
+	items     []registryItem
+	catCounts map[string]int // pre-computed category counts
+	cursor    int
+	ready     bool
+	width     int
+	height    int
 }
 
 // NewSkillsView creates a skills registry view.
@@ -585,11 +586,15 @@ func (s *SkillsView) Update(msg tea.Msg) tea.Cmd {
 				newEnabled := !item.enabled
 				if item.isMCP {
 					if s.mcpReg != nil {
-						_ = s.mcpReg.SetEnabled(item.name, newEnabled)
+						if err := s.mcpReg.SetEnabled(item.name, newEnabled); err != nil {
+							log.Debug("toggle MCP server failed", "name", item.name, "error", err)
+						}
 					}
 				} else {
 					if s.registry != nil {
-						_ = s.registry.SetEnabled(item.name, newEnabled)
+						if err := s.registry.SetEnabled(item.name, newEnabled); err != nil {
+							log.Debug("toggle skill failed", "name", item.name, "error", err)
+						}
 					}
 				}
 				s.refreshContent()
@@ -614,29 +619,27 @@ func (s *SkillsView) View() string {
 func (s *SkillsView) buildItems() {
 	s.items = nil
 
-	builtinNames := map[string]bool{
-		"recall": true, "sysinfo": true, "time": true, "search": true,
-	}
-
-	// Group skills by category while preserving sorted order
+	// Group skills by category using the registry-provided Category field
 	var builtin, selfAware, custom []registryItem
 	if s.registry != nil {
 		for _, sk := range s.registry.List() {
+			cat := sk.Category
+			if cat == "" {
+				cat = "Custom / YAML"
+			}
 			item := registryItem{
 				name:        sk.Name,
 				description: sk.Description,
 				enabled:     sk.Enabled,
+				category:    cat,
+				locked:      cat == "Self-Awareness",
 			}
-			switch {
-			case strings.HasPrefix(sk.Name, "self:"):
-				item.category = "Self-Awareness"
-				item.locked = true
-				selfAware = append(selfAware, item)
-			case builtinNames[sk.Name]:
-				item.category = "Built-in"
+			switch cat {
+			case "Built-in":
 				builtin = append(builtin, item)
+			case "Self-Awareness":
+				selfAware = append(selfAware, item)
 			default:
-				item.category = "Custom / YAML"
 				custom = append(custom, item)
 			}
 		}
@@ -665,6 +668,12 @@ func (s *SkillsView) buildItems() {
 	s.items = append(s.items, selfAware...)
 	s.items = append(s.items, custom...)
 	s.items = append(s.items, mcpItems...)
+
+	// Pre-compute category counts
+	s.catCounts = make(map[string]int)
+	for _, item := range s.items {
+		s.catCounts[item.category]++
+	}
 }
 
 // refreshContent rebuilds the viewport content from the current item list.
@@ -711,7 +720,6 @@ func (s *SkillsView) refreshContent() {
 	var sections []string
 	var currentCat string
 	var rows []string
-	catCount := 0
 
 	for i, item := range s.items {
 		// Start new category section
@@ -720,14 +728,7 @@ func (s *SkillsView) refreshContent() {
 				sections = append(sections, strings.Join(rows, "\n"))
 			}
 			currentCat = item.category
-			catCount = 0
-			// Count items in this category
-			for _, it := range s.items {
-				if it.category == currentCat {
-					catCount++
-				}
-			}
-			rows = []string{AccentStyle.Render(fmt.Sprintf("  %s (%d)", currentCat, catCount))}
+			rows = []string{AccentStyle.Render(fmt.Sprintf("  %s (%d)", currentCat, s.catCounts[currentCat]))}
 		}
 
 		// Status badge
@@ -799,7 +800,8 @@ func (s *SkillsView) refreshContent() {
 	nav := DimStyle.Render("  ") +
 		HelpKeyStyle.Render("j/k") + DimStyle.Render(" navigate  ") +
 		HelpKeyStyle.Render("g/G") + DimStyle.Render(" top/bottom  ") +
-		HelpKeyStyle.Render("Enter/Space") + DimStyle.Render(" toggle")
+		HelpKeyStyle.Render("Enter/Space") + DimStyle.Render(" toggle  ") +
+		DimStyle.Render("(changes reset on restart)")
 
 	// Compose final view
 	body := lipgloss.JoinVertical(lipgloss.Left,

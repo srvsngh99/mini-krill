@@ -164,12 +164,16 @@ type SkillInfo struct {
 	Name        string `json:"name" yaml:"name"`
 	Description string `json:"description" yaml:"description"`
 	Enabled     bool   `json:"enabled" yaml:"enabled"`
+	Category    string `json:"category" yaml:"category"` // "Built-in", "Self-Awareness", "Custom / YAML"
 }
 
 // SkillRegistry manages available skills.
 type SkillRegistry interface {
 	Register(skill Skill) error
 	Unregister(name string) error
+	// Get retrieves a skill by name. Returns nil, false both when the skill
+	// is not registered AND when it is registered but disabled. Callers that
+	// need to distinguish these cases should check IsEnabled separately.
 	Get(name string) (Skill, bool)
 	List() []SkillInfo
 	SetEnabled(name string, enabled bool) error

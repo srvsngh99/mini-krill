@@ -24,6 +24,8 @@ func (r *SkillRegistryImpl) RegisterBuiltins() {
 	for _, s := range builtins {
 		if err := r.Register(s); err != nil {
 			log.Warn("failed to register built-in skill", "name", s.Name(), "error", err)
+		} else {
+			r.categories[s.Name()] = "Built-in"
 		}
 	}
 	log.Debug("built-in skills registered", "count", len(builtins))
@@ -35,6 +37,8 @@ func (r *SkillRegistryImpl) RegisterSelfSkills(sc SelfContext) {
 	for _, s := range selfSkills {
 		if err := r.Register(s); err != nil {
 			log.Warn("failed to register self-skill", "name", s.Name(), "error", err)
+		} else {
+			r.categories[s.Name()] = "Self-Awareness"
 		}
 	}
 	log.Debug("self-awareness skills registered", "count", len(selfSkills))
