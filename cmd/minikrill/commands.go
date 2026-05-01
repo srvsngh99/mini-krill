@@ -367,17 +367,31 @@ var diveCmd = &cobra.Command{
 }
 
 // diveDaemon re-execs the dive command as a detached background process.
+// daemonRunning returns true if a dive daemon is already running.
+func daemonRunning() bool {
+	pidFile := filepath.Join(config.DataDir(), "krill.pid")
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		return false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return false
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return processRunning(proc)
+}
+
 func diveDaemon() error {
 	// Check if a daemon is already running
-	pidFile := filepath.Join(config.DataDir(), "krill.pid")
-	if data, err := os.ReadFile(pidFile); err == nil {
-		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
-			if proc, err := os.FindProcess(pid); err == nil {
-				if processRunning(proc) {
-					return fmt.Errorf("Mini Krill is already diving (PID %d). Run 'minikrill surface' first", pid)
-				}
-			}
-		}
+	if daemonRunning() {
+		pidFile := filepath.Join(config.DataDir(), "krill.pid")
+		data, _ := os.ReadFile(pidFile)
+		pid, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+		return fmt.Errorf("Mini Krill is already diving (PID %d). Run 'minikrill surface' first", pid)
 	}
 
 	exe, err := os.Executable()
@@ -413,6 +427,7 @@ func diveDaemon() error {
 	// Detach - the parent does not wait for the child.
 	_ = child.Process.Release()
 
+	pidFile := filepath.Join(config.DataDir(), "krill.pid")
 	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(child.Process.Pid)), 0644)
 
 	printBanner()
@@ -527,7 +542,9 @@ var chatCmd = &cobra.Command{
 		_ = stack.hb.Start(ctx)
 		defer func() { _ = stack.hb.Stop() }()
 
-		startBots(ctx, stack)
+		if !daemonRunning() {
+			startBots(ctx, stack)
+		}
 
 		app := tui.NewApp(stack.agent, stack.brain, stack.hb, stack.skills, stack.mcp, core.Version, stack.cfg.Log.File)
 		app.SetInitialTab(tui.TabChat)
@@ -553,9 +570,11 @@ var tuiCmd = &cobra.Command{
 		_ = stack.hb.Start(ctx)
 		defer func() { _ = stack.hb.Stop() }()
 
-		bs := startBots(ctx, stack)
-		if stack.cfg.Telegram.Enabled && bs.TelegramErr != nil {
-			klog.Error("telegram bot failed in TUI mode", "error", bs.TelegramErr)
+		if !daemonRunning() {
+			bs := startBots(ctx, stack)
+			if stack.cfg.Telegram.Enabled && bs.TelegramErr != nil {
+				klog.Error("telegram bot failed in TUI mode", "error", bs.TelegramErr)
+			}
 		}
 
 		app := tui.NewApp(stack.agent, stack.brain, stack.hb, stack.skills, stack.mcp, core.Version, stack.cfg.Log.File)
