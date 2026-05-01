@@ -366,18 +366,32 @@ var diveCmd = &cobra.Command{
 	},
 }
 
+// daemonPID returns the PID of a running dive daemon, or 0 if none.
+func daemonPID() int {
+	pidFile := filepath.Join(config.DataDir(), "krill.pid")
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		return 0
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return 0
+	}
+	if !processRunning(proc) {
+		return 0
+	}
+	return pid
+}
+
 // diveDaemon re-execs the dive command as a detached background process.
 func diveDaemon() error {
 	// Check if a daemon is already running
-	pidFile := filepath.Join(config.DataDir(), "krill.pid")
-	if data, err := os.ReadFile(pidFile); err == nil {
-		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
-			if proc, err := os.FindProcess(pid); err == nil {
-				if processRunning(proc) {
-					return fmt.Errorf("Mini Krill is already diving (PID %d). Run 'minikrill surface' first", pid)
-				}
-			}
-		}
+	if pid := daemonPID(); pid != 0 {
+		return fmt.Errorf("Mini Krill is already diving (PID %d). Run 'minikrill surface' first", pid)
 	}
 
 	exe, err := os.Executable()
@@ -413,6 +427,7 @@ func diveDaemon() error {
 	// Detach - the parent does not wait for the child.
 	_ = child.Process.Release()
 
+	pidFile := filepath.Join(config.DataDir(), "krill.pid")
 	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(child.Process.Pid)), 0644)
 
 	printBanner()
@@ -432,14 +447,9 @@ var surfaceCmd = &cobra.Command{
 	Use:   "surface",
 	Short: "Stop a running Mini Krill instance",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		pidFile := filepath.Join(config.DataDir(), "krill.pid")
-		data, err := os.ReadFile(pidFile)
-		if err != nil {
-			return fmt.Errorf("Mini Krill is not diving (no PID file)")
-		}
-		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-		if err != nil {
-			return fmt.Errorf("corrupt PID file")
+		pid := daemonPID()
+		if pid == 0 {
+			return fmt.Errorf("Mini Krill is not diving (no running daemon found)")
 		}
 		proc, err := os.FindProcess(pid)
 		if err != nil {
@@ -448,7 +458,7 @@ var surfaceCmd = &cobra.Command{
 		if err := terminateProcess(proc); err != nil {
 			_ = proc.Kill()
 		}
-		_ = os.Remove(pidFile)
+		_ = os.Remove(filepath.Join(config.DataDir(), "krill.pid"))
 		fmt.Println(cCyan + "Mini Krill is surfacing..." + cReset)
 		return nil
 	},
@@ -527,7 +537,14 @@ var chatCmd = &cobra.Command{
 		_ = stack.hb.Start(ctx)
 		defer func() { _ = stack.hb.Stop() }()
 
-		startBots(ctx, stack)
+		if daemonPID() == 0 {
+			bs := startBots(ctx, stack)
+			if stack.cfg.Telegram.Enabled && bs.TelegramErr != nil {
+				klog.Warn("telegram bot failed to start", "error", bs.TelegramErr)
+			}
+		} else {
+			klog.Debug("skipping bot startup, dive daemon is running")
+		}
 
 		app := tui.NewApp(stack.agent, stack.brain, stack.hb, stack.skills, stack.mcp, core.Version, stack.cfg.Log.File)
 		app.SetInitialTab(tui.TabChat)
@@ -553,9 +570,13 @@ var tuiCmd = &cobra.Command{
 		_ = stack.hb.Start(ctx)
 		defer func() { _ = stack.hb.Stop() }()
 
-		bs := startBots(ctx, stack)
-		if stack.cfg.Telegram.Enabled && bs.TelegramErr != nil {
-			klog.Error("telegram bot failed in TUI mode", "error", bs.TelegramErr)
+		if daemonPID() == 0 {
+			bs := startBots(ctx, stack)
+			if stack.cfg.Telegram.Enabled && bs.TelegramErr != nil {
+				klog.Error("telegram bot failed in TUI mode", "error", bs.TelegramErr)
+			}
+		} else {
+			klog.Debug("skipping bot startup, dive daemon is running")
 		}
 
 		app := tui.NewApp(stack.agent, stack.brain, stack.hb, stack.skills, stack.mcp, core.Version, stack.cfg.Log.File)
