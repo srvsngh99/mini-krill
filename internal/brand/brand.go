@@ -9,30 +9,30 @@ const (
 	Creator     = "Sourav Singh"
 	Attribution = "by Sourav Singh / Sourav AI Labs"
 	Tagline     = "Local-first AI agent with a crustaceous soul"
+	Credits     = "Inspired by Jarvis and OpenClaw"
 )
 
-// Mark is an ASCII interpretation of the circular Mini Krill logo.
-// It intentionally stays plain ASCII so it renders in conservative terminals.
+// Mark is an ASCII krill/shrimp silhouette inspired by the circular logo.
+// Pure ASCII so it renders in conservative terminals.
 var Mark = []string{
-	"        .-''''''''-.",
-	"     .-'   .----.   '-.",
-	"   .'    .'  __  '.    '.",
-	"  /     /  .'oo'.  \\     \\",
-	" ;     |  /_____)   |     ;",
-	" |     |   / / /    |     |",
-	" ;     |  /_/ /__   |     ;",
-	"  \\     \\    '--'  /     /",
-	"   '.    '._    _.'    .'",
-	"     '-.     '''     .-'",
-	"        '-.______.-'",
+	"            .--._",
+	"           /  o  \\__",
+	"          |   __    '-.___",
+	"          |  /  \\        '==-.",
+	"           \\|    |  /\\/\\/\\   \\",
+	"            '._  | |      |   |",
+	"               '-| |  ))  |  /",
+	"                 |  \\_/\\_/  /",
+	"                  \\  '---'_/",
+	"                   '-.___/",
 }
 
 // MarkCompact is for narrow terminals and short CLI banners.
 var MarkCompact = []string{
-	"   .-''''-.",
-	"  /  >o  /)",
-	" |  /___/ |",
-	"  \\__\\_\\_/",
+	"    .--.__",
+	"   / o    '=-.",
+	"   \\| /\\/\\  /",
+	"    '-'--'-'",
 }
 
 func BannerLines(version string, compact bool) []string {
@@ -46,6 +46,7 @@ func BannerLines(version string, compact bool) []string {
 		fmt.Sprintf("%s v%s", Name, version),
 		Attribution,
 		Tagline,
+		Credits,
 	)
 	return lines
 }
