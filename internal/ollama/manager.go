@@ -323,6 +323,8 @@ func (m *OllamaManager) Pull(ctx context.Context, model string) error {
 // PullWithProgress pulls a model and writes human-readable progress to w.
 // Designed for interactive use (e.g. init wizard).
 func (m *OllamaManager) PullWithProgress(ctx context.Context, model string, w io.Writer) error {
+	log.Info("pulling ollama model with progress", "model", model)
+
 	err := m.pullStream(ctx, model, func(p pullProgress) {
 		if p.Total > 0 {
 			pct := float64(p.Completed) / float64(p.Total) * 100
@@ -345,6 +347,7 @@ func (m *OllamaManager) PullWithProgress(ctx context.Context, model string, w io
 	}
 
 	fmt.Fprintf(w, "\r\033[2K  Pulled %s successfully.\n", model)
+	log.Info("model pulled successfully (with progress)", "model", model)
 	return nil
 }
 
