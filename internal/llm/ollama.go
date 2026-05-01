@@ -13,6 +13,7 @@ import (
 	"github.com/srvsngh99/mini-krill/internal/config"
 	"github.com/srvsngh99/mini-krill/internal/core"
 	log "github.com/srvsngh99/mini-krill/internal/log"
+	"github.com/srvsngh99/mini-krill/internal/ollama"
 )
 
 // OllamaProvider talks to a local Ollama instance over its REST API.
@@ -72,6 +73,12 @@ type ollamaChatResponse struct {
 	Done            bool          `json:"done"`
 	EvalCount       int           `json:"eval_count"`
 	PromptEvalCount int           `json:"prompt_eval_count"`
+}
+
+type ollamaTagsResponse struct {
+	Models []struct {
+		Name string `json:"name"`
+	} `json:"models"`
 }
 
 // ---------------------------------------------------------------------------
@@ -248,8 +255,26 @@ func (o *OllamaProvider) Available(ctx context.Context) bool {
 		return false
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
-	return resp.StatusCode == http.StatusOK
+
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+
+	var tags ollamaTagsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tags); err != nil {
+		log.Debug("ollama tags decode failed", "error", err)
+		return false
+	}
+
+	target := ollama.NormalizeModelName(o.model)
+	for _, m := range tags.Models {
+		if ollama.NormalizeModelName(m.Name) == target {
+			return true
+		}
+	}
+
+	log.Debug("ollama model not found locally", "model", o.model, "available", len(tags.Models))
+	return false
 }
 
 func isConnectionRefused(err error) bool {

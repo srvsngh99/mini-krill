@@ -152,14 +152,8 @@ func (a *App) View() string {
 		return "\n  Waiting for terminal..."
 	}
 
-	// Chat tab gets a compact header for maximum chat space;
-	// other tabs keep the full ASCII art banner.
-	var header string
-	if a.activeTab == TabChat {
-		header = RenderCompactHeader(a.version, a.width)
-	} else {
-		header = RenderHeader(a.version, a.width)
-	}
+	// Compact header for all tabs to maximize body space.
+	header := RenderCompactHeader(a.version, a.width)
 	tabBar := a.renderTabBar()
 	body := a.renderBody()
 	footer := a.renderFooter()
@@ -282,14 +276,11 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 // onTabSwitch handles focus changes when switching tabs.
+// Chat input is NOT auto-focused on switch so that left/right arrows
+// remain available for tab navigation. Press Enter to focus the input.
 func (a *App) onTabSwitch() {
-	if a.activeTab == TabChat {
-		a.chat.Focus()
-	} else {
-		a.chat.Blur()
-	}
+	a.chat.Blur()
 
-	// Recalculate view sizes since chat tab uses a compact header.
 	a.resizeViews()
 
 	// Refresh logs when switching to logs tab
@@ -341,12 +332,7 @@ func (a *App) resizeViews() {
 // bodyHeight computes the available vertical space for view content
 // by subtracting the actual rendered header, tab bar, and footer heights.
 func (a *App) bodyHeight() int {
-	var header string
-	if a.activeTab == TabChat {
-		header = RenderCompactHeader(a.version, a.width)
-	} else {
-		header = RenderHeader(a.version, a.width)
-	}
+	header := RenderCompactHeader(a.version, a.width)
 	tabBar := a.renderTabBar()
 	footer := a.renderFooter()
 
