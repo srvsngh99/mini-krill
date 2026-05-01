@@ -417,14 +417,16 @@ func (s *MCPServerImpl) cleanup() {
 // Like a krill swarm coordinator - knows where every member is and what
 // they can do.
 type MCPRegistryImpl struct {
-	mu      sync.RWMutex
-	servers map[string]core.MCPServer
+	mu       sync.RWMutex
+	servers  map[string]core.MCPServer
+	disabled map[string]bool // tracks runtime-disabled servers
 }
 
 // NewMCPRegistry creates a new, empty MCP server registry.
 func NewMCPRegistry() *MCPRegistryImpl {
 	return &MCPRegistryImpl{
-		servers: make(map[string]core.MCPServer),
+		servers:  make(map[string]core.MCPServer),
+		disabled: make(map[string]bool),
 	}
 }
 
@@ -449,11 +451,14 @@ func (r *MCPRegistryImpl) Register(name string, server core.MCPServer) error {
 	return nil
 }
 
-// Get retrieves an MCP server by name.
+// Get retrieves an MCP server by name. Returns nil, false if the server is disabled.
 func (r *MCPRegistryImpl) Get(name string) (core.MCPServer, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	if r.disabled[name] {
+		return nil, false
+	}
 	server, ok := r.servers[name]
 	return server, ok
 }
@@ -479,6 +484,7 @@ func (r *MCPRegistryImpl) List() []core.MCPServerInfo {
 			Name:      name,
 			Connected: connected,
 			ToolCount: toolCount,
+			Enabled:   !r.disabled[name],
 		})
 	}
 
@@ -493,7 +499,10 @@ func (r *MCPRegistryImpl) AllTools() []core.MCPTool {
 	defer r.mu.RUnlock()
 
 	var all []core.MCPTool
-	for _, server := range r.servers {
+	for name, server := range r.servers {
+		if r.disabled[name] {
+			continue
+		}
 		tools := server.Tools()
 		if tools != nil {
 			all = append(all, tools...)
@@ -523,6 +532,32 @@ func (r *MCPRegistryImpl) Close() error {
 	// Clear the map after closing everything
 	r.servers = make(map[string]core.MCPServer)
 	return firstErr
+}
+
+// SetEnabled toggles an MCP server's enabled state at runtime.
+func (r *MCPRegistryImpl) SetEnabled(name string, enabled bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.servers[name]; !exists {
+		return fmt.Errorf("MCP server %q not found", name)
+	}
+
+	if enabled {
+		delete(r.disabled, name)
+	} else {
+		r.disabled[name] = true
+	}
+
+	log.Debug("MCP server enabled state changed", "name", name, "enabled", enabled)
+	return nil
+}
+
+// IsEnabled returns whether an MCP server is currently enabled.
+func (r *MCPRegistryImpl) IsEnabled(name string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return !r.disabled[name]
 }
 
 // LoadFromConfig creates MCP servers from the configuration and optionally

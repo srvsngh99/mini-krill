@@ -1,0 +1,9 @@
+name: summarize
+description: Condense long text, articles, or documents into key points
+prompt_template: |
+  Summarize the following text concisely. Focus on the key points,
+  main arguments, and important details. Use bullet points for clarity.
+  Keep the summary under 200 words unless the input is very long.
+
+  Text to summarize:
+  {{.Input}}

@@ -1,0 +1,12 @@
+name: explain-code
+description: Break down code snippets with clear explanations
+prompt_template: |
+  Explain the following code clearly and concisely. Break it down by:
+  1. What the code does overall (one sentence)
+  2. Key components and how they work together
+  3. Any notable patterns, idioms, or potential issues
+
+  Keep the explanation accessible but technically accurate.
+
+  Code:
+  {{.Input}}

@@ -225,6 +225,83 @@ func TestTimeSkill(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Enable/disable tests
+// ---------------------------------------------------------------------------
+
+func TestSkillRegistryDisableAndGet(t *testing.T) {
+	reg := NewRegistry()
+	_ = reg.Register(&mockSkill{name: "search", desc: "web search"})
+
+	// Disable
+	if err := reg.SetEnabled("search", false); err != nil {
+		t.Fatalf("SetEnabled(false) error: %v", err)
+	}
+
+	// Get should return false for disabled skill
+	_, ok := reg.Get("search")
+	if ok {
+		t.Error("Get() returned true for disabled skill, want false")
+	}
+
+	// List should show Enabled: false
+	for _, info := range reg.List() {
+		if info.Name == "search" && info.Enabled {
+			t.Error("List() shows disabled skill as enabled")
+		}
+	}
+}
+
+func TestSkillRegistryReEnable(t *testing.T) {
+	reg := NewRegistry()
+	_ = reg.Register(&mockSkill{name: "time", desc: "time skill"})
+
+	_ = reg.SetEnabled("time", false)
+	_, ok := reg.Get("time")
+	if ok {
+		t.Fatal("Get() should return false when disabled")
+	}
+
+	_ = reg.SetEnabled("time", true)
+	_, ok = reg.Get("time")
+	if !ok {
+		t.Error("Get() should return true after re-enabling")
+	}
+
+	if !reg.IsEnabled("time") {
+		t.Error("IsEnabled() should return true after re-enabling")
+	}
+}
+
+func TestSkillRegistrySelfSkillUndisableable(t *testing.T) {
+	reg := NewRegistry()
+	_ = reg.Register(&mockSkill{name: "self:inspect", desc: "inspect"})
+
+	err := reg.SetEnabled("self:inspect", false)
+	if err == nil {
+		t.Error("SetEnabled(false) on self-skill should return error")
+	}
+
+	// Should still be gettable
+	_, ok := reg.Get("self:inspect")
+	if !ok {
+		t.Error("self-skill should remain gettable after failed disable")
+	}
+
+	if !reg.IsEnabled("self:inspect") {
+		t.Error("self-skill should remain enabled after failed disable")
+	}
+}
+
+func TestSkillRegistryDisableUnknown(t *testing.T) {
+	reg := NewRegistry()
+
+	err := reg.SetEnabled("nonexistent", false)
+	if err == nil {
+		t.Error("SetEnabled on nonexistent skill should return error")
+	}
+}
+
 func TestRecallSkill(t *testing.T) {
 	reg := NewRegistry()
 	reg.RegisterBuiltins()
