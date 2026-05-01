@@ -1,5 +1,5 @@
 # Stage 1: Build the binary
-FROM golang:1.22-alpine AS builder
+FROM golang:1.24.2-alpine AS builder
 
 LABEL maintainer="Sourav AI Labs"
 

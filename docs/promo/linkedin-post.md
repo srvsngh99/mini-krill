@@ -2,13 +2,13 @@ I built an AI agent from scratch. Today it's open source.
 
 Meet Mini Krill — a local-first AI agent that runs entirely on your machine.
 
-No API keys. No cloud accounts. No setup friction.
+No API keys for the default local path. No cloud account required. Minimal setup.
 
-Install it, run `minikrill init`, and you're chatting with an AI that lives on your hardware. Everything stays local — your prompts, your conversations, your data. Nothing leaves your machine.
+Install it, run `minikrill init`, and you're chatting with an AI that can live on your hardware. With Ollama, your prompts, conversations, and data stay on your machine.
 
 Here's what makes it different:
 
--> Runs on Windows, Linux, and macOS. Single binary. ~15MB. Zero dependencies.
+-> Runs on Windows, Linux, and macOS. Single binary. ~15MB. Local inference uses Ollama.
 
 -> Talk to it from Telegram, your terminal, a TUI dashboard, or Discord. All interfaces share one unified memory — start a conversation on Telegram from your phone, pick it up in your terminal.
 
@@ -16,7 +16,7 @@ Here's what makes it different:
 
 -> Plan-before-execute. The agent always shows you its plan and waits for your approval before acting. Transparent by design.
 
--> Lightweight and clean. Built in Go. 18 internal packages. No bloat, no framework overhead, no runtime dependencies.
+-> Lightweight and clean. Built in Go. 18 internal packages. No bloat, no framework overhead.
 
 Inspired by Jarvis and OpenClaw.
 
