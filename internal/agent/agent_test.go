@@ -80,10 +80,12 @@ func (b *mockBrain) EnrichMessages(msgs []core.Message) []core.Message {
 
 type mockSkillRegistry struct{}
 
-func (r *mockSkillRegistry) Register(_ core.Skill) error     { return nil }
-func (r *mockSkillRegistry) Unregister(_ string) error       { return nil }
-func (r *mockSkillRegistry) Get(_ string) (core.Skill, bool) { return nil, false }
-func (r *mockSkillRegistry) List() []core.SkillInfo          { return nil }
+func (r *mockSkillRegistry) Register(_ core.Skill) error       { return nil }
+func (r *mockSkillRegistry) Unregister(_ string) error         { return nil }
+func (r *mockSkillRegistry) Get(_ string) (core.Skill, bool)   { return nil, false }
+func (r *mockSkillRegistry) List() []core.SkillInfo            { return nil }
+func (r *mockSkillRegistry) SetEnabled(_ string, _ bool) error { return nil }
+func (r *mockSkillRegistry) IsEnabled(_ string) bool           { return true }
 
 // ---------------------------------------------------------------------------
 // Mock MCP Registry
@@ -96,6 +98,8 @@ func (r *mockMCPReg) Get(_ string) (core.MCPServer, bool)       { return nil, fa
 func (r *mockMCPReg) List() []core.MCPServerInfo                { return nil }
 func (r *mockMCPReg) AllTools() []core.MCPTool                  { return nil }
 func (r *mockMCPReg) Close() error                              { return nil }
+func (r *mockMCPReg) SetEnabled(_ string, _ bool) error         { return nil }
+func (r *mockMCPReg) IsEnabled(_ string) bool                   { return true }
 
 // ---------------------------------------------------------------------------
 // Helper

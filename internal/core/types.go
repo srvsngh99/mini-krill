@@ -164,14 +164,20 @@ type SkillInfo struct {
 	Name        string `json:"name" yaml:"name"`
 	Description string `json:"description" yaml:"description"`
 	Enabled     bool   `json:"enabled" yaml:"enabled"`
+	Category    string `json:"category" yaml:"category"` // "Built-in", "Self-Awareness", "Custom / YAML"
 }
 
 // SkillRegistry manages available skills.
 type SkillRegistry interface {
 	Register(skill Skill) error
 	Unregister(name string) error
+	// Get retrieves a skill by name. Returns nil, false both when the skill
+	// is not registered AND when it is registered but disabled. Callers that
+	// need to distinguish these cases should check IsEnabled separately.
 	Get(name string) (Skill, bool)
 	List() []SkillInfo
+	SetEnabled(name string, enabled bool) error
+	IsEnabled(name string) bool
 }
 
 // MCPTool describes a tool exposed by an MCP server.
@@ -186,6 +192,7 @@ type MCPServerInfo struct {
 	Name      string `json:"name"`
 	Connected bool   `json:"connected"`
 	ToolCount int    `json:"tool_count"`
+	Enabled   bool   `json:"enabled"`
 }
 
 // MCPServer is the interface for an MCP server connection.
@@ -204,6 +211,8 @@ type MCPRegistry interface {
 	List() []MCPServerInfo
 	AllTools() []MCPTool
 	Close() error
+	SetEnabled(name string, enabled bool) error
+	IsEnabled(name string) bool
 }
 
 // ---------------------------------------------------------------------------

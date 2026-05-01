@@ -529,7 +529,7 @@ var chatCmd = &cobra.Command{
 
 		startBots(ctx, stack)
 
-		app := tui.NewApp(stack.agent, stack.brain, stack.hb, core.Version, stack.cfg.Log.File)
+		app := tui.NewApp(stack.agent, stack.brain, stack.hb, stack.skills, stack.mcp, core.Version, stack.cfg.Log.File)
 		app.SetInitialTab(tui.TabChat)
 		return app.Run()
 	},
@@ -558,7 +558,7 @@ var tuiCmd = &cobra.Command{
 			klog.Error("telegram bot failed in TUI mode", "error", bs.TelegramErr)
 		}
 
-		app := tui.NewApp(stack.agent, stack.brain, stack.hb, core.Version, stack.cfg.Log.File)
+		app := tui.NewApp(stack.agent, stack.brain, stack.hb, stack.skills, stack.mcp, core.Version, stack.cfg.Log.File)
 		return app.Run()
 	},
 }

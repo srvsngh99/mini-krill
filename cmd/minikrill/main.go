@@ -148,6 +148,7 @@ func initStack(quiet bool) (*krillStack, error) {
 	skillReg := plugin.NewRegistry()
 	skillReg.RegisterBuiltins()
 	if cfg.Plugins.Dir != "" {
+		plugin.SeedDefaultSkills(cfg.Plugins.Dir)
 		_ = skillReg.LoadSkillsFromDir(cfg.Plugins.Dir)
 	}
 

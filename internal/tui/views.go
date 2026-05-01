@@ -501,6 +501,324 @@ func colorizeLogLine(line string) string {
 }
 
 // ---------------------------------------------------------------------------
+// SkillsView
+// ---------------------------------------------------------------------------
+
+// registryItem is a unified entry for both skills and MCP servers.
+type registryItem struct {
+	name        string
+	description string
+	enabled     bool
+	category    string // "Built-in", "Self-Awareness", "Custom / YAML", "MCP Servers"
+	isMCP       bool
+	locked      bool // true for self:* skills — cannot be toggled
+}
+
+// SkillsView displays skills and MCP servers with enable/disable toggle.
+type SkillsView struct {
+	registry  core.SkillRegistry
+	mcpReg    core.MCPRegistry
+	viewport  viewport.Model
+	items     []registryItem
+	catCounts map[string]int // pre-computed category counts
+	cursor    int
+	ready     bool
+	width     int
+	height    int
+}
+
+// NewSkillsView creates a skills registry view.
+func NewSkillsView(registry core.SkillRegistry, mcpReg core.MCPRegistry) SkillsView {
+	return SkillsView{
+		registry: registry,
+		mcpReg:   mcpReg,
+	}
+}
+
+// SetSize updates the skills view dimensions.
+func (s *SkillsView) SetSize(w, h int) {
+	s.width = w
+	s.height = h
+	if !s.ready {
+		s.viewport = viewport.New(w, h)
+		s.ready = true
+	} else {
+		s.viewport.Width = w
+		s.viewport.Height = h
+	}
+	s.refreshContent()
+}
+
+// Update handles keyboard navigation and toggle for the skills list.
+func (s *SkillsView) Update(msg tea.Msg) tea.Cmd {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		total := len(s.items)
+		switch msg.String() {
+		case "j", "down":
+			if s.cursor < total-1 {
+				s.cursor++
+				s.refreshContent()
+			}
+			return nil
+		case "k", "up":
+			if s.cursor > 0 {
+				s.cursor--
+				s.refreshContent()
+			}
+			return nil
+		case "g":
+			s.cursor = 0
+			s.refreshContent()
+			return nil
+		case "G":
+			if total > 0 {
+				s.cursor = total - 1
+				s.refreshContent()
+			}
+			return nil
+		case "enter", " ":
+			if s.cursor < total {
+				item := s.items[s.cursor]
+				if item.locked {
+					return nil // self-skills cannot be toggled
+				}
+				newEnabled := !item.enabled
+				if item.isMCP {
+					if s.mcpReg != nil {
+						if err := s.mcpReg.SetEnabled(item.name, newEnabled); err != nil {
+							log.Debug("toggle MCP server failed", "name", item.name, "error", err)
+						}
+					}
+				} else {
+					if s.registry != nil {
+						if err := s.registry.SetEnabled(item.name, newEnabled); err != nil {
+							log.Debug("toggle skill failed", "name", item.name, "error", err)
+						}
+					}
+				}
+				s.refreshContent()
+			}
+			return nil
+		}
+	}
+	var cmd tea.Cmd
+	s.viewport, cmd = s.viewport.Update(msg)
+	return cmd
+}
+
+// View renders the skills registry tab.
+func (s *SkillsView) View() string {
+	if !s.ready {
+		return "Loading skills..."
+	}
+	return s.viewport.View()
+}
+
+// buildItems constructs the unified flat item list from skills + MCP servers.
+func (s *SkillsView) buildItems() {
+	s.items = nil
+
+	// Group skills by category using the registry-provided Category field
+	var builtin, selfAware, custom []registryItem
+	if s.registry != nil {
+		for _, sk := range s.registry.List() {
+			cat := sk.Category
+			if cat == "" {
+				cat = "Custom / YAML"
+			}
+			item := registryItem{
+				name:        sk.Name,
+				description: sk.Description,
+				enabled:     sk.Enabled,
+				category:    cat,
+				locked:      cat == "Self-Awareness",
+			}
+			switch cat {
+			case "Built-in":
+				builtin = append(builtin, item)
+			case "Self-Awareness":
+				selfAware = append(selfAware, item)
+			default:
+				custom = append(custom, item)
+			}
+		}
+	}
+
+	// MCP servers
+	var mcpItems []registryItem
+	if s.mcpReg != nil {
+		for _, srv := range s.mcpReg.List() {
+			connLabel := "disconnected"
+			if srv.Connected {
+				connLabel = fmt.Sprintf("connected, %d tools", srv.ToolCount)
+			}
+			mcpItems = append(mcpItems, registryItem{
+				name:        srv.Name,
+				description: connLabel,
+				enabled:     srv.Enabled,
+				category:    "MCP Servers",
+				isMCP:       true,
+			})
+		}
+	}
+
+	// Assemble in display order
+	s.items = append(s.items, builtin...)
+	s.items = append(s.items, selfAware...)
+	s.items = append(s.items, custom...)
+	s.items = append(s.items, mcpItems...)
+
+	// Pre-compute category counts
+	s.catCounts = make(map[string]int)
+	for _, item := range s.items {
+		s.catCounts[item.category]++
+	}
+}
+
+// refreshContent rebuilds the viewport content from the current item list.
+func (s *SkillsView) refreshContent() {
+	if !s.ready {
+		return
+	}
+
+	s.buildItems()
+
+	// Clamp cursor
+	if s.cursor >= len(s.items) {
+		s.cursor = len(s.items) - 1
+	}
+	if s.cursor < 0 {
+		s.cursor = 0
+	}
+
+	panelWidth := s.width - 4
+	if panelWidth < 30 {
+		panelWidth = 30
+	}
+
+	// Count skills vs MCP
+	skillCount := 0
+	mcpCount := 0
+	for _, item := range s.items {
+		if item.isMCP {
+			mcpCount++
+		} else {
+			skillCount++
+		}
+	}
+
+	// Header summary
+	header := TitleStyle.Render("  Skill Registry  ")
+	if mcpCount > 0 {
+		header += DimStyle.Render(fmt.Sprintf("  %d skills, %d MCP servers", skillCount, mcpCount))
+	} else {
+		header += DimStyle.Render(fmt.Sprintf("  %d skills registered", skillCount))
+	}
+
+	// Build rows grouped by category
+	var sections []string
+	var currentCat string
+	var rows []string
+
+	for i, item := range s.items {
+		// Start new category section
+		if item.category != currentCat {
+			if len(rows) > 0 {
+				sections = append(sections, strings.Join(rows, "\n"))
+			}
+			currentCat = item.category
+			rows = []string{AccentStyle.Render(fmt.Sprintf("  %s (%d)", currentCat, s.catCounts[currentCat]))}
+		}
+
+		// Status badge
+		status := StatusOK.Render("[on] ")
+		if !item.enabled {
+			status = StatusFail.Render("[off]")
+		}
+
+		// Name and description
+		name := item.name
+		desc := item.description
+		maxDesc := panelWidth - 32
+		if maxDesc < 10 {
+			maxDesc = 10
+		}
+		if len(desc) > maxDesc {
+			desc = desc[:maxDesc-3] + "..."
+		}
+
+		// Locked indicator for self-skills
+		nameDisplay := fmt.Sprintf("%-20s", name)
+		if item.locked {
+			nameDisplay = fmt.Sprintf("%-17s", name) + DimStyle.Render("locked")
+		}
+
+		if i == s.cursor {
+			line := lipgloss.NewStyle().
+				Foreground(ColorCyan).
+				Bold(true).
+				Render(fmt.Sprintf("▸ %s %s %s", status, nameDisplay, desc))
+			rows = append(rows, line)
+		} else {
+			line := fmt.Sprintf("  %s %s %s", status, nameDisplay, DimStyle.Render(desc))
+			rows = append(rows, line)
+		}
+	}
+	if len(rows) > 0 {
+		sections = append(sections, strings.Join(rows, "\n"))
+	}
+
+	// Detail panel for the selected item
+	var detailBox string
+	if s.cursor >= 0 && s.cursor < len(s.items) {
+		selected := s.items[s.cursor]
+		statusLabel := AccentStyle.Render("enabled")
+		if !selected.enabled {
+			statusLabel = ErrorStyle.Render("disabled")
+		}
+		if selected.locked {
+			statusLabel = AccentStyle.Render("enabled") + DimStyle.Render(" (locked)")
+		}
+
+		detailLines := []string{
+			RenderKeyValue("Name", selected.name),
+			RenderKeyValue("Category", selected.category),
+			RenderKeyValue("Status", statusLabel),
+			"",
+			LabelStyle.Render("Description:"),
+			ValueStyle.Render("  " + wordWrap(selected.description, panelWidth-8)),
+		}
+		boxTitle := "  Skill Details"
+		if selected.isMCP {
+			boxTitle = "  MCP Server Details"
+		}
+		detailBox = RenderBox(boxTitle, strings.Join(detailLines, "\n"), panelWidth)
+	}
+
+	// Navigation hints
+	nav := DimStyle.Render("  ") +
+		HelpKeyStyle.Render("j/k") + DimStyle.Render(" navigate  ") +
+		HelpKeyStyle.Render("g/G") + DimStyle.Render(" top/bottom  ") +
+		HelpKeyStyle.Render("Enter/Space") + DimStyle.Render(" toggle  ") +
+		DimStyle.Render("(changes reset on restart)")
+
+	// Compose final view
+	body := lipgloss.JoinVertical(lipgloss.Left,
+		"",
+		header,
+		"",
+		strings.Join(sections, "\n\n"),
+		"",
+		detailBox,
+		"",
+		nav,
+	)
+
+	s.viewport.SetContent(body)
+}
+
+// ---------------------------------------------------------------------------
 // HelpView
 // ---------------------------------------------------------------------------
 
@@ -536,10 +854,11 @@ func (h *HelpView) View() string {
 	// --- Keyboard Shortcuts ---
 	shortcuts := []struct{ key, desc string }{
 		{"Tab / Shift+Tab", "Switch between tabs (always works)"},
-		{"1 2 3 4", "Jump directly to tab"},
+		{"1 2 3 4 5", "Jump directly to tab"},
 		{"Right / Left", "Next / previous tab"},
 		{"Esc", "Unfocus chat input"},
-		{"j / k", "Scroll down / up (logs)"},
+		{"j / k", "Scroll down / up (skills, logs)"},
+		{"g / G", "Jump to top / bottom (skills)"},
 		{"c", "Copy logs to clipboard (logs)"},
 		{"Enter", "Send message (chat)"},
 		{"q / Ctrl+C", "Quit (not in chat input)"},
