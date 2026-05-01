@@ -11,7 +11,7 @@
 Built by [Sourav Singh](https://souravailabs.ai/about/) / [Sourav AI Labs](https://souravailabs.ai)
 
 [![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/srvsngh99/mini-krill/releases)
-[![Go](https://img.shields.io/badge/Go-1.22+-00ADD8.svg?logo=go)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.24+-00ADD8.svg?logo=go)](https://go.dev/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)]()
 
@@ -27,7 +27,7 @@ Most AI agents need API keys, cloud accounts, or complex setup before you can us
 - Switch to ChatGPT (via Codex CLI) or Claude (via Claude Code CLI) using your existing subscription
 - Every action goes through a **plan-before-execute** loop — the agent shows its plan and waits for your approval before acting
 - Chat from anywhere — **Telegram bot, terminal CLI, TUI dashboard, or Discord bot** — with shared memory across all interfaces
-- Runs seamlessly on **Windows, Linux, and macOS** — single binary, zero dependencies
+- Runs on **Windows, Linux, and macOS** — single binary; local inference uses Ollama
 - Your data, your machine, your rules
 
 ---
@@ -415,7 +415,7 @@ go test ./...
 golangci-lint run
 ```
 
-Requires Go 1.22+. See [docs/TESTING.md](docs/TESTING.md) for the full test checklist.
+Requires Go 1.24+. See [docs/TESTING.md](docs/TESTING.md) for the full test checklist.
 
 ---
 
