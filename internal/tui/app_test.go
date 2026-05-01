@@ -33,7 +33,7 @@ func TestSetInitialTab(t *testing.T) {
 	}
 
 	// Set to each valid tab
-	for _, tab := range []int{TabDashboard, TabChat, TabSkills, TabLogs, TabHelp} {
+	for _, tab := range []int{TabDashboard, TabChat, TabSkills, TabMCP, TabLogs, TabHelp} {
 		app.SetInitialTab(tab)
 		if app.activeTab != tab {
 			t.Errorf("expected tab %d, got %d", tab, app.activeTab)
