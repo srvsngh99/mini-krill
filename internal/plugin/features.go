@@ -22,7 +22,6 @@ import (
 // access to state beyond the standard Execute(ctx, input, llm) signature.
 type FeatureContext struct {
 	Config    *config.Config
-	LLM       core.LLMProvider
 	Reminders *reminder.Store
 }
 
@@ -46,10 +45,9 @@ func NewFeatureSkills(fc FeatureContext) []core.Skill {
 }
 
 func telegramAvailable(cfg *config.Config) bool {
-	if os.Getenv("KRILL_TELEGRAM_TOKEN") != "" {
-		return true
-	}
-	return cfg != nil && cfg.Telegram.Token != ""
+	hasToken := os.Getenv("KRILL_TELEGRAM_TOKEN") != "" || (cfg != nil && cfg.Telegram.Token != "")
+	hasChatID := os.Getenv("KRILL_TELEGRAM_CHAT_ID") != ""
+	return hasToken && hasChatID
 }
 
 // ---------------------------------------------------------------------------
@@ -57,7 +55,8 @@ func telegramAvailable(cfg *config.Config) bool {
 // ---------------------------------------------------------------------------
 
 // urlPattern is a simple regex to extract a URL from user input.
-var urlPattern = regexp.MustCompile(`https?://[^\s<>"]+`)
+// featureURLPattern extracts the first URL from user input for feature skills.
+var featureURLPattern = regexp.MustCompile(`https?://[^\s<>"]+`)
 
 func youtubeSkill() core.Skill {
 	return &selfSkill{
@@ -65,7 +64,7 @@ func youtubeSkill() core.Skill {
 		desc: "Summarize or transcribe a YouTube video from its URL",
 		exec: func(ctx context.Context, input string, llm core.LLMProvider) (string, error) {
 			// Extract URL from input
-			url := urlPattern.FindString(input)
+			url := featureURLPattern.FindString(input)
 			if url == "" {
 				return "Please provide a YouTube URL. Example: youtube https://youtube.com/watch?v=...", nil
 			}
@@ -94,10 +93,10 @@ func youtubeSkill() core.Skill {
 				}
 			}
 
-			// Fallback: return raw transcript (truncated)
+			// Fallback: return raw transcript (rune-safe truncation)
 			transcript := doc.Text
-			if len(transcript) > 3000 {
-				transcript = transcript[:3000] + "\n\n... [transcript truncated]"
+			if len([]rune(transcript)) > 3000 {
+				transcript = string([]rune(transcript)[:3000]) + "\n\n... [transcript truncated]"
 			}
 			return fmt.Sprintf("Video: %s\n\nTranscript:\n%s", doc.Source, transcript), nil
 		},
@@ -137,14 +136,29 @@ func webSkill() core.Skill {
 		name: "web",
 		desc: "Read and summarize any web page from its URL",
 		exec: func(ctx context.Context, input string, llm core.LLMProvider) (string, error) {
-			url := urlPattern.FindString(input)
+			url := featureURLPattern.FindString(input)
 			if url == "" {
 				return "Please provide a URL. Example: web https://example.com/article", nil
 			}
 
-			// If it's a YouTube URL, redirect to youtube skill
+			// If it's a YouTube URL, handle via ReadYouTube directly
 			if content.IsYouTubeURL(url) {
-				return "This looks like a YouTube URL. Try: youtube " + url, nil
+				doc, err := content.ReadYouTube(ctx, url)
+				if err != nil {
+					return fmt.Sprintf("Could not read YouTube video: %v", err), nil
+				}
+				if llm != nil {
+					summary, serr := content.Summarize(ctx, llm, []content.Document{doc},
+						"Summarize this YouTube video transcript concisely with key takeaways.")
+					if serr == nil && summary != "" {
+						return fmt.Sprintf("Video: %s\n\n%s", url, summary), nil
+					}
+				}
+				text := doc.Text
+				if len([]rune(text)) > 3000 {
+					text = string([]rune(text)[:3000]) + "\n\n... [transcript truncated]"
+				}
+				return fmt.Sprintf("Video: %s\n\nTranscript:\n%s", url, text), nil
 			}
 
 			doc, err := content.ReadURL(ctx, url)
@@ -164,10 +178,10 @@ func webSkill() core.Skill {
 				}
 			}
 
-			// Fallback: return raw text (truncated)
+			// Fallback: return raw text (rune-safe truncation)
 			text := doc.Text
-			if len(text) > 3000 {
-				text = text[:3000] + "\n\n... [content truncated]"
+			if len([]rune(text)) > 3000 {
+				text = string([]rune(text)[:3000]) + "\n\n... [content truncated]"
 			}
 			return fmt.Sprintf("Source: %s\n\n%s", url, text), nil
 		},

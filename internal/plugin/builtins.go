@@ -52,7 +52,7 @@ func (r *SkillRegistryImpl) RegisterFeatureSkills(fc FeatureContext) {
 		if err := r.Register(s); err != nil {
 			log.Warn("failed to register feature skill", "name", s.Name(), "error", err)
 		} else {
-			r.categories[s.Name()] = "Built-in"
+			r.categories[s.Name()] = "Feature"
 		}
 	}
 	log.Debug("feature skills registered", "count", len(features))
