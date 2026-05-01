@@ -110,6 +110,50 @@ func TestUpdateKeyMsgNotDoubleDispatched(t *testing.T) {
 	}
 }
 
+func TestLeftRightAlwaysSwitchTabs(t *testing.T) {
+	app := newSizedApp()
+	app.activeTab = TabChat
+	app.chat.Focus()
+
+	if !app.chat.Focused() {
+		t.Fatal("expected chat input to be focused")
+	}
+
+	// Right should switch from Chat to Logs even when chat is focused
+	app.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	if app.activeTab != TabLogs {
+		t.Errorf("expected Right to switch to TabLogs (%d), got %d", TabLogs, app.activeTab)
+	}
+
+	// Go back to Chat and re-focus
+	app.activeTab = TabChat
+	app.chat.Focus()
+
+	// Left should switch from Chat to Dashboard
+	app.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	if app.activeTab != TabDashboard {
+		t.Errorf("expected Left to switch to TabDashboard (%d), got %d", TabDashboard, app.activeTab)
+	}
+}
+
+func TestLeftRightWrapAround(t *testing.T) {
+	app := newSizedApp()
+
+	// From Dashboard, Left should wrap to Help
+	app.activeTab = TabDashboard
+	app.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	if app.activeTab != TabHelp {
+		t.Errorf("expected Left from Dashboard to wrap to TabHelp (%d), got %d", TabHelp, app.activeTab)
+	}
+
+	// From Help, Right should wrap to Dashboard
+	app.activeTab = TabHelp
+	app.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	if app.activeTab != TabDashboard {
+		t.Errorf("expected Right from Help to wrap to TabDashboard (%d), got %d", TabDashboard, app.activeTab)
+	}
+}
+
 func TestEscDoesNotForwardWhenNotInChat(t *testing.T) {
 	app := newSizedApp()
 	app.activeTab = TabDashboard

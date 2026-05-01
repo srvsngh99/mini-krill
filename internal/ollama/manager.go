@@ -309,6 +309,92 @@ func (m *OllamaManager) Pull(ctx context.Context, model string) error {
 	return nil
 }
 
+// PullWithProgress pulls a model and writes human-readable progress to w.
+// Unlike Pull, this is designed for interactive use (e.g. init wizard).
+func (m *OllamaManager) PullWithProgress(ctx context.Context, model string, w io.Writer) error {
+	log.Info("pulling ollama model with progress", "model", model)
+
+	reqBody, err := json.Marshal(map[string]string{"name": model})
+	if err != nil {
+		return fmt.Errorf("marshal pull request: %w", err)
+	}
+
+	url := m.host + "/api/pull"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(reqBody)))
+	if err != nil {
+		return fmt.Errorf("create pull request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	pullClient := &http.Client{}
+	resp, err := pullClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("pull request failed (is ollama running?): %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		errBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("pull returned status %d: %s", resp.StatusCode, string(errBody))
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	for scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+
+		var progress struct {
+			Status    string `json:"status"`
+			Digest    string `json:"digest"`
+			Total     int64  `json:"total"`
+			Completed int64  `json:"completed"`
+			Error     string `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(line), &progress); err != nil {
+			continue
+		}
+
+		if progress.Error != "" {
+			fmt.Fprintf(w, "\n")
+			return fmt.Errorf("ollama pull error: %s", progress.Error)
+		}
+
+		if progress.Total > 0 {
+			pct := float64(progress.Completed) / float64(progress.Total) * 100
+			completedMB := float64(progress.Completed) / (1024 * 1024)
+			totalMB := float64(progress.Total) / (1024 * 1024)
+			if totalMB >= 1024 {
+				fmt.Fprintf(w, "\r  Pulling %s... %.0f%% (%.1f GB / %.1f GB)   ",
+					model, pct, completedMB/1024, totalMB/1024)
+			} else {
+				fmt.Fprintf(w, "\r  Pulling %s... %.0f%% (%.0f MB / %.0f MB)   ",
+					model, pct, completedMB, totalMB)
+			}
+		} else if progress.Status != "" {
+			fmt.Fprintf(w, "\r  Pulling %s... %s   ", model, progress.Status)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(w, "\n")
+		return fmt.Errorf("reading pull response: %w", err)
+	}
+
+	fmt.Fprintf(w, "\r  Pulled %s successfully.                              \n", model)
+	log.Info("model pulled successfully (with progress)", "model", model)
+	return nil
+}
+
 // ListModels queries the Ollama API for all locally available models.
 func (m *OllamaManager) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	url := m.host + "/api/tags"

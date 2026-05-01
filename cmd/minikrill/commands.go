@@ -135,15 +135,15 @@ var initCmd = &cobra.Command{
 			cfg.Ollama.DefaultModel = selectedModel
 
 			if !localSet[selectedModel] {
-				fmt.Printf(cDim+"  Pulling %s in background..."+cReset+"\n", selectedModel)
-				fmt.Println(cDim + "  Run " + cReset + "minikrill doctor" + cDim + " to check pull status." + cReset)
-				ctx := cmd.Context()
-				go func(model string) {
-					if err := mgr.EnsureRunning(ctx); err != nil {
-						return
-					}
-					_ = mgr.Pull(ctx, model)
-				}(selectedModel)
+				fmt.Println()
+				pullCtx := context.Background()
+				if err := mgr.EnsureRunning(pullCtx); err != nil {
+					fmt.Printf(cYellow+"  Could not start Ollama: %v\n"+cReset, err)
+					fmt.Println(cDim + "  You can pull the model later with: ollama pull " + selectedModel + cReset)
+				} else if err := mgr.PullWithProgress(pullCtx, selectedModel, os.Stdout); err != nil {
+					fmt.Printf(cYellow+"  Pull failed: %v\n"+cReset, err)
+					fmt.Println(cDim + "  You can retry with: ollama pull " + selectedModel + cReset)
+				}
 			}
 		case 1: // Codex
 			cfg.LLM.Provider = "codex"

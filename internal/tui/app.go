@@ -152,14 +152,8 @@ func (a *App) View() string {
 		return "\n  Waiting for terminal..."
 	}
 
-	// Chat tab gets a compact header for maximum chat space;
-	// other tabs keep the full ASCII art banner.
-	var header string
-	if a.activeTab == TabChat {
-		header = RenderCompactHeader(a.version, a.width)
-	} else {
-		header = RenderHeader(a.version, a.width)
-	}
+	// Compact header for all tabs to maximize body space.
+	header := RenderCompactHeader(a.version, a.width)
 	tabBar := a.renderTabBar()
 	body := a.renderBody()
 	footer := a.renderFooter()
@@ -231,18 +225,14 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	case "right":
-		if !inChat {
-			a.activeTab = (a.activeTab + 1) % len(a.tabs)
-			a.onTabSwitch()
-			return nil
-		}
+		a.activeTab = (a.activeTab + 1) % len(a.tabs)
+		a.onTabSwitch()
+		return nil
 
 	case "left":
-		if !inChat {
-			a.activeTab = (a.activeTab - 1 + len(a.tabs)) % len(a.tabs)
-			a.onTabSwitch()
-			return nil
-		}
+		a.activeTab = (a.activeTab - 1 + len(a.tabs)) % len(a.tabs)
+		a.onTabSwitch()
+		return nil
 
 	case "1":
 		if !inChat {
@@ -341,12 +331,7 @@ func (a *App) resizeViews() {
 // bodyHeight computes the available vertical space for view content
 // by subtracting the actual rendered header, tab bar, and footer heights.
 func (a *App) bodyHeight() int {
-	var header string
-	if a.activeTab == TabChat {
-		header = RenderCompactHeader(a.version, a.width)
-	} else {
-		header = RenderHeader(a.version, a.width)
-	}
+	header := RenderCompactHeader(a.version, a.width)
 	tabBar := a.renderTabBar()
 	footer := a.renderFooter()
 
