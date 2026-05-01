@@ -44,6 +44,20 @@ func (r *SkillRegistryImpl) RegisterSelfSkills(sc SelfContext) {
 	log.Debug("self-awareness skills registered", "count", len(selfSkills))
 }
 
+// RegisterFeatureSkills registers chat skills wrapping CLI-only features
+// (YouTube, reminders, web research, notifications).
+func (r *SkillRegistryImpl) RegisterFeatureSkills(fc FeatureContext) {
+	features := NewFeatureSkills(fc)
+	for _, s := range features {
+		if err := r.Register(s); err != nil {
+			log.Warn("failed to register feature skill", "name", s.Name(), "error", err)
+		} else {
+			r.categories[s.Name()] = "Built-in"
+		}
+	}
+	log.Debug("feature skills registered", "count", len(features))
+}
+
 // ---------------------------------------------------------------------------
 // recall skill
 // ---------------------------------------------------------------------------

@@ -237,7 +237,21 @@ func selfSkills(sc SelfContext) core.Skill {
 		exec: func(_ context.Context, _ string, _ core.LLMProvider) (string, error) {
 			skills := sc.Skills.List()
 			var sb strings.Builder
-			sb.WriteString(fmt.Sprintf("=== KRILL SKILLS (%d registered) ===\n\n", len(skills)))
+
+			// TLDR — high-level capabilities summary shown first
+			sb.WriteString("=== WHAT I CAN DO ===\n\n")
+			sb.WriteString("• Chat & discuss any topic naturally\n")
+			sb.WriteString("• Summarize YouTube videos — just paste a link\n")
+			sb.WriteString("• Set reminders — \"remind me in 30 min to check the build\"\n")
+			sb.WriteString("• Research the web — deep search with sources and citations\n")
+			sb.WriteString("• Read & summarize web pages — paste any URL\n")
+			sb.WriteString("• Summarize text, explain code, debug errors, brainstorm ideas\n")
+			sb.WriteString("• Send Telegram notifications\n")
+			sb.WriteString("• Manage my own personality, memory, and configuration\n")
+			sb.WriteString("• Plan and execute multi-step tasks\n\n")
+
+			// Detailed skill list
+			sb.WriteString(fmt.Sprintf("=== REGISTERED SKILLS (%d) ===\n\n", len(skills)))
 			for _, s := range skills {
 				status := "on"
 				if !s.Enabled {

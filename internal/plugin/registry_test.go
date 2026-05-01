@@ -302,6 +302,37 @@ func TestSkillRegistryDisableUnknown(t *testing.T) {
 	}
 }
 
+func TestFeatureSkillsRegistration(t *testing.T) {
+	reg := NewRegistry()
+
+	// Register with nil reminders and no Telegram — should get youtube, research, web
+	reg.RegisterFeatureSkills(FeatureContext{})
+
+	expected := []string{"youtube", "research", "web"}
+	for _, name := range expected {
+		if _, ok := reg.Get(name); !ok {
+			t.Errorf("feature skill %q not registered", name)
+		}
+	}
+
+	// remind and notify should NOT be registered (nil store, no token)
+	if _, ok := reg.Get("remind"); ok {
+		t.Error("remind should not be registered without a Store")
+	}
+	if _, ok := reg.Get("notify"); ok {
+		t.Error("notify should not be registered without Telegram config")
+	}
+
+	// Verify categories are set to Built-in
+	for _, info := range reg.List() {
+		for _, name := range expected {
+			if info.Name == name && info.Category != "Built-in" {
+				t.Errorf("feature skill %q category = %q, want Built-in", name, info.Category)
+			}
+		}
+	}
+}
+
 func TestRecallSkill(t *testing.T) {
 	reg := NewRegistry()
 	reg.RegisterBuiltins()
