@@ -34,7 +34,7 @@ type chatEntry struct {
 // DashboardView
 // ---------------------------------------------------------------------------
 
-// DashboardView shows system status, active sub-krills, and a krill fact.
+// DashboardView shows system status and a krill fact.
 type DashboardView struct {
 	status  core.HealthStatus
 	fact    string
@@ -68,10 +68,9 @@ func (d *DashboardView) View() string {
 		return "Terminal too small..."
 	}
 
-	// Calculate panel widths - leave room for borders and padding
-	panelWidth := (d.width - 6) / 2
+	panelWidth := d.width - 4
 	if panelWidth < 20 {
-		panelWidth = d.width - 4
+		panelWidth = 20
 	}
 
 	// --- System Status panel ---
@@ -99,24 +98,12 @@ func (d *DashboardView) View() string {
 	statusContent := strings.Join(statusLines, "\n")
 	statusBox := RenderBox("  System Status", statusContent, panelWidth)
 
-	// --- Active Sub-Krills panel ---
-	subKrillContent := DimStyle.Render("No active sub-krills\nThe swarm is resting...")
-	subKrillBox := RenderBox("  Active Sub-Krills", subKrillContent, panelWidth)
-
 	// --- Krill Fact panel ---
 	factWrapped := wordWrap(d.fact, d.width-8)
 	factContent := AccentStyle.Render("  " + factWrapped)
-	factBox := RenderBox("  Did You Know?", factContent, d.width-4)
+	factBox := RenderBox("  Did You Know?", factContent, panelWidth)
 
-	// Layout: status + sub-krills side by side, fact below
-	if panelWidth < d.width-4 {
-		// Wide enough for side-by-side
-		topRow := lipgloss.JoinHorizontal(lipgloss.Top, statusBox, "  ", subKrillBox)
-		return lipgloss.JoinVertical(lipgloss.Left, topRow, "", factBox)
-	}
-
-	// Narrow: stack vertically
-	return lipgloss.JoinVertical(lipgloss.Left, statusBox, "", subKrillBox, "", factBox)
+	return lipgloss.JoinVertical(lipgloss.Left, statusBox, "", factBox)
 }
 
 // ---------------------------------------------------------------------------

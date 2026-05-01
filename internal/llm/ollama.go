@@ -74,6 +74,12 @@ type ollamaChatResponse struct {
 	PromptEvalCount int           `json:"prompt_eval_count"`
 }
 
+type ollamaTagsResponse struct {
+	Models []struct {
+		Name string `json:"name"`
+	} `json:"models"`
+}
+
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
@@ -248,8 +254,35 @@ func (o *OllamaProvider) Available(ctx context.Context) bool {
 		return false
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
-	return resp.StatusCode == http.StatusOK
+
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+
+	var tags ollamaTagsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tags); err != nil {
+		log.Debug("ollama tags decode failed", "error", err)
+		return false
+	}
+
+	target := normalizeModelName(o.model)
+	for _, m := range tags.Models {
+		if normalizeModelName(m.Name) == target {
+			return true
+		}
+	}
+
+	log.Debug("ollama model not found locally", "model", o.model, "available", len(tags.Models))
+	return false
+}
+
+// normalizeModelName lowercases and appends ":latest" if no tag is specified.
+func normalizeModelName(name string) string {
+	name = strings.ToLower(name)
+	if !strings.Contains(name, ":") {
+		name += ":latest"
+	}
+	return name
 }
 
 func isConnectionRefused(err error) bool {
