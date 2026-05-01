@@ -103,7 +103,14 @@ func (d *DashboardView) View() string {
 	factContent := AccentStyle.Render("  " + factWrapped)
 	factBox := RenderBox("  Did You Know?", factContent, panelWidth)
 
-	return lipgloss.JoinVertical(lipgloss.Left, statusBox, "", factBox)
+	// Show ASCII krill art when the terminal is tall enough.
+	spacer := "\n"
+	if d.height >= 30 {
+		logoHeader := RenderHeader(d.version, d.width)
+		return lipgloss.JoinVertical(lipgloss.Left, logoHeader, spacer, statusBox, spacer, factBox)
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, statusBox, spacer, factBox)
 }
 
 // ---------------------------------------------------------------------------
@@ -1093,7 +1100,7 @@ func (h *HelpView) View() string {
 		ValueStyle.Render("  Local-first with Ollama, but can connect to cloud LLMs too."),
 		"",
 		DimStyle.Render("  Built with: Go, Bubble Tea, Lip Gloss, Ollama"),
-		DimStyle.Render("  Inspired by DeepKrill - another crustaceous AI agent"),
+		DimStyle.Render("  "+brand.Credits),
 		"",
 		AccentStyle.Render(fmt.Sprintf("  %s", randomKrillFact())),
 	)

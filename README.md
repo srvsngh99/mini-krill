@@ -1,24 +1,14 @@
-```text
-        .-''''''''-.
-     .-'   .----.   '-.
-   .'    .'  __  '.    '.
-  /     /  .'oo'.  \     \
- ;     |  /_____)   |     ;
- |     |   / / /    |     |
- ;     |  /_/ /__   |     ;
-  \     \    '--'  /     /
-   '.    '._    _.'    .'
-     '-.     '''     .-'
-        '-.______.-'
-```
-
 <div align="center">
+
+<img src="assets/logo.png" alt="Mini Krill" width="200">
 
 # Mini Krill
 
 ### Your Crustaceous AI Buddy
 
-**A lightweight, open-source AI agent by Sourav Singh / Sourav AI Labs that runs locally or through subscription-backed CLIs. Thinks, plans, and acts - with personality.**
+**A lightweight, open-source AI agent that runs locally or through subscription-backed CLIs. Thinks, plans, and acts — with personality.**
+
+Built by [Sourav Singh](https://souravailabs.ai/about/) / [Sourav AI Labs](https://souravailabs.ai)
 
 [![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/srvsngh99/mini-krill/releases)
 [![Go](https://img.shields.io/badge/Go-1.22+-00ADD8.svg?logo=go)](https://go.dev/)
@@ -29,76 +19,69 @@
 
 ---
 
-## Feature Highlights
+## Why Mini Krill?
 
-- **Local-first** - runs via Ollama, no cloud account needed
-- **Subscription optional** - switches to Codex or Claude Code through their official CLIs
-- **Plan-before-execute** - always shows its plan, waits for your approval before acting
-- **Personality** - not a boring assistant, a crustaceous AI buddy with soul
-- **Plugin system** - YAML-based skill registry for extensible capabilities
-- **Unified chat memory** - move between CLI, TUI, Telegram, and Discord with shared continuity
-- **Telegram and Discord** - built-in chat bot support for both platforms
-- **Krill-themed TUI** - beautiful terminal dashboard with real-time status
-- **Brain with memory** - remembers context and conversations across sessions
-- **Heartbeat monitoring** - always knows its own health and resource usage
-- **Doctor and sonar** - diagnostic health checks and quick pings
-- **One-command install** - single binary, no runtime dependencies
-- **Cross-platform** - Linux, macOS, and Windows
-- **Lightweight** - roughly 15MB binary, minimal memory footprint
+Most AI agents need API keys, cloud accounts, or complex setup before you can use them. Mini Krill takes a different approach: **start local, stay private, upgrade when you want to.**
+
+- Run entirely on your machine with [Ollama](https://ollama.com) — no cloud account needed
+- Switch to ChatGPT (via Codex CLI) or Claude (via Claude Code CLI) using your existing subscription
+- Every action goes through a **plan-before-execute** loop — the agent shows its plan and waits for your approval before acting
+- Chat from anywhere — **Telegram bot, terminal CLI, TUI dashboard, or Discord bot** — with shared memory across all interfaces
+- Runs seamlessly on **Windows, Linux, and macOS** — single binary, zero dependencies
+- Your data, your machine, your rules
 
 ---
 
 ## Quick Start
 
 ```bash
-# Install (one-liner)
+# Install
 curl -fsSL https://raw.githubusercontent.com/srvsngh99/mini-krill/main/scripts/install.sh | bash
-
-# Or via Go
-go install github.com/srvsngh99/mini-krill/cmd/minikrill@latest
 
 # Setup
 minikrill init
 
-# Start chatting
+# Chat
 minikrill chat
 ```
+
+That's it. The init wizard walks you through choosing a provider (Ollama, Codex, or Claude Code).
+
+---
+
+## Features
+
+| Feature | Description |
+|---------|-------------|
+| **Local-first** | Runs via Ollama with no cloud dependency |
+| **Subscription optional** | Switch to Codex or Claude Code through their official CLIs |
+| **Plan-before-execute** | Shows its plan, waits for approval before acting |
+| **Personality** | Not a boring assistant — a crustaceous AI buddy with soul |
+| **Plugin system** | YAML-based skill registry for extensible capabilities |
+| **Unified memory** | Move between CLI, TUI, Telegram, and Discord with shared continuity |
+| **Chat bots** | Built-in Telegram and Discord bot support |
+| **TUI dashboard** | Ocean-themed terminal UI with real-time status |
+| **Persistent brain** | Remembers context and conversations across sessions |
+| **Health monitoring** | Heartbeat, doctor diagnostics, and sonar pings |
+| **Cross-platform** | Linux, macOS, and Windows — single ~15MB binary |
 
 ---
 
 ## Installation
 
-### Binary Release (recommended)
-
-Download the latest release for your platform from the
-[Releases page](https://github.com/srvsngh99/mini-krill/releases).
-
-Extract and move the binary to your PATH:
-
-```bash
-tar -xzf minikrill_<version>_<os>_<arch>.tar.gz
-sudo mv minikrill /usr/local/bin/
-```
-
-### Curl Installer
+### One-liner (Linux / macOS)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/srvsngh99/mini-krill/main/scripts/install.sh | bash
 ```
 
-This detects Linux/macOS and architecture, downloads the correct binary, and places it in `/usr/local/bin` or `~/.local/bin`.
-
-### Windows Installer
+### Windows
 
 ```powershell
 irm https://raw.githubusercontent.com/srvsngh99/mini-krill/main/scripts/install.ps1 | iex
 ```
 
-This installs the Windows binary under `%LOCALAPPDATA%\MiniKrill\bin` and adds it to your user PATH.
-
 ### Go Install
-
-Requires Go 1.22 or later:
 
 ```bash
 go install github.com/srvsngh99/mini-krill/cmd/minikrill@latest
@@ -111,82 +94,255 @@ docker pull ghcr.io/srvsngh99/mini-krill:latest
 docker run -it --rm ghcr.io/srvsngh99/mini-krill:latest chat
 ```
 
-Or use docker-compose (see the [Docker section](#docker) below).
-
 ### Build from Source
 
 ```bash
 git clone https://github.com/srvsngh99/mini-krill.git
 cd mini-krill
 go build -o minikrill ./cmd/minikrill
-sudo mv minikrill /usr/local/bin/
 ```
+
+See [docs/INSTALL.md](docs/INSTALL.md) for detailed setup including binary releases, Docker Compose, and PATH configuration.
 
 ---
 
 ## Provider Setup
 
-Mini Krill starts with Ollama and can switch to subscription-backed CLIs without API keys:
+Mini Krill starts with Ollama and can switch to subscription-backed CLIs without storing any API keys:
 
 ```bash
-# Local/private
-minikrill ollama ensure
+# Local — fully private
+minikrill ollama ensure        # installs Ollama + pulls a model
 minikrill chat
 /use local
 ```
 
-Recommended local model: `gemma3:4b`. If the machine is low on RAM, use `llama3.2:3b`.
+Recommended local model: `gemma3:4b` (or `llama3.2:3b` for low-RAM machines).
 
 ```bash
-# ChatGPT subscription via official Codex CLI
+# ChatGPT subscription via Codex CLI
 codex login
 minikrill chat
 /use codex
 ```
 
-Codex CLI models exposed on current subscription installs include `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex`, and `gpt-5.2`. Mini Krill defaults to `auto` so the official CLI can choose the plan-appropriate default.
-
 ```bash
-# Claude subscription via official Claude Code CLI
+# Claude subscription via Claude Code CLI
 claude auth login
 minikrill chat
 /use claude
 ```
 
-Claude Code model aliases exposed on current subscription installs include `opus`, `sonnet`, and `haiku`. Mini Krill defaults to `auto`.
+Mini Krill does **not** read or store Codex/Claude OAuth tokens. Authentication is fully delegated to the official provider CLIs.
 
-Mini Krill does not read or store Codex/Claude OAuth tokens. Those credentials stay owned by the official provider CLIs.
+Switch providers any time inside chat:
 
-Mandatory setup: choose one provider in `minikrill init`.
-Optional setup: Codex login, Claude login, Telegram token, Discord token, and later API keys.
+```text
+/models         # list providers and auth status
+/use local      # switch to Ollama
+/use codex      # switch to Codex CLI
+/use claude     # switch to Claude Code
+```
 
-### Test Checklist
+---
+
+## Usage
+
+### Interactive Chat
 
 ```bash
-minikrill doctor
-minikrill run /models
-minikrill run "remember that I prefer short answers"
-minikrill run "what do you remember about my preferences?"
 minikrill chat
 ```
 
-Memory note: Mini Krill does not fine-tune or modify the model itself. It stores chat continuity and user preferences locally, then supplies that context to whichever provider is active.
+### One-shot Mode
 
-Provider switching can be tested inside any chat interface:
-
-```text
-/models
-/use local
-/use codex
-/use claude
-/model
+```bash
+minikrill run "remember that I prefer short answers"
+minikrill run "what do you remember about my preferences?"
 ```
+
+### TUI Dashboard
+
+```bash
+minikrill tui
+```
+
+### Background Services (Telegram / Discord)
+
+```bash
+minikrill dive              # start in background
+minikrill dive --foreground  # start in foreground (for testing)
+minikrill surface            # stop gracefully
+```
+
+### Health Checks
+
+```bash
+minikrill doctor   # full diagnostic
+minikrill sonar    # quick health ping
+```
+
+### Brain & Memory
+
+```bash
+minikrill brain status    # memory stats
+minikrill brain recall    # recall a memory by key
+minikrill brain search    # search memories
+minikrill brain forget    # remove a memory
+```
+
+### Content & Research
+
+```bash
+minikrill summarize README.md
+minikrill web summarize https://example.com
+minikrill research "best local model for 8GB RAM"
+```
+
+Files, web pages, and search results are treated as untrusted content — Mini Krill summarizes them as data and never lets retrieved text trigger tools or actions.
+
+### Ollama Management
+
+```bash
+minikrill ollama install   # install Ollama
+minikrill ollama start     # start server
+minikrill ollama pull      # pull a model
+minikrill ollama list      # list downloaded models
+minikrill ollama status    # check if running
+```
+
+See the full [CLI reference](docs/INSTALL.md) or run `minikrill --help`.
+
+---
+
+## Architecture
+
+Mini Krill is built as loosely-coupled Go packages with clear dependency boundaries:
+
+```
+cmd/minikrill/       CLI entry point (Cobra)
+internal/
+  agent/             Core agent loop: think, plan, act
+  brain/             Memory, personality, heartbeat, conversation store
+  llm/               Provider abstraction (Ollama, Codex CLI, Claude Code, cloud APIs)
+  plugin/            Skill registry, YAML skills, MCP server registry
+  chat/              Chat session management
+  tui/               Terminal UI (Bubble Tea)
+  safety/            Untrusted content sandboxing
+  content/           Web/file/YouTube content fetching
+  doctor/            Health diagnostics
+  config/            YAML + environment variable configuration
+```
+
+The agent follows a **plan-before-execute** workflow:
+
+1. **Receive** user input from any interface (CLI, TUI, Telegram, Discord)
+2. **Think** — classify intent, consult memory and preferences
+3. **Plan** — generate a step-by-step plan for task requests
+4. **Approve** — present the plan and wait for user approval
+5. **Execute** — carry out approved steps, update memory
+6. **Respond** — deliver results with personality
+
+---
+
+## Security & Privacy
+
+Mini Krill is designed with a local-first, privacy-respecting architecture. Here is how your data stays protected:
+
+### Nothing leaves your machine (with Ollama)
+
+When using Ollama as the LLM provider, all prompts, responses, memories, and conversations stay entirely on your local machine. No data is sent to any external server.
+
+### No telemetry
+
+Mini Krill never phones home, collects analytics, or sends usage data. There is no telemetry of any kind.
+
+### Credential delegation
+
+Mini Krill does **not** store or read OAuth tokens for Codex or Claude Code. Authentication is fully owned by the official provider CLIs (`codex login`, `claude auth login`). Mini Krill simply calls these CLIs as subprocesses.
+
+### Untrusted content sandboxing
+
+All external content (files, web pages, search results, YouTube transcripts) is wrapped through a security boundary before reaching the LLM. The `safety` package:
+
+- Marks content as `UNTRUSTED` with explicit rules preventing the LLM from following embedded instructions
+- Truncates content to safe limits (18,000 characters by default)
+- Strips null bytes and control characters
+
+This prevents prompt injection attacks from external content sources.
+
+### SSRF protection
+
+The HTTP client blocks requests to private, loopback, and link-local IP addresses, preventing server-side request forgery when fetching web content or following redirects.
+
+### Secrets never in source
+
+The `.gitignore` explicitly blocks `.env`, `credentials.*`, `*.key`, and `*.pem` files. API keys are only accepted via environment variables at runtime — never stored in config files or source code.
+
+### Local data storage
+
+All persistent data lives in `~/.mini-krill/` on your machine:
+
+```
+~/.mini-krill/
+  config.yaml              # configuration
+  brain/
+    conversations.jsonl    # chat history (JSONL)
+    memories/              # persistent memories
+    soul.yaml              # personality config
+    heartbeat.json         # health state
+  skills/                  # user-defined skills
+  logs/                    # runtime logs
+```
+
+---
+
+## Configuration
+
+### config.yaml
+
+```yaml
+llm:
+  provider: ollama          # ollama | codex | claude
+  model: gemma3:4b          # or "auto" for subscription CLIs
+  temperature: 0.7
+  max_tokens: 4096
+
+personality:
+  name: Krill
+  style: friendly           # friendly | professional | chaotic
+  krill_facts: true
+
+telegram:
+  enabled: false
+  token: ""                 # set via KRILL_TELEGRAM_TOKEN env var
+
+discord:
+  enabled: false
+  token: ""                 # set via KRILL_DISCORD_TOKEN env var
+
+heartbeat:
+  interval: 30s
+  checks: [llm, memory, disk]
+```
+
+### Environment Variables
+
+| Variable | Description |
+|---|---|
+| `KRILL_LLM_PROVIDER` | LLM provider (ollama, codex, claude, openai, anthropic, google) |
+| `KRILL_LLM_API_KEY` | API key for direct cloud API access (not needed for Ollama, Codex CLI, or Claude CLI) |
+| `KRILL_LLM_MODEL` | Model name |
+| `KRILL_TELEGRAM_TOKEN` | Telegram bot token |
+| `KRILL_DISCORD_TOKEN` | Discord bot token |
+| `KRILL_DATA_DIR` | Override data directory (default: `~/.mini-krill`) |
+| `KRILL_LOG_LEVEL` | Log level: debug, info, warn, error |
 
 ---
 
 ## Documentation
 
-Dedicated docs live in [`docs/`](docs/):
+Detailed guides live in [`docs/`](docs/):
 
 - [Installation and setup](docs/INSTALL.md)
 - [Provider switching](docs/PROVIDERS.md)
@@ -196,353 +352,19 @@ Dedicated docs live in [`docs/`](docs/):
 - [Testing checklist](docs/TESTING.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 
-CLI help is available with:
-
-```bash
-minikrill --help
-minikrill <command> --help
-minikrill chat
-```
-
-Inside chat, type `help`.
-
----
-
-## Usage
-
-### Pure CLI Quickstart
-
-```bash
-minikrill init
-minikrill ollama ensure
-minikrill run /models
-minikrill chat
-```
-
-Switch providers inside chat:
-
-```text
-/use local
-/use codex
-/use claude
-```
-
-One-shot mode:
-
-```bash
-minikrill run "remember that I prefer short answers"
-minikrill run "what do you remember"
-```
-
-### Automation Quickstart
-
-```bash
-minikrill remind "check the build in 10 minutes"
-minikrill reminders list
-minikrill dive --foreground
-```
-
-```bash
-minikrill summarize README.md
-minikrill web summarize https://example.com
-minikrill research "best local model for 8GB RAM"
-```
-
-Files, web pages, and search results are treated as untrusted content. Mini Krill summarizes them as data and does not let retrieved text trigger tools or scheduled tasks.
-
-### `minikrill init`
-
-Interactive setup wizard. Walks you through choosing Ollama, Codex, or Claude Code. Codex and Claude authentication is delegated to their official CLIs, so Mini Krill does not store subscription OAuth tokens.
-
-```bash
-minikrill init
-```
-
-### `minikrill chat`
-
-Start an interactive chat session with your krill agent. The agent thinks, plans, and responds with personality.
-
-```bash
-minikrill chat
-```
-
-Useful chat commands:
-
-```text
-/model          # Show active provider and model
-/models         # List providers and auth status
-/use local      # Switch to Ollama
-/use codex      # Switch to Codex CLI
-/use claude     # Switch to Claude Code
-/auth codex     # Show Codex login instructions
-/auth claude    # Show Claude login instructions
-```
-
-### `minikrill dive`
-
-Start Mini Krill's background services, including heartbeat monitoring and configured Telegram/Discord bots.
-
-```bash
-minikrill dive
-```
-
-Telegram and Discord integrations run through `minikrill dive`. Use `--foreground` while testing:
-
-```bash
-minikrill dive --foreground
-```
-
-### Telegram
-
-Create a bot with BotFather, then either use the setup wizard or environment variables:
-
-```bash
-export KRILL_TELEGRAM_TOKEN="123456:bot-token"
-minikrill dive --foreground
-```
-
-Optional allow-list:
-
-```bash
-export KRILL_TELEGRAM_ALLOWED_IDS="123456789,987654321"
-```
-
-Telegram commands:
-
-```text
-/start
-/help
-/status
-/model
-/models
-/switch local
-/switch codex gpt-5.5
-/switch claude sonnet
-```
-
-One-off notification:
-
-```bash
-export KRILL_TELEGRAM_CHAT_ID="123456789"
-minikrill notify "Mini Krill is running"
-```
-
-### Discord
-
-Create a Discord application and bot, enable Message Content Intent, invite it to your server, then configure:
-
-```bash
-export KRILL_DISCORD_TOKEN="discord-bot-token"
-minikrill dive --foreground
-```
-
-Optional server/channel filtering in `~/.mini-krill/config.yaml`:
-
-```yaml
-discord:
-  enabled: true
-  guild_id: "your-server-id"
-  channel_id: "your-channel-id"
-```
-
-Discord commands:
-
-```text
-!help
-!status
-!fact
-!plan
-```
-
-You can also mention the bot or DM it. Normal chat commands like `/models`, `/use codex`, and `remember that ...` go through the shared agent memory.
-
-### `minikrill surface`
-
-Stop a running Mini Krill instance gracefully.
-
-```bash
-minikrill surface
-```
-
-### `minikrill tui`
-
-Launch the krill-themed terminal dashboard. Shows live status, recent conversations, memory state, and health metrics.
-
-```bash
-minikrill tui
-```
-
-### `minikrill doctor`
-
-Run a full health diagnostic. Checks LLM connectivity, memory integrity, plugin status, and system resources.
-
-```bash
-minikrill doctor
-```
-
-### `minikrill sonar`
-
-Quick health ping. Returns a one-line status - useful for scripts and monitoring.
-
-```bash
-minikrill sonar
-```
-
-### `minikrill version`
-
-Print version, build info, and Go runtime details.
-
-```bash
-minikrill version
-```
-
-### `minikrill ollama`
-
-Manage the local Ollama installation and models:
-
-```bash
-minikrill ollama install    # Install Ollama if not present
-minikrill ollama start      # Start the Ollama server
-minikrill ollama stop       # Stop the Ollama server
-minikrill ollama pull       # Pull a model (e.g., llama3, mistral)
-minikrill ollama list       # List downloaded models
-minikrill ollama status     # Check if Ollama is running
-```
-
-### `minikrill skill`
-
-Manage skills and plugins:
-
-```bash
-minikrill skill list        # List all registered skills
-```
-
-### `minikrill brain`
-
-Inspect and manage the brain (memory) system:
-
-```bash
-minikrill brain status      # Show memory stats and health
-minikrill brain recall      # Recall a specific memory by key
-minikrill brain forget      # Remove a memory entry
-minikrill brain search      # Search memories by keyword
-```
-
----
-
-## Configuration
-
-Mini Krill stores its configuration and data in `~/.mini-krill/`.
-
-### Directory Structure
-
-```
-~/.mini-krill/
-  config.yaml          # Main configuration
-  brain/
-    conversations.jsonl # Unified chat continuity across interfaces
-    memories/           # Durable memories and preferences
-    soul.yaml          # Personality and behavior config
-    heartbeat.json     # Health state
-  skills/              # User-defined skill files
-  logs/                # Runtime logs
-```
-
-### config.yaml
-
-```yaml
-llm:
-  provider: ollama          # ollama | codex | claude
-  model: gemma3:4b          # recommended local model, or auto for subscription CLIs
-  api_key: ""               # reserved for future API-provider support
-  base_url: ""              # Override endpoint (optional)
-  temperature: 0.7
-  max_tokens: 4096
-
-personality:
-  name: Krill
-  style: friendly           # friendly | professional | chaotic
-  krill_facts: true         # Sprinkle krill facts in responses
-
-telegram:
-  enabled: false
-  token: ""
-
-discord:
-  enabled: false
-  token: ""
-
-mcp:
-  servers: {}               # MCP server configurations
-
-heartbeat:
-  interval: 30s
-  checks:
-    - llm
-    - memory
-    - disk
-```
-
-### Environment Variables
-
-All config values can be overridden with environment variables:
-
-| Variable | Description |
-|---|---|
-| `KRILL_LLM_PROVIDER` | LLM provider (ollama, openai, anthropic, google) |
-| `KRILL_LLM_API_KEY` | API key for cloud providers |
-| `KRILL_LLM_MODEL` | Model name |
-| `KRILL_TELEGRAM_TOKEN` | Telegram bot token |
-| `KRILL_DISCORD_TOKEN` | Discord bot token |
-| `KRILL_DATA_DIR` | Override data directory (default: ~/.mini-krill) |
-| `KRILL_LOG_LEVEL` | Log level: debug, info, warn, error |
-
----
-
-## Architecture
-
-Mini Krill is built as a set of loosely-coupled Go packages:
-
-```
-cmd/minikrill/       Entry point and CLI wiring (Cobra)
-internal/
-  agent/             Core agent loop: think, plan, act
-  brain/             Memory, soul, personality, heartbeat
-  llm/               LLM provider abstraction (Ollama, Codex CLI, Claude Code, etc.)
-  plugin/            Skill registry and YAML skill loader
-  chat/              Interactive chat session management
-  tui/               Terminal UI (Bubble Tea)
-  doctor/            Health diagnostics and sonar
-  telegram/          Telegram bot adapter
-  discord/           Discord bot adapter
-  mcp/               MCP client and server registry
-  config/            Configuration loading and validation
-```
-
-The agent follows a **plan-before-execute** workflow:
-
-1. Receive user input
-2. Think - analyze intent and context, consult memory
-3. Plan - generate a step-by-step plan
-4. Present plan to user and wait for approval
-5. Execute - carry out approved steps, update memory
-6. Respond - deliver results with personality
-
 ---
 
 ## Skills and Plugins
 
 ### Built-in Skills
 
-Mini Krill ships with a handful of built-in skills:
+- **recall** — search and retrieve memories
+- **sysinfo** — OS, CPU, memory, disk info
+- **time** — current time, timezone conversions
 
-- **recall** - search and retrieve memories from the brain
-- **sysinfo** - report system information (OS, CPU, memory, disk)
-- **time** - current time, timezone conversions, countdowns
+### Custom YAML Skills
 
-### Creating a Custom Skill
-
-Skills are defined as YAML files in `~/.mini-krill/skills/` or the project's `skills/` directory:
+Define skills as YAML files in `~/.mini-krill/skills/`:
 
 ```yaml
 name: weather
@@ -550,16 +372,13 @@ description: Get the current weather for a location
 trigger: "weather in {location}"
 steps:
   - type: http
-    method: GET
     url: "https://wttr.in/{{.location}}?format=3"
     capture: result
   - type: respond
     message: "{{.result}}"
 ```
 
-Current YAML skills are prompt-template skills: they render user input into a reusable LLM prompt. Shell, HTTP, and branch step skills are planned for a later release.
-
-### MCP Server Configuration
+### MCP Server Support
 
 Add MCP servers in `config.yaml`:
 
@@ -569,140 +388,68 @@ mcp:
     - name: filesystem
       command: npx
       args: ["-y", "@anthropic/mcp-filesystem", "/home/user/documents"]
-    - name: github
-      command: npx
-      args: ["-y", "@anthropic/mcp-github"]
-      env:
-        GITHUB_TOKEN: "your-token"
 ```
-
-MCP server registration is available. Full tool invocation from plans is tracked as a future capability.
 
 ---
 
 ## Docker
 
-A `docker-compose.yaml` is provided for running Mini Krill alongside Ollama:
+A `docker-compose.yaml` runs Mini Krill alongside Ollama with persistent volumes:
 
 ```bash
-# Start Mini Krill + Ollama
 docker-compose up -d
-
-# Pull a model inside the Ollama container
 docker-compose exec ollama ollama pull llama3
-
-# Chat
 docker-compose exec minikrill minikrill chat
-
-# Stop
 docker-compose down
 ```
-
-The compose file mounts `~/.mini-krill` as a volume so configuration and memory persist across restarts.
 
 ---
 
 ## Development
 
-### Prerequisites
-
-- Go 1.22 or later
-- (Optional) Ollama for local LLM testing
-
-### Building
-
 ```bash
 git clone https://github.com/srvsngh99/mini-krill.git
 cd mini-krill
 go build -o minikrill ./cmd/minikrill
-```
-
-### Running Tests
-
-```bash
-# All tests
 go test ./...
-
-# With verbose output
-go test -v ./...
-
-# Specific package
-go test -v ./internal/agent/...
-
-# With coverage
-go test -cover ./...
-```
-
-### Linting
-
-```bash
 golangci-lint run
 ```
 
-### Project Structure
-
-```
-mini-krill/
-  cmd/minikrill/         CLI entry point
-  internal/              All internal packages
-  config/                Default config files
-  skills/                Built-in skill definitions
-  scripts/               Install and utility scripts
-  testdata/              Test fixtures
-  .github/workflows/     CI and release pipelines
-  go.mod                 Go module definition
-  LICENSE                MIT license
-  README.md              This file
-  CHANGELOG.md           Version history
-  VERSION                Current version
-```
+Requires Go 1.22+. See [docs/TESTING.md](docs/TESTING.md) for the full test checklist.
 
 ---
 
 ## FAQ
 
-**Q: Do I need a cloud API key to use Mini Krill?**
+**Do I need a cloud API key?**
+No. Mini Krill works fully offline with Ollama.
 
-No. Mini Krill works fully offline with Ollama. Run `minikrill ollama install` and `minikrill ollama pull llama3` to get started with no cloud dependency.
+**Is my data sent to the cloud?**
+Only if you choose a cloud provider. With Ollama, everything stays local. Mini Krill never sends telemetry.
 
-**Q: How much memory does it use?**
+**How much memory does it use?**
+The binary uses ~20-40MB RAM. Ollama model memory depends on model size (a 7B model uses ~4-8GB).
 
-The Mini Krill binary itself uses around 20-40MB of RAM. LLM memory usage depends on your provider - Ollama models vary by size (a 7B model uses roughly 4-8GB of RAM).
-
-**Q: Can I use it as a Telegram or Discord bot?**
-
-Yes. Run `minikrill init` and enable Telegram or Discord during setup. Then run `minikrill dive` to start the bot in the background.
-
-**Q: Is my data sent to the cloud?**
-
-Only if you choose a cloud LLM provider. With Ollama, everything stays on your machine. Mini Krill never phones home or sends telemetry.
-
-**Q: How do I update Mini Krill?**
-
-Run the install script again, or `go install github.com/srvsngh99/mini-krill/cmd/minikrill@latest` for the latest version.
+**How do I update?**
+Run the install script again or `go install github.com/srvsngh99/mini-krill/cmd/minikrill@latest`.
 
 ---
 
 ## Contributing
 
-Contributions are welcome. Here is how to get started:
-
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feat/your-feature`
-3. Make your changes and add tests
+3. Make changes and add tests
 4. Run `go test ./...` and `golangci-lint run`
-5. Commit with a clear message
-6. Open a Pull Request
-
-Please read the code of conduct and ensure your PR passes CI before requesting review.
+5. Open a Pull Request
 
 ---
 
 ## Credits
 
-Created by **Sourav Singh** | **Sourav AI Labs**
+Created by **[Sourav Singh](https://souravailabs.ai/about/)** | **[Sourav AI Labs](https://souravailabs.ai)**
 
-Inspired by [DeepKrill](https://github.com/srvsngh99/deepkrill) - the full-featured AI agent platform.
+Inspired by [Jarvis](https://en.wikipedia.org/wiki/J.A.R.V.I.S.) and [OpenClaw](https://github.com/openclaw).
 
 ---
 
@@ -714,6 +461,6 @@ Inspired by [DeepKrill](https://github.com/srvsngh99/deepkrill) - the full-featu
 
 <div align="center">
 <sub>
-Fun krill fact: Antarctic krill (Euphausia superba) have a combined biomass of around 379 million tonnes - making them one of the most abundant animal species on Earth. They are tiny but mighty, just like this CLI tool.
+Fun krill fact: Antarctic krill have a combined biomass of around 379 million tonnes — making them one of the most abundant animal species on Earth. Tiny but mighty, just like this CLI.
 </sub>
 </div>
