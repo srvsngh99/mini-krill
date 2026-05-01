@@ -25,14 +25,18 @@ import (
 // SkillRegistryImpl is the concrete implementation of core.SkillRegistry.
 // Thread-safe via sync.RWMutex.
 type SkillRegistryImpl struct {
-	mu     sync.RWMutex
-	skills map[string]core.Skill
+	mu         sync.RWMutex
+	skills     map[string]core.Skill
+	disabled   map[string]bool   // tracks runtime-disabled skills
+	categories map[string]string // tracks skill category (source)
 }
 
 // NewRegistry creates a new, empty skill registry.
 func NewRegistry() *SkillRegistryImpl {
 	return &SkillRegistryImpl{
-		skills: make(map[string]core.Skill),
+		skills:     make(map[string]core.Skill),
+		disabled:   make(map[string]bool),
+		categories: make(map[string]string),
 	}
 }
 
@@ -72,10 +76,13 @@ func (r *SkillRegistryImpl) Unregister(name string) error {
 	return nil
 }
 
-// Get retrieves a skill by name.
+// Get retrieves a skill by name. Returns nil, false if the skill is disabled.
 func (r *SkillRegistryImpl) Get(name string) (core.Skill, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if r.disabled[name] {
+		return nil, false
+	}
 	skill, ok := r.skills[name]
 	return skill, ok
 }
@@ -87,10 +94,15 @@ func (r *SkillRegistryImpl) List() []core.SkillInfo {
 
 	infos := make([]core.SkillInfo, 0, len(r.skills))
 	for _, s := range r.skills {
+		cat := r.categories[s.Name()]
+		if cat == "" {
+			cat = "Custom / YAML"
+		}
 		infos = append(infos, core.SkillInfo{
 			Name:        s.Name(),
 			Description: s.Description(),
-			Enabled:     true,
+			Enabled:     !r.disabled[s.Name()],
+			Category:    cat,
 		})
 	}
 
@@ -99,6 +111,37 @@ func (r *SkillRegistryImpl) List() []core.SkillInfo {
 	})
 
 	return infos
+}
+
+// SetEnabled toggles a skill's enabled state at runtime.
+// Self-awareness skills (self:*) cannot be disabled — they are the krill's core.
+func (r *SkillRegistryImpl) SetEnabled(name string, enabled bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.skills[name]; !exists {
+		return fmt.Errorf("skill %q not found", name)
+	}
+
+	if !enabled && strings.HasPrefix(name, "self:") {
+		return fmt.Errorf("skill %q cannot be disabled — self-awareness skills are locked", name)
+	}
+
+	if enabled {
+		delete(r.disabled, name)
+	} else {
+		r.disabled[name] = true
+	}
+
+	log.Debug("skill enabled state changed", "name", name, "enabled", enabled)
+	return nil
+}
+
+// IsEnabled returns whether a skill is currently enabled.
+func (r *SkillRegistryImpl) IsEnabled(name string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return !r.disabled[name]
 }
 
 // ---------------------------------------------------------------------------

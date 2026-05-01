@@ -131,7 +131,13 @@ func (a *KrillAgent) Chat(ctx context.Context, input string) (string, error) {
 	a.maybeStoreUserPreference(ctx, input)
 
 	// --- Phase 3: Classify intent ---
-	intent := a.classifyIntent(ctx, input)
+	// Short-circuit: if the message matches a self-skill, it's always CHAT.
+	// This prevents the LLM classifier from routing self-referential questions
+	// (e.g. "what can you do") to the TASK/plan path.
+	intent := "CHAT"
+	if selfSkill, _ := a.detectSelfSkill(input); selfSkill == "" {
+		intent = a.classifyIntent(ctx, input)
+	}
 	log.Debug("intent classified", "input_preview", truncate(input, 50), "intent", intent)
 
 	// --- Phase 4: Route based on intent ---
