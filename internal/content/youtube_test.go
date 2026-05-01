@@ -129,11 +129,15 @@ func TestReadYouTube_Integration(t *testing.T) {
 		"captionTracks":[{"baseUrl":"` + captionBase + `","name":{"simpleText":"English"},"languageCode":"en"}]
 		}}};</script></body></html>`
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(page))
+		if _, err := w.Write([]byte(page)); err != nil {
+			t.Errorf("write page: %v", err)
+		}
 	})
 	mux.HandleFunc("/api/timedtext", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/xml")
-		w.Write([]byte(captionXML))
+		if _, err := w.Write([]byte(captionXML)); err != nil {
+			t.Errorf("write caption XML: %v", err)
+		}
 	})
 
 	srv := httptest.NewServer(mux)

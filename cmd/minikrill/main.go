@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -251,24 +250,6 @@ func friendlyError(err error) string {
 		msg = "Something went wrong in the deep"
 	}
 	return msg
-}
-
-func spinner(done <-chan struct{}) {
-	frames := []string{".", "..", "..."}
-	i := 0
-	ticker := time.NewTicker(400 * time.Millisecond)
-	defer ticker.Stop()
-	fmt.Print(cDimCyan + "  thinking" + cReset)
-	for {
-		select {
-		case <-done:
-			fmt.Print("\r\033[K")
-			return
-		case <-ticker.C:
-			fmt.Print("\r" + cDimCyan + "  thinking" + frames[i%3] + cReset + "   ")
-			i++
-		}
-	}
 }
 
 func truncateStr(s string, n int) string {
