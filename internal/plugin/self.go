@@ -230,14 +230,54 @@ func selfMemory(sc SelfContext) core.Skill {
 	}
 }
 
+// capabilityLine maps a skill name to a user-friendly TLDR line.
+// Only skills that are actually registered appear in the TLDR.
+var capabilityLines = []struct {
+	skill string // skill name to check, or "" for always-shown
+	line  string
+}{
+	{"", "Chat & discuss any topic naturally"},
+	{"youtube", "Summarize YouTube videos — just paste a link"},
+	{"remind", "Set reminders — \"remind me in 30 min to check the build\""},
+	{"research", "Research the web — deep search with sources and citations"},
+	{"web", "Read & summarize web pages — paste any URL"},
+	{"summarize", "Summarize text and documents"},
+	{"explain-code", "Explain code with clear breakdowns"},
+	{"debug", "Debug errors and suggest fixes"},
+	{"brainstorm", "Brainstorm creative ideas"},
+	{"notify", "Send Telegram notifications"},
+	{"self:configure", "Manage my own personality, memory, and configuration"},
+	{"", "Plan and execute multi-step tasks"},
+}
+
 func selfSkills(sc SelfContext) core.Skill {
 	return &selfSkill{
 		name: "self:skills",
 		desc: "List all the krill's registered skills and capabilities",
 		exec: func(_ context.Context, _ string, _ core.LLMProvider) (string, error) {
 			skills := sc.Skills.List()
+
+			// Build a set of registered+enabled skill names
+			registered := make(map[string]bool, len(skills))
+			for _, s := range skills {
+				if s.Enabled {
+					registered[s.Name] = true
+				}
+			}
+
 			var sb strings.Builder
-			sb.WriteString(fmt.Sprintf("=== KRILL SKILLS (%d registered) ===\n\n", len(skills)))
+
+			// TLDR — built dynamically from what's actually registered
+			sb.WriteString("=== WHAT I CAN DO ===\n\n")
+			for _, cap := range capabilityLines {
+				if cap.skill == "" || registered[cap.skill] {
+					sb.WriteString("• " + cap.line + "\n")
+				}
+			}
+			sb.WriteString("\n")
+
+			// Detailed skill list
+			sb.WriteString(fmt.Sprintf("=== REGISTERED SKILLS (%d) ===\n\n", len(skills)))
 			for _, s := range skills {
 				status := "on"
 				if !s.Enabled {

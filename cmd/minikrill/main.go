@@ -166,11 +166,20 @@ func initStack(quiet bool) (*krillStack, error) {
 		DataDir:   config.DataDir(),
 	})
 
+	// Register feature skills (YouTube, reminders, web, research, notify)
+	reminderStore, err := reminder.NewStore(filepath.Join(config.DataDir(), "reminders.jsonl"))
+	if err != nil {
+		klog.Warn("reminder store init failed, remind skill will not be available", "error", err)
+	}
+	skillReg.RegisterFeatureSkills(plugin.FeatureContext{
+		Config:    cfg,
+		Reminders: reminderStore,
+	})
+
 	// Pass recovery config from brain to agent for cold-start continuity
 	cfg.Agent.RecoveryTurns = cfg.Brain.RecoveryTurns
 
 	krillAgent := agent.New(cfg.Agent, providerMgr, krillBrain, skillReg, mcpReg)
-	reminderStore, _ := reminder.NewStore(filepath.Join(config.DataDir(), "reminders.jsonl"))
 	chatHandler := chat.NewHandler(krillAgent, reminderStore)
 
 	return &krillStack{
