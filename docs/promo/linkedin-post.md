@@ -1,28 +1,43 @@
 I built an AI agent from scratch. Today it's open source.
 
-Mini Krill is a local-first AI agent that runs entirely on your machine. No API keys needed. No cloud dependency. Just you, your terminal, and an LLM running locally through Ollama.
+Meet Mini Krill — a local-first AI agent that runs entirely on your machine.
 
-Why did I build it? Because I wanted to understand how autonomous agents actually work — not by reading papers, but by implementing the full loop: reasoning, planning, approval, execution, and memory.
+No API keys. No cloud accounts. No setup friction.
 
-What makes it different:
+Install it, run `minikrill init`, and you're chatting with an AI that lives on your hardware. Everything stays local — your prompts, your conversations, your data. Nothing leaves your machine.
 
-- Runs on Windows, Linux, and macOS — single binary, zero dependencies
-- Starts with Ollama (fully private), switches to ChatGPT or Claude via official CLIs
-- Plan-before-execute: always shows its plan, waits for your approval
-- Chat from anywhere — Telegram bot, terminal CLI, TUI dashboard, or Discord bot — with unified memory across all interfaces. Start a conversation on Telegram from your phone, continue it in your terminal
-- Built-in security: untrusted content sandboxing, SSRF protection, no telemetry
+Here's what makes it different:
 
-Built in Go. ~15,000 lines. 18 internal packages. MIT licensed.
+-> Runs on Windows, Linux, and macOS. Single binary. ~15MB. Zero dependencies.
+
+-> Talk to it from Telegram, your terminal, a TUI dashboard, or Discord. All interfaces share one unified memory — start a conversation on Telegram from your phone, pick it up in your terminal.
+
+-> Powered by Ollama for fully private local inference. Want more power? Switch to ChatGPT or Claude with one command using your existing subscription. No API keys needed either way.
+
+-> Plan-before-execute. The agent always shows you its plan and waits for your approval before acting. Transparent by design.
+
+-> Lightweight and clean. Built in Go. 18 internal packages. No bloat, no framework overhead, no runtime dependencies.
 
 Inspired by Jarvis and OpenClaw.
-
-If you're interested in how AI agents reason, plan, and act — or if you just want a practical local AI assistant — check it out:
 
 https://github.com/srvsngh99/mini-krill
 
 One-liner install:
 curl -fsSL https://raw.githubusercontent.com/srvsngh99/mini-krill/main/scripts/install.sh | bash
 
-I'll be writing more about the architecture decisions and what I learned building this on souravailabs.ai.
+A side note — I paused my 52 Weeks of GenAI Testing journey to build this. The pace of development in AI agents and harnesses has been relentless, and I felt I couldn't afford to just watch from the sidelines. I needed to build, not just test. The GenAI testing series will resume, but in a different form — informed by everything I learned building Mini Krill from the ground up.
+
+I'll be writing more about the architecture and what I learned building this at souravailabs.ai.
+
+I'd love your feedback — try it out and let me know what you think.
 
 #OpenSource #AI #AIAgents #GoLang #LocalFirst #BuildInPublic #SouravAILabs
+
+---
+First comment:
+
+Got questions, feature requests, or found a bug? Open an issue here:
+https://github.com/srvsngh99/mini-krill/issues
+
+Read the full story behind Mini Krill on my blog:
+https://souravailabs.ai/posts/mini-krill-goes-open-source/
