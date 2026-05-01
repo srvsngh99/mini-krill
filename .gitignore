@@ -33,6 +33,9 @@ vendor/
 /logs/
 *.pid
 
+# Local launch/promo drafts
+docs/promo/
+
 # Local AI CLI/session state
 .claude/
 .codex/
