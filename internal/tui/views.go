@@ -620,7 +620,7 @@ func (s *SkillsView) buildItems() {
 	s.items = nil
 
 	// Group skills by category using the registry-provided Category field
-	var builtin, selfAware, custom []registryItem
+	var builtin, feature, selfAware, custom []registryItem
 	if s.registry != nil {
 		for _, sk := range s.registry.List() {
 			cat := sk.Category
@@ -637,6 +637,8 @@ func (s *SkillsView) buildItems() {
 			switch cat {
 			case "Built-in":
 				builtin = append(builtin, item)
+			case "Feature":
+				feature = append(feature, item)
 			case "Self-Awareness":
 				selfAware = append(selfAware, item)
 			default:
@@ -665,6 +667,7 @@ func (s *SkillsView) buildItems() {
 
 	// Assemble in display order
 	s.items = append(s.items, builtin...)
+	s.items = append(s.items, feature...)
 	s.items = append(s.items, selfAware...)
 	s.items = append(s.items, custom...)
 	s.items = append(s.items, mcpItems...)

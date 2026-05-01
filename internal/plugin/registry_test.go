@@ -323,11 +323,11 @@ func TestFeatureSkillsRegistration(t *testing.T) {
 		t.Error("notify should not be registered without Telegram config")
 	}
 
-	// Verify categories are set to Built-in
+	// Verify categories are set to Feature
 	for _, info := range reg.List() {
 		for _, name := range expected {
-			if info.Name == name && info.Category != "Built-in" {
-				t.Errorf("feature skill %q category = %q, want Built-in", name, info.Category)
+			if info.Name == name && info.Category != "Feature" {
+				t.Errorf("feature skill %q category = %q, want Feature", name, info.Category)
 			}
 		}
 	}

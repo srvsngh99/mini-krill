@@ -167,10 +167,12 @@ func initStack(quiet bool) (*krillStack, error) {
 	})
 
 	// Register feature skills (YouTube, reminders, web, research, notify)
-	reminderStore, _ := reminder.NewStore(filepath.Join(config.DataDir(), "reminders.jsonl"))
+	reminderStore, err := reminder.NewStore(filepath.Join(config.DataDir(), "reminders.jsonl"))
+	if err != nil {
+		klog.Warn("reminder store init failed, remind skill will not be available", "error", err)
+	}
 	skillReg.RegisterFeatureSkills(plugin.FeatureContext{
 		Config:    cfg,
-		LLM:       providerMgr,
 		Reminders: reminderStore,
 	})
 
