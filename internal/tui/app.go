@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/srvsngh99/mini-krill/internal/brand"
 	"github.com/srvsngh99/mini-krill/internal/core"
 	log "github.com/srvsngh99/mini-krill/internal/log"
 )
@@ -158,8 +159,6 @@ func (a *App) View() string {
 		return "\n  Waiting for terminal..."
 	}
 
-	// Compact header for all tabs to maximize body space.
-	header := RenderCompactHeader(a.version, a.width)
 	tabBar := a.renderTabBar()
 	body := a.renderBody()
 	footer := a.renderFooter()
@@ -175,7 +174,6 @@ func (a *App) View() string {
 
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
-		header,
 		tabBar,
 		bodyStyled,
 		footer,
@@ -358,24 +356,23 @@ func (a *App) resizeViews() {
 }
 
 // bodyHeight computes the available vertical space for view content
-// by subtracting the actual rendered header, tab bar, and footer heights.
+// by subtracting the rendered tab bar and footer heights.
 func (a *App) bodyHeight() int {
-	header := RenderCompactHeader(a.version, a.width)
 	tabBar := a.renderTabBar()
 	footer := a.renderFooter()
 
-	headerLines := strings.Count(header, "\n") + 1
 	tabLines := strings.Count(tabBar, "\n") + 1
 	footerLines := strings.Count(footer, "\n") + 1
 
-	h := a.height - headerLines - tabLines - footerLines - layoutMargins
+	h := a.height - tabLines - footerLines - layoutMargins
 	if h < 5 {
 		h = 5
 	}
 	return h
 }
 
-// renderTabBar builds the horizontal tab bar with active highlighting.
+// renderTabBar builds the horizontal tab bar with active highlighting
+// and right-aligned version branding in the filler area.
 func (a *App) renderTabBar() string {
 	var tabs []string
 
@@ -392,13 +389,22 @@ func (a *App) renderTabBar() string {
 
 	row := lipgloss.JoinHorizontal(lipgloss.Bottom, tabs...)
 
-	// Fill the rest of the tab bar with a border line
+	// Fill the rest of the tab bar with a border line.
+	// Version branding is right-aligned in the filler area.
 	gap := a.width - lipgloss.Width(row)
 	if gap > 0 {
+		versionTag := fmt.Sprintf("%s v%s", brand.Name, a.version)
+		fillerContent := ""
+		if gap > len(versionTag)+4 {
+			padding := gap - len(versionTag) - 2
+			fillerContent = strings.Repeat(" ", padding) + DimStyle.Render(versionTag) + "  "
+		} else {
+			fillerContent = strings.Repeat(" ", gap)
+		}
 		filler := lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder(), false, false, true, false).
 			BorderForeground(ColorDimBlue).
-			Render(strings.Repeat(" ", gap))
+			Render(fillerContent)
 		row = lipgloss.JoinHorizontal(lipgloss.Bottom, row, filler)
 	}
 
