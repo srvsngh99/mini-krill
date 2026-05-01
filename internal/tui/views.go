@@ -504,20 +504,18 @@ func colorizeLogLine(line string) string {
 // SkillsView
 // ---------------------------------------------------------------------------
 
-// registryItem is a unified entry for both skills and MCP servers.
+// registryItem is an entry for a skill in the registry.
 type registryItem struct {
 	name        string
 	description string
 	enabled     bool
-	category    string // "Built-in", "Self-Awareness", "Custom / YAML", "MCP Servers"
-	isMCP       bool
-	locked      bool // true for self:* skills — cannot be toggled
+	category    string // "Built-in", "Self-Awareness", "Custom / YAML"
+	locked      bool   // true for self:* skills — cannot be toggled
 }
 
-// SkillsView displays skills and MCP servers with enable/disable toggle.
+// SkillsView displays skills with enable/disable toggle.
 type SkillsView struct {
 	registry  core.SkillRegistry
-	mcpReg    core.MCPRegistry
 	viewport  viewport.Model
 	items     []registryItem
 	catCounts map[string]int // pre-computed category counts
@@ -528,10 +526,9 @@ type SkillsView struct {
 }
 
 // NewSkillsView creates a skills registry view.
-func NewSkillsView(registry core.SkillRegistry, mcpReg core.MCPRegistry) SkillsView {
+func NewSkillsView(registry core.SkillRegistry) SkillsView {
 	return SkillsView{
 		registry: registry,
-		mcpReg:   mcpReg,
 	}
 }
 
@@ -584,17 +581,9 @@ func (s *SkillsView) Update(msg tea.Msg) tea.Cmd {
 					return nil // self-skills cannot be toggled
 				}
 				newEnabled := !item.enabled
-				if item.isMCP {
-					if s.mcpReg != nil {
-						if err := s.mcpReg.SetEnabled(item.name, newEnabled); err != nil {
-							log.Debug("toggle MCP server failed", "name", item.name, "error", err)
-						}
-					}
-				} else {
-					if s.registry != nil {
-						if err := s.registry.SetEnabled(item.name, newEnabled); err != nil {
-							log.Debug("toggle skill failed", "name", item.name, "error", err)
-						}
+				if s.registry != nil {
+					if err := s.registry.SetEnabled(item.name, newEnabled); err != nil {
+						log.Debug("toggle skill failed", "name", item.name, "error", err)
 					}
 				}
 				s.refreshContent()
@@ -647,30 +636,11 @@ func (s *SkillsView) buildItems() {
 		}
 	}
 
-	// MCP servers
-	var mcpItems []registryItem
-	if s.mcpReg != nil {
-		for _, srv := range s.mcpReg.List() {
-			connLabel := "disconnected"
-			if srv.Connected {
-				connLabel = fmt.Sprintf("connected, %d tools", srv.ToolCount)
-			}
-			mcpItems = append(mcpItems, registryItem{
-				name:        srv.Name,
-				description: connLabel,
-				enabled:     srv.Enabled,
-				category:    "MCP Servers",
-				isMCP:       true,
-			})
-		}
-	}
-
 	// Assemble in display order
 	s.items = append(s.items, builtin...)
 	s.items = append(s.items, feature...)
 	s.items = append(s.items, selfAware...)
 	s.items = append(s.items, custom...)
-	s.items = append(s.items, mcpItems...)
 
 	// Pre-compute category counts
 	s.catCounts = make(map[string]int)
@@ -700,24 +670,9 @@ func (s *SkillsView) refreshContent() {
 		panelWidth = 30
 	}
 
-	// Count skills vs MCP
-	skillCount := 0
-	mcpCount := 0
-	for _, item := range s.items {
-		if item.isMCP {
-			mcpCount++
-		} else {
-			skillCount++
-		}
-	}
-
 	// Header summary
-	header := TitleStyle.Render("  Skill Registry  ")
-	if mcpCount > 0 {
-		header += DimStyle.Render(fmt.Sprintf("  %d skills, %d MCP servers", skillCount, mcpCount))
-	} else {
-		header += DimStyle.Render(fmt.Sprintf("  %d skills registered", skillCount))
-	}
+	header := TitleStyle.Render("  Skill Registry  ") +
+		DimStyle.Render(fmt.Sprintf("  %d skills registered", len(s.items)))
 
 	// Build rows grouped by category
 	var sections []string
@@ -792,11 +747,7 @@ func (s *SkillsView) refreshContent() {
 			LabelStyle.Render("Description:"),
 			ValueStyle.Render("  " + wordWrap(selected.description, panelWidth-8)),
 		}
-		boxTitle := "  Skill Details"
-		if selected.isMCP {
-			boxTitle = "  MCP Server Details"
-		}
-		detailBox = RenderBox(boxTitle, strings.Join(detailLines, "\n"), panelWidth)
+		detailBox = RenderBox("  Skill Details", strings.Join(detailLines, "\n"), panelWidth)
 	}
 
 	// Navigation hints
@@ -819,6 +770,239 @@ func (s *SkillsView) refreshContent() {
 	)
 
 	s.viewport.SetContent(body)
+}
+
+// ---------------------------------------------------------------------------
+// MCPView
+// ---------------------------------------------------------------------------
+
+// mcpItem represents a single MCP server entry.
+type mcpItem struct {
+	name      string
+	enabled   bool
+	connected bool
+	toolCount int
+}
+
+// MCPView displays MCP servers with connection status and enable/disable toggle.
+type MCPView struct {
+	mcpReg   core.MCPRegistry
+	viewport viewport.Model
+	items    []mcpItem
+	cursor   int
+	ready    bool
+	width    int
+	height   int
+}
+
+// NewMCPView creates a new MCP server management view.
+func NewMCPView(mcpReg core.MCPRegistry) MCPView {
+	return MCPView{
+		mcpReg: mcpReg,
+	}
+}
+
+// SetSize updates the MCP view dimensions.
+func (m *MCPView) SetSize(w, h int) {
+	m.width = w
+	m.height = h
+	if !m.ready {
+		m.viewport = viewport.New(w, h)
+		m.ready = true
+	} else {
+		m.viewport.Width = w
+		m.viewport.Height = h
+	}
+	m.refreshContent()
+}
+
+// Update handles keyboard navigation and toggle for the MCP server list.
+func (m *MCPView) Update(msg tea.Msg) tea.Cmd {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		total := len(m.items)
+		switch msg.String() {
+		case "j", "down":
+			if m.cursor < total-1 {
+				m.cursor++
+				m.refreshContent()
+			}
+			return nil
+		case "k", "up":
+			if m.cursor > 0 {
+				m.cursor--
+				m.refreshContent()
+			}
+			return nil
+		case "g":
+			m.cursor = 0
+			m.refreshContent()
+			return nil
+		case "G":
+			if total > 0 {
+				m.cursor = total - 1
+				m.refreshContent()
+			}
+			return nil
+		case "enter", " ":
+			if m.cursor < total {
+				item := m.items[m.cursor]
+				newEnabled := !item.enabled
+				if m.mcpReg != nil {
+					if err := m.mcpReg.SetEnabled(item.name, newEnabled); err != nil {
+						log.Debug("toggle MCP server failed", "name", item.name, "error", err)
+					}
+				}
+				m.refreshContent()
+			}
+			return nil
+		}
+	}
+	var cmd tea.Cmd
+	m.viewport, cmd = m.viewport.Update(msg)
+	return cmd
+}
+
+// View renders the MCP server tab.
+func (m *MCPView) View() string {
+	if !m.ready {
+		return "Loading MCP servers..."
+	}
+	return m.viewport.View()
+}
+
+// buildItems constructs the item list from the MCP registry.
+func (m *MCPView) buildItems() {
+	m.items = nil
+	if m.mcpReg == nil {
+		return
+	}
+	for _, srv := range m.mcpReg.List() {
+		m.items = append(m.items, mcpItem{
+			name:      srv.Name,
+			enabled:   srv.Enabled,
+			connected: srv.Connected,
+			toolCount: srv.ToolCount,
+		})
+	}
+}
+
+// refreshContent rebuilds the viewport content from the current item list.
+func (m *MCPView) refreshContent() {
+	if !m.ready {
+		return
+	}
+
+	m.buildItems()
+
+	// Clamp cursor
+	if m.cursor >= len(m.items) {
+		m.cursor = len(m.items) - 1
+	}
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+
+	panelWidth := m.width - 4
+	if panelWidth < 30 {
+		panelWidth = 30
+	}
+
+	// Header
+	header := TitleStyle.Render("  MCP Servers  ") +
+		DimStyle.Render(fmt.Sprintf("  %d servers registered", len(m.items)))
+
+	if len(m.items) == 0 {
+		empty := DimStyle.Render("  No MCP servers configured.\n  Add servers in config/default.yaml under mcp.servers.")
+		nav := DimStyle.Render("  Configure MCP servers to extend your agent's capabilities.")
+
+		body := lipgloss.JoinVertical(lipgloss.Left,
+			"",
+			header,
+			"",
+			empty,
+			"",
+			nav,
+		)
+		m.viewport.SetContent(body)
+		return
+	}
+
+	// Build rows
+	var rows []string
+	for i, item := range m.items {
+		// Status badge
+		status := StatusOK.Render("[on] ")
+		if !item.enabled {
+			status = StatusFail.Render("[off]")
+		}
+
+		// Connection indicator
+		connText := "disconnected"
+		if item.connected {
+			connText = fmt.Sprintf("connected, %d tools", item.toolCount)
+		}
+
+		nameDisplay := fmt.Sprintf("%-20s", item.name)
+
+		if i == m.cursor {
+			line := lipgloss.NewStyle().
+				Foreground(ColorCyan).
+				Bold(true).
+				Render(fmt.Sprintf("▸ %s %s %s", status, nameDisplay, connText))
+			rows = append(rows, line)
+		} else {
+			line := fmt.Sprintf("  %s %s %s", status, nameDisplay, DimStyle.Render(connText))
+			rows = append(rows, line)
+		}
+	}
+
+	// Detail panel for selected server
+	var detailBox string
+	if m.cursor >= 0 && m.cursor < len(m.items) {
+		selected := m.items[m.cursor]
+
+		statusLabel := AccentStyle.Render("enabled")
+		if !selected.enabled {
+			statusLabel = ErrorStyle.Render("disabled")
+		}
+
+		var connStatus string
+		if selected.connected {
+			connStatus = AccentStyle.Render(fmt.Sprintf("connected (%d tools)", selected.toolCount))
+		} else {
+			connStatus = ErrorStyle.Render("disconnected")
+		}
+
+		detailLines := []string{
+			RenderKeyValue("Name", selected.name),
+			RenderKeyValue("Status", statusLabel),
+			RenderKeyValue("Connection", connStatus),
+			RenderKeyValue("Tools", fmt.Sprintf("%d", selected.toolCount)),
+		}
+		detailBox = RenderBox("  MCP Server Details", strings.Join(detailLines, "\n"), panelWidth)
+	}
+
+	// Navigation hints
+	nav := DimStyle.Render("  ") +
+		HelpKeyStyle.Render("j/k") + DimStyle.Render(" navigate  ") +
+		HelpKeyStyle.Render("g/G") + DimStyle.Render(" top/bottom  ") +
+		HelpKeyStyle.Render("Enter/Space") + DimStyle.Render(" toggle  ") +
+		DimStyle.Render("(changes reset on restart)")
+
+	// Compose final view
+	body := lipgloss.JoinVertical(lipgloss.Left,
+		"",
+		header,
+		"",
+		strings.Join(rows, "\n"),
+		"",
+		detailBox,
+		"",
+		nav,
+	)
+
+	m.viewport.SetContent(body)
 }
 
 // ---------------------------------------------------------------------------
@@ -857,7 +1041,7 @@ func (h *HelpView) View() string {
 	// --- Keyboard Shortcuts ---
 	shortcuts := []struct{ key, desc string }{
 		{"Tab / Shift+Tab", "Switch between tabs (always works)"},
-		{"1 2 3 4 5", "Jump directly to tab"},
+		{"1 2 3 4 5 6", "Jump directly to tab"},
 		{"Right / Left", "Next / previous tab"},
 		{"Esc", "Unfocus chat input"},
 		{"j / k", "Scroll down / up (skills, logs)"},
