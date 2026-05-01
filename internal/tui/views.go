@@ -755,7 +755,7 @@ func (s *SkillsView) refreshContent() {
 		HelpKeyStyle.Render("j/k") + DimStyle.Render(" navigate  ") +
 		HelpKeyStyle.Render("g/G") + DimStyle.Render(" top/bottom  ") +
 		HelpKeyStyle.Render("Enter/Space") + DimStyle.Render(" toggle  ") +
-		DimStyle.Render("(changes reset on restart)")
+		DimStyle.Render("(runtime only)")
 
 	// Compose final view
 	body := lipgloss.JoinVertical(lipgloss.Left,
@@ -913,7 +913,7 @@ func (m *MCPView) refreshContent() {
 		DimStyle.Render(fmt.Sprintf("  %d servers registered", len(m.items)))
 
 	if len(m.items) == 0 {
-		empty := DimStyle.Render("  No MCP servers configured.\n  Add servers in config/default.yaml under mcp.servers.")
+		empty := DimStyle.Render("  No MCP servers configured.\n  Add servers in your krill config under mcp.servers.")
 		nav := DimStyle.Render("  Configure MCP servers to extend your agent's capabilities.")
 
 		body := lipgloss.JoinVertical(lipgloss.Left,
@@ -943,7 +943,11 @@ func (m *MCPView) refreshContent() {
 			connText = fmt.Sprintf("connected, %d tools", item.toolCount)
 		}
 
-		nameDisplay := fmt.Sprintf("%-20s", item.name)
+		name := item.name
+		if len(name) > 20 {
+			name = name[:17] + "..."
+		}
+		nameDisplay := fmt.Sprintf("%-20s", name)
 
 		if i == m.cursor {
 			line := lipgloss.NewStyle().
@@ -988,7 +992,7 @@ func (m *MCPView) refreshContent() {
 		HelpKeyStyle.Render("j/k") + DimStyle.Render(" navigate  ") +
 		HelpKeyStyle.Render("g/G") + DimStyle.Render(" top/bottom  ") +
 		HelpKeyStyle.Render("Enter/Space") + DimStyle.Render(" toggle  ") +
-		DimStyle.Render("(changes reset on restart)")
+		DimStyle.Render("(runtime only)")
 
 	// Compose final view
 	body := lipgloss.JoinVertical(lipgloss.Left,
@@ -1044,8 +1048,8 @@ func (h *HelpView) View() string {
 		{"1 2 3 4 5 6", "Jump directly to tab"},
 		{"Right / Left", "Next / previous tab"},
 		{"Esc", "Unfocus chat input"},
-		{"j / k", "Scroll down / up (skills, logs)"},
-		{"g / G", "Jump to top / bottom (skills)"},
+		{"j / k", "Scroll down / up (skills, mcp, logs)"},
+		{"g / G", "Jump to top / bottom (skills, mcp)"},
 		{"c", "Copy logs to clipboard (logs)"},
 		{"Enter", "Send message (chat)"},
 		{"q / Ctrl+C", "Quit (not in chat input)"},
