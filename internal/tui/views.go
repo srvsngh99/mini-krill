@@ -104,12 +104,13 @@ func (d *DashboardView) View() string {
 	factBox := RenderBox("  Did You Know?", factContent, panelWidth)
 
 	// Show ASCII krill art when the terminal is tall enough.
+	spacer := "\n"
 	if d.height >= 30 {
 		logoHeader := RenderHeader(d.version, d.width)
-		return lipgloss.JoinVertical(lipgloss.Left, logoHeader, "", statusBox, "", factBox)
+		return lipgloss.JoinVertical(lipgloss.Left, logoHeader, spacer, statusBox, spacer, factBox)
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, statusBox, "", factBox)
+	return lipgloss.JoinVertical(lipgloss.Left, statusBox, spacer, factBox)
 }
 
 // ---------------------------------------------------------------------------

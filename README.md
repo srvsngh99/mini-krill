@@ -331,7 +331,7 @@ heartbeat:
 | Variable | Description |
 |---|---|
 | `KRILL_LLM_PROVIDER` | LLM provider (ollama, codex, claude, openai, anthropic, google) |
-| `KRILL_LLM_API_KEY` | API key for cloud providers |
+| `KRILL_LLM_API_KEY` | API key for direct cloud API access (not needed for Ollama, Codex CLI, or Claude CLI) |
 | `KRILL_LLM_MODEL` | Model name |
 | `KRILL_TELEGRAM_TOKEN` | Telegram bot token |
 | `KRILL_DISCORD_TOKEN` | Discord bot token |
