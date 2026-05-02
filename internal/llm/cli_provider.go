@@ -4,21 +4,27 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/srvsngh99/mini-krill/internal/config"
 	"github.com/srvsngh99/mini-krill/internal/core"
 )
 
+// idleTimeout is how long runCLI waits with zero output from the subprocess
+// before considering it stuck and killing it. The total runtime is unlimited
+// as long as the process keeps producing output.
+const idleTimeout = 10 * time.Minute
+
 // CLIProvider delegates model calls to official subscription-aware CLIs.
 // It intentionally stores no OAuth tokens; Codex/Claude own authentication.
 type CLIProvider struct {
-	name    string
-	model   string
-	timeout time.Duration
+	name  string
+	model string
 }
 
 func NewCLIProvider(name string, cfg config.LLMConfig) *CLIProvider {
@@ -26,7 +32,7 @@ func NewCLIProvider(name string, cfg config.LLMConfig) *CLIProvider {
 	if model == "" {
 		model = "auto"
 	}
-	return &CLIProvider{name: name, model: model, timeout: 10 * time.Minute}
+	return &CLIProvider{name: name, model: model}
 }
 
 func (p *CLIProvider) Chat(ctx context.Context, messages []core.Message, opts ...core.ChatOption) (*core.Response, error) {
@@ -40,9 +46,6 @@ func (p *CLIProvider) Chat(ctx context.Context, messages []core.Message, opts ..
 	if strings.TrimSpace(prompt) == "" {
 		return nil, fmt.Errorf("%s provider received empty prompt", p.name)
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, p.timeout)
-	defer cancel()
 
 	var out []byte
 	var err error
@@ -122,7 +125,15 @@ func (p *CLIProvider) runClaude(ctx context.Context, model, prompt string) ([]by
 	return runCLI(ctx, "claude", args, prompt)
 }
 
+// runCLI executes a CLI subprocess with idle-based termination. The process
+// can run for as long as it needs — there is no wall-clock cap. But if it
+// produces zero bytes on both stdout and stderr for idleTimeout, it is
+// considered stuck and gets killed.
 func runCLI(ctx context.Context, name string, args []string, stdin string) ([]byte, error) {
+	// Create a child context we can cancel when idle timeout fires.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	cmd := exec.CommandContext(ctx, name, args...)
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
@@ -133,17 +144,90 @@ func runCLI(ctx context.Context, name string, args []string, stdin string) ([]by
 	// dive.log with thousands of "can't turn off malloc stack logging" lines.
 	cmd.Env = append(os.Environ(), "MallocStackLogging=0")
 
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
+		return nil, fmt.Errorf("%s: stdout pipe: %w", name, err)
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("%s: stderr pipe: %w", name, err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("%s failed to start: %w", name, err)
+	}
+
+	// Idle timer — reset every time bytes arrive on either pipe.
+	idle := time.NewTimer(idleTimeout)
+	defer idle.Stop()
+
+	var stdout, stderr bytes.Buffer
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// readAndBump drains a pipe into a buffer, resetting the idle timer on
+	// every chunk read. When the pipe closes (process exits or EOF), the
+	// goroutine returns.
+	readAndBump := func(pipe io.Reader, buf *bytes.Buffer) {
+		defer wg.Done()
+		tmp := make([]byte, 4096)
+		for {
+			n, err := pipe.Read(tmp)
+			if n > 0 {
+				buf.Write(tmp[:n])
+				// Reset the idle timer — process is alive.
+				if !idle.Stop() {
+					select {
+					case <-idle.C:
+					default:
+					}
+				}
+				idle.Reset(idleTimeout)
+			}
+			if err != nil {
+				return
+			}
+		}
+	}
+
+	go readAndBump(stdoutPipe, &stdout)
+	go readAndBump(stderrPipe, &stderr)
+
+	// Wait for either: both pipes close (normal exit), idle timeout, or
+	// parent context cancellation.
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	var idled bool
+	select {
+	case <-done:
+		// Process finished normally — pipes closed.
+	case <-idle.C:
+		// No output for idleTimeout — kill the stuck process.
+		idled = true
+		cancel()
+	case <-ctx.Done():
+		// Parent cancelled (user quit, app shutdown).
+	}
+
+	// Wait for the process to exit and the reader goroutines to drain.
+	waitErr := cmd.Wait()
+	wg.Wait()
+
+	if idled {
+		return nil, fmt.Errorf("%s idle for %v with no output — process killed", name, idleTimeout)
+	}
+	if waitErr != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
-			msg = err.Error()
+			msg = waitErr.Error()
 		}
 		return nil, fmt.Errorf("%s failed: %s", name, redactCLIError(msg))
 	}
-	return out, nil
+	return stdout.Bytes(), nil
 }
 
 func commandOK(ctx context.Context, name string, args ...string) bool {

@@ -288,8 +288,8 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 		log.Debug("failed to send typing action", "error", err)
 	}
 
-	// Per-message timeout so a slow LLM doesn't block Telegram forever.
-	msgCtx, msgCancel := context.WithTimeout(ctx, 90*time.Second)
+	// No fixed timeout - the agent and providers manage their own deadlines.
+	msgCtx, msgCancel := context.WithCancel(ctx)
 	defer msgCancel()
 
 	chatMsg := core.ChatMessage{
