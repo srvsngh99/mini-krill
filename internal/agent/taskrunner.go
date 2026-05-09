@@ -15,15 +15,22 @@ import (
 )
 
 // NotifyFunc is called when a background task finishes to deliver the result
-// back to the user on their chat platform.
+// back to the user on their chat platform. The platform argument is included
+// for legacy single-notifier wiring; per-platform routing should be done via
+// RegisterNotifier so each platform's callback only sees its own deliveries.
 type NotifyFunc func(platform, chatID, message string)
+
+// PlatformNotifyFunc is the per-platform variant — chatID and message only,
+// since platform identity is implicit in the registration.
+type PlatformNotifyFunc func(chatID, message string)
 
 // TaskRunner manages the execution of durable tasks in background goroutines.
 type TaskRunner struct {
 	store         *TaskStore
 	agent         *KrillAgent
-	notifyMu      sync.RWMutex // guards notifyFn
+	notifyMu      sync.RWMutex // guards notifyFn and notifiers
 	notifyFn      NotifyFunc
+	notifiers     map[string]PlatformNotifyFunc // platform → handler
 	maxConcurrent int32
 	running       int32 // atomic counter
 }
@@ -36,16 +43,30 @@ func NewTaskRunner(store *TaskStore, agent *KrillAgent, maxConcurrent int) *Task
 	return &TaskRunner{
 		store:         store,
 		agent:         agent,
+		notifiers:     make(map[string]PlatformNotifyFunc),
 		maxConcurrent: int32(maxConcurrent),
 	}
 }
 
-// SetNotifyFunc sets the callback for delivering results to chat platforms.
-// Must be called before any Submit calls.
+// SetNotifyFunc sets a single catch-all callback for delivering results to
+// chat platforms. Kept for backward compatibility — prefer RegisterNotifier
+// when more than one platform is involved.
 func (r *TaskRunner) SetNotifyFunc(fn NotifyFunc) {
 	r.notifyMu.Lock()
 	defer r.notifyMu.Unlock()
 	r.notifyFn = fn
+}
+
+// RegisterNotifier attaches a per-platform delivery callback. Calls for other
+// platforms fall through to the global SetNotifyFunc handler if one is set.
+func (r *TaskRunner) RegisterNotifier(platform string, fn PlatformNotifyFunc) {
+	r.notifyMu.Lock()
+	defer r.notifyMu.Unlock()
+	if fn == nil {
+		delete(r.notifiers, platform)
+		return
+	}
+	r.notifiers[platform] = fn
 }
 
 // Submit queues a task for background execution.
@@ -108,15 +129,22 @@ func (r *TaskRunner) run(task *DurableTask) {
 	r.storeAsMemory(task, result)
 }
 
-// notify sends the result back to the user's chat platform.
+// notify sends the result back to the user's chat platform. Per-platform
+// handlers (RegisterNotifier) take precedence; the catch-all NotifyFunc is
+// used when no platform-specific handler is registered.
 func (r *TaskRunner) notify(task *DurableTask, message string) {
 	r.notifyMu.RLock()
-	fn := r.notifyFn
+	platformFn := r.notifiers[task.Platform]
+	fallback := r.notifyFn
 	r.notifyMu.RUnlock()
-	if fn == nil {
+
+	if platformFn != nil {
+		platformFn(task.ChatID, message)
 		return
 	}
-	fn(task.Platform, task.ChatID, message)
+	if fallback != nil {
+		fallback(task.Platform, task.ChatID, message)
+	}
 }
 
 // storeAsMemory saves a task outcome as a durable memory and generates a reflection.

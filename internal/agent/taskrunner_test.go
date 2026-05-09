@@ -181,3 +181,83 @@ func TestAgentHandleTaskCommand(t *testing.T) {
 		t.Errorf("/cancel response = %q, expected 'not found'", resp)
 	}
 }
+
+func TestTaskRunnerPerPlatformNotifier(t *testing.T) {
+	agent := newTaskTestAgent()
+	store := NewTaskStore("")
+	runner := NewTaskRunner(store, agent, 3)
+
+	var (
+		mu             sync.Mutex
+		telegramCalls  int
+		discordCalls   int
+		fallbackCalls  int
+		telegramChatID string
+	)
+
+	runner.RegisterNotifier("telegram", func(chatID, message string) {
+		mu.Lock()
+		telegramCalls++
+		telegramChatID = chatID
+		mu.Unlock()
+	})
+	runner.RegisterNotifier("discord", func(chatID, message string) {
+		mu.Lock()
+		discordCalls++
+		mu.Unlock()
+	})
+	runner.SetNotifyFunc(func(platform, chatID, message string) {
+		mu.Lock()
+		fallbackCalls++
+		mu.Unlock()
+	})
+
+	tg := store.Create("u1", "telegram", "tg-chat-1", "telegram task")
+	if err := runner.Submit(tg); err != nil {
+		t.Fatalf("Submit telegram: %v", err)
+	}
+	cli := store.Create("u2", "cli", "", "cli task")
+	if err := runner.Submit(cli); err != nil {
+		t.Fatalf("Submit cli: %v", err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		got, _ := store.Get(cli.ID)
+		got2, _ := store.Get(tg.ID)
+		if (got.Status == "done" || got.Status == "failed") &&
+			(got2.Status == "done" || got2.Status == "failed") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	// Allow notify goroutines to finish.
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if telegramCalls != 1 {
+		t.Errorf("telegram notifier called %d times, want 1", telegramCalls)
+	}
+	if telegramChatID != "tg-chat-1" {
+		t.Errorf("telegram chat ID = %q, want 'tg-chat-1'", telegramChatID)
+	}
+	if discordCalls != 0 {
+		t.Errorf("discord notifier called %d times, want 0", discordCalls)
+	}
+	// CLI has no platform handler → falls through to global notifier.
+	if fallbackCalls != 1 {
+		t.Errorf("fallback notifier called %d times, want 1 (cli task)", fallbackCalls)
+	}
+}
+
+func TestTaskRunnerRegisterNotifierUnregister(t *testing.T) {
+	runner := NewTaskRunner(NewTaskStore(""), newTaskTestAgent(), 3)
+	called := 0
+	runner.RegisterNotifier("telegram", func(chatID, message string) { called++ })
+	runner.RegisterNotifier("telegram", nil) // unregister
+	runner.notify(&DurableTask{Platform: "telegram", ChatID: "x"}, "hi")
+	if called != 0 {
+		t.Errorf("notifier should be unregistered, got %d calls", called)
+	}
+}

@@ -48,13 +48,16 @@ func (h *ChatHandlerImpl) HandleMessage(ctx context.Context, msg core.ChatMessag
 		return response, nil
 	}
 
-	// Set platform + chat ID on the agent so it knows whether to run tasks
-	// in background and where to deliver results.
-	if ps, ok := h.agent.(interface{ SetChatContext(string, string) }); ok {
-		ps.SetChatContext(msg.Platform, msg.ChatID)
+	// Prefer the platform-aware entry point so platform/chatID are bound to
+	// this specific message under one lock acquisition. Falls back to the
+	// plain Chat for agents that don't implement the platform-aware interface.
+	var resp string
+	var err error
+	if pa, ok := h.agent.(core.PlatformAwareAgent); ok {
+		resp, err = pa.ChatFromPlatform(ctx, msg.Platform, msg.ChatID, msg.Text)
+	} else {
+		resp, err = h.agent.Chat(ctx, msg.Text)
 	}
-
-	resp, err := h.agent.Chat(ctx, msg.Text)
 	if err != nil {
 		log.Error("agent.Chat failed",
 			"platform", msg.Platform,

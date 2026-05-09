@@ -257,6 +257,14 @@ type Agent interface {
 	SpawnKrill(ctx context.Context, task string) (*SubKrill, error)
 }
 
+// PlatformAwareAgent extends Agent with a platform-aware entry point.
+// Implementations process platform/chatID atomically with the message so
+// background-task routing has the right destination.
+type PlatformAwareAgent interface {
+	Agent
+	ChatFromPlatform(ctx context.Context, platform, chatID, input string) (string, error)
+}
+
 // TaskInfo is a serialisable snapshot of a durable task.
 type TaskInfo struct {
 	ID        string    `json:"id"`

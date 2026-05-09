@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -593,3 +594,41 @@ func (m *slowMockProvider) Stream(_ context.Context, _ []core.Message, _ ...core
 func (m *slowMockProvider) Name() string                     { return "slow-mock" }
 func (m *slowMockProvider) ModelName() string                { return "slow-mock" }
 func (m *slowMockProvider) Available(_ context.Context) bool { return true }
+
+func TestChatFromPlatformAtomicity(t *testing.T) {
+	// Two concurrent dispatchers should each see their own platform/chatID
+	// inside the corresponding ChatFromPlatform call. The previous
+	// SetChatContext + Chat split allowed the second SetChatContext to
+	// overwrite the first before the first Chat ran.
+	agent := newTestAgent("hi")
+	agent.InitTaskSystem("", 1)
+
+	const N = 20
+	var wg sync.WaitGroup
+	platforms := []string{"telegram", "cli", "discord", "tui"}
+	errs := make(chan string, N)
+
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		platform := platforms[i%len(platforms)]
+		chatID := platform + "-" + string(rune('a'+i))
+		go func() {
+			defer wg.Done()
+			// We can't directly inspect a.platform after the call (the test
+			// agent uses real chat path). Instead, use the round-trip
+			// through ChatFromPlatform — if it doesn't deadlock or return
+			// a wrong-platform error and the agent platform == chatID
+			// platform on observation, we're good. The real correctness
+			// guarantee is that ChatFromPlatform takes a single mutex
+			// acquisition, so contention here just exercises that lock.
+			if _, err := agent.ChatFromPlatform(context.Background(), platform, chatID, "hello"); err != nil {
+				errs <- err.Error()
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for e := range errs {
+		t.Errorf("ChatFromPlatform under contention: %s", e)
+	}
+}

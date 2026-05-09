@@ -6,6 +6,8 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -15,8 +17,12 @@ import (
 	log "github.com/srvsngh99/mini-krill/internal/log"
 )
 
-// Compile-time interface check - KrillAgent must satisfy core.Agent.
-var _ core.Agent = (*KrillAgent)(nil)
+// Compile-time interface checks - KrillAgent satisfies both Agent and the
+// platform-aware extension.
+var (
+	_ core.Agent              = (*KrillAgent)(nil)
+	_ core.PlatformAwareAgent = (*KrillAgent)(nil)
+)
 
 // maxHistory caps conversation history to prevent unbounded memory growth.
 // Krill molt their exoskeleton to grow - we shed old messages to stay nimble.
@@ -114,29 +120,27 @@ func (a *KrillAgent) SetChannel(channel string) {
 	a.channel = unifiedConversationChannel
 }
 
-// SetPlatform records which chat platform and chat ID the agent is currently
-// serving. Used to decide whether to run tasks in the background and where
-// to deliver results. Safe to call concurrently — serialised by a.mu.
+// SetPlatform is retained for tests that don't go through ChatFromPlatform.
+// Production callers should use ChatFromPlatform so that platform/chatID and
+// the message itself are processed atomically under one lock acquisition.
 func (a *KrillAgent) SetPlatform(platform string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.platform = platform
 }
 
-// SetChatContext records the current platform and chat ID for background task routing.
-func (a *KrillAgent) SetChatContext(platform, chatID string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.platform = platform
-	a.chatID = chatID
-}
-
 // InitTaskSystem sets up the durable task store and runner.
 // Called during application startup after the agent is created.
+// The directory is created if it does not exist; persistence is disabled
+// when dataDir is empty (used in tests).
 func (a *KrillAgent) InitTaskSystem(dataDir string, maxConcurrent int) {
 	path := ""
 	if dataDir != "" {
-		path = dataDir + "/tasks.jsonl"
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			log.Warn("task data dir creation failed, persistence disabled", "dir", dataDir, "error", err)
+		} else {
+			path = filepath.Join(dataDir, "tasks.jsonl")
+		}
 	}
 	a.taskStore = NewTaskStore(path)
 	a.taskRunner = NewTaskRunner(a.taskStore, a, maxConcurrent)
@@ -199,15 +203,23 @@ func (a *KrillAgent) CancelTask(id string) error {
 	return a.taskStore.Cancel(id)
 }
 
-// Chat is the main entry point - every user message flows through here.
-// It handles pending plan approval, intent classification, and response generation.
-// Note: Chat holds a.mu for its entire duration. The platform field is safe to
-// read because SetPlatform also holds a.mu, so they cannot race. For multi-
-// platform concurrency (Telegram + CLI simultaneously), callers must set
-// platform before each Chat call, which is serialised by the lock.
+// Chat is the main entry point for callers that don't have a chat platform —
+// CLI one-shots, tests, internal flows. For platform integrations, prefer
+// ChatFromPlatform so background-task routing has the right destination.
 func (a *KrillAgent) Chat(ctx context.Context, input string) (string, error) {
+	return a.ChatFromPlatform(ctx, "", "", input)
+}
+
+// ChatFromPlatform is the platform-aware entry point. It atomically sets the
+// current platform/chatID and processes the message under a single lock
+// acquisition, so two concurrent dispatchers cannot interleave each other's
+// platform context.
+func (a *KrillAgent) ChatFromPlatform(ctx context.Context, platform, chatID, input string) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
+	a.platform = platform
+	a.chatID = chatID
 
 	if response, handled := a.handleProviderCommand(input); handled {
 		a.saveTurn("user", input)
