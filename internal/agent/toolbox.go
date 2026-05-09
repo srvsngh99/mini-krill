@@ -108,6 +108,9 @@ func (t *Toolbox) ExecuteTool(ctx context.Context, name string, args map[string]
 		if command == "" {
 			return "", fmt.Errorf("shell tool requires a 'command' argument")
 		}
+		if !IsReadOnlyCommand(command) && !IsBlockedCommand(command) {
+			log.Info("shell: non-read-only command, proceeding with caution", "command", truncate(command, 60))
+		}
 		return ExecuteShellSafe(ctx, command)
 	}
 

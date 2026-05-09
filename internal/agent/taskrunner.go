@@ -5,6 +5,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -21,6 +22,7 @@ type NotifyFunc func(platform, chatID, message string)
 type TaskRunner struct {
 	store         *TaskStore
 	agent         *KrillAgent
+	notifyMu      sync.RWMutex // guards notifyFn
 	notifyFn      NotifyFunc
 	maxConcurrent int32
 	running       int32 // atomic counter
@@ -39,18 +41,22 @@ func NewTaskRunner(store *TaskStore, agent *KrillAgent, maxConcurrent int) *Task
 }
 
 // SetNotifyFunc sets the callback for delivering results to chat platforms.
+// Must be called before any Submit calls.
 func (r *TaskRunner) SetNotifyFunc(fn NotifyFunc) {
+	r.notifyMu.Lock()
+	defer r.notifyMu.Unlock()
 	r.notifyFn = fn
 }
 
 // Submit queues a task for background execution.
 func (r *TaskRunner) Submit(task *DurableTask) error {
-	current := atomic.LoadInt32(&r.running)
-	if current >= r.maxConcurrent {
-		return fmt.Errorf("too many concurrent tasks (%d/%d), try again later", current, r.maxConcurrent)
+	// Add first, then check — avoids TOCTOU race between Load and Add.
+	newCount := atomic.AddInt32(&r.running, 1)
+	if newCount > r.maxConcurrent {
+		atomic.AddInt32(&r.running, -1) // rollback
+		return fmt.Errorf("too many concurrent tasks (%d/%d), try again later", newCount-1, r.maxConcurrent)
 	}
 
-	atomic.AddInt32(&r.running, 1)
 	go r.run(task)
 	return nil
 }
@@ -104,10 +110,13 @@ func (r *TaskRunner) run(task *DurableTask) {
 
 // notify sends the result back to the user's chat platform.
 func (r *TaskRunner) notify(task *DurableTask, message string) {
-	if r.notifyFn == nil {
+	r.notifyMu.RLock()
+	fn := r.notifyFn
+	r.notifyMu.RUnlock()
+	if fn == nil {
 		return
 	}
-	r.notifyFn(task.Platform, task.ChatID, message)
+	fn(task.Platform, task.ChatID, message)
 }
 
 // storeAsMemory saves a task outcome as a durable memory and generates a reflection.

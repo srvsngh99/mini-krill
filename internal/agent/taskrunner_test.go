@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/srvsngh99/mini-krill/internal/config"
+	"github.com/srvsngh99/mini-krill/internal/core"
 )
 
 func newTaskTestAgent() *KrillAgent {
@@ -111,6 +112,41 @@ func TestAgentTaskManagerInterface(t *testing.T) {
 	_, ok := agent.GetTask("nonexistent")
 	if ok {
 		t.Error("GetTask(nonexistent) should return false")
+	}
+}
+
+func TestShouldRunInBackgroundTelegram(t *testing.T) {
+	agent := newTaskTestAgent()
+	agent.InitTaskSystem("", 3)
+	agent.SetPlatform("telegram")
+
+	// Multi-step plan on telegram should run in background
+	plan := &core.Plan{
+		Task: "check repo",
+		Steps: []core.PlanStep{
+			{ID: 1, Description: "list files"},
+			{ID: 2, Description: "read README"},
+		},
+	}
+	if !agent.shouldRunInBackground(plan) {
+		t.Error("shouldRunInBackground(telegram, 2 steps) = false, want true")
+	}
+}
+
+func TestShouldRunInBackgroundCLI(t *testing.T) {
+	agent := newTaskTestAgent()
+	agent.InitTaskSystem("", 3)
+	agent.SetPlatform("cli")
+
+	plan := &core.Plan{
+		Task: "check repo",
+		Steps: []core.PlanStep{
+			{ID: 1, Description: "list files"},
+			{ID: 2, Description: "read README"},
+		},
+	}
+	if agent.shouldRunInBackground(plan) {
+		t.Error("shouldRunInBackground(cli, 2 steps) = true, want false (CLI is synchronous)")
 	}
 }
 

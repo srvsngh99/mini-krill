@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -190,6 +191,61 @@ func TestFillDefaults(t *testing.T) {
 	expectedBrainDir := filepath.Join(tmpDir, "brain")
 	if cfg.Brain.DataDir != expectedBrainDir {
 		t.Errorf("Brain.DataDir = %q, want %q", cfg.Brain.DataDir, expectedBrainDir)
+	}
+}
+
+func TestPlanApprovalLegacyBoolTrue(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("KRILL_DATA_DIR", tmpDir)
+
+	yamlData := []byte("agent:\n  name: krill\n  plan_approval: true\n")
+	if err := os.WriteFile(filepath.Join(tmpDir, "config.yaml"), yamlData, 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.Agent.PlanApproval != "always" {
+		t.Errorf("PlanApproval = %q, want 'always' (migrated from bool true)", cfg.Agent.PlanApproval)
+	}
+}
+
+func TestPlanApprovalLegacyBoolFalse(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("KRILL_DATA_DIR", tmpDir)
+
+	yamlData := []byte("agent:\n  name: krill\n  plan_approval: false\n")
+	if err := os.WriteFile(filepath.Join(tmpDir, "config.yaml"), yamlData, 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.Agent.PlanApproval != "never" {
+		t.Errorf("PlanApproval = %q, want 'never' (migrated from bool false)", cfg.Agent.PlanApproval)
+	}
+}
+
+func TestPlanApprovalStringValues(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("KRILL_DATA_DIR", tmpDir)
+
+	for _, val := range []string{"auto", "always", "never"} {
+		yamlData := []byte(fmt.Sprintf("agent:\n  name: krill\n  plan_approval: %s\n", val))
+		if err := os.WriteFile(filepath.Join(tmpDir, "config.yaml"), yamlData, 0600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load(%s) error: %v", val, err)
+		}
+		if cfg.Agent.PlanApproval != val {
+			t.Errorf("PlanApproval = %q, want %q", cfg.Agent.PlanApproval, val)
+		}
 	}
 }
 

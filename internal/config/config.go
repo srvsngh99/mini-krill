@@ -30,11 +30,65 @@ type Config struct {
 
 // AgentConfig controls the main krill agent behaviour.
 type AgentConfig struct {
-	Name          string `yaml:"name"`
-	Personality   string `yaml:"personality"` // active personality profile (default: "krill")
-	MaxSubKrills  int    `yaml:"max_sub_krills"`
-	PlanApproval  string `yaml:"plan_approval"`  // "auto" (default), "always", or "never"
-	RecoveryTurns int    `yaml:"recovery_turns"` // turns to load on cold start (default 10, from brain config)
+	Name          string       `yaml:"name"`
+	Personality   string       `yaml:"personality"` // active personality profile (default: "krill")
+	MaxSubKrills  int          `yaml:"max_sub_krills"`
+	PlanApproval  string       `yaml:"-"` // "auto" (default), "always", or "never"; set via UnmarshalYAML
+	RecoveryTurns int          `yaml:"recovery_turns"` // turns to load on cold start (default 10, from brain config)
+}
+
+// agentConfigRaw is used during YAML unmarshalling to accept plan_approval
+// as either a bool (legacy) or string (new).
+type agentConfigRaw struct {
+	Name          string      `yaml:"name"`
+	Personality   string      `yaml:"personality"`
+	MaxSubKrills  int         `yaml:"max_sub_krills"`
+	PlanApproval  interface{} `yaml:"plan_approval"`
+	RecoveryTurns int         `yaml:"recovery_turns"`
+}
+
+// UnmarshalYAML handles backward-compatible parsing of plan_approval,
+// which was a bool in earlier versions and is now a 3-way string.
+func (a *AgentConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var raw agentConfigRaw
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+	a.Name = raw.Name
+	a.Personality = raw.Personality
+	a.MaxSubKrills = raw.MaxSubKrills
+	a.RecoveryTurns = raw.RecoveryTurns
+
+	switch v := raw.PlanApproval.(type) {
+	case bool:
+		if v {
+			a.PlanApproval = "always"
+		} else {
+			a.PlanApproval = "never"
+		}
+	case string:
+		a.PlanApproval = v
+	default:
+		a.PlanApproval = ""
+	}
+	return nil
+}
+
+// MarshalYAML ensures PlanApproval is written as a string when saving config.
+func (a AgentConfig) MarshalYAML() (interface{}, error) {
+	return &struct {
+		Name          string `yaml:"name"`
+		Personality   string `yaml:"personality,omitempty"`
+		MaxSubKrills  int    `yaml:"max_sub_krills"`
+		PlanApproval  string `yaml:"plan_approval"`
+		RecoveryTurns int    `yaml:"recovery_turns,omitempty"`
+	}{
+		Name:          a.Name,
+		Personality:   a.Personality,
+		MaxSubKrills:  a.MaxSubKrills,
+		PlanApproval:  a.PlanApproval,
+		RecoveryTurns: a.RecoveryTurns,
+	}, nil
 }
 
 // LLMConfig selects and configures the LLM provider.

@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -311,15 +312,23 @@ func parseToolCall(response string) (string, map[string]string) {
 	return toolName, args
 }
 
-// parseSimpleJSON does a lightweight parse of {"key": "value"} JSON.
-// We avoid pulling in encoding/json for this simple case.
+// parseSimpleJSON parses a JSON object string into a string map.
 func parseSimpleJSON(s string) map[string]string {
 	result := make(map[string]string)
 	s = strings.TrimSpace(s)
+
+	// Try proper JSON parse first
+	var raw map[string]interface{}
+	if err := json.Unmarshal([]byte(s), &raw); err == nil {
+		for k, v := range raw {
+			result[k] = fmt.Sprintf("%v", v)
+		}
+		return result
+	}
+
+	// Fallback: extract key-value pairs from malformed JSON
 	s = strings.TrimPrefix(s, "{")
 	s = strings.TrimSuffix(s, "}")
-
-	// Split on commas (simplistic but sufficient for tool args)
 	pairs := strings.Split(s, ",")
 	for _, pair := range pairs {
 		pair = strings.TrimSpace(pair)
@@ -359,20 +368,15 @@ func cleanToolCallFromResponse(response string) string {
 }
 
 // extractShellCommand attempts to extract a shell command from a step description.
-// It looks for backtick-quoted commands or common patterns.
+// Only honours backtick-quoted commands to avoid extracting garbage from prose.
 func extractShellCommand(desc string) string {
-	// Check for backtick-quoted command
 	if idx := strings.Index(desc, "`"); idx >= 0 {
 		end := strings.Index(desc[idx+1:], "`")
 		if end >= 0 {
-			return desc[idx+1 : idx+1+end]
-		}
-	}
-	// Check for common "run X" patterns
-	lower := strings.ToLower(desc)
-	for _, prefix := range []string{"run ", "execute "} {
-		if idx := strings.Index(lower, prefix); idx >= 0 {
-			return strings.TrimSpace(desc[idx+len(prefix):])
+			cmd := strings.TrimSpace(desc[idx+1 : idx+1+end])
+			if cmd != "" {
+				return cmd
+			}
 		}
 	}
 	return ""

@@ -335,9 +335,9 @@ func TestExtractShellCommand(t *testing.T) {
 		want string
 	}{
 		{"Run `ls -la /tmp`", "ls -la /tmp"},
-		{"Execute git status", "git status"},
+		{"Execute `git status`", "git status"},
 		{"List the files in the directory", ""},
-		{"run cat README.md", "cat README.md"},
+		{"run cat README.md", ""},  // no backticks → not extracted
 	}
 	for _, tc := range cases {
 		got := extractShellCommand(tc.desc)

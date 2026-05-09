@@ -228,6 +228,15 @@ func TestRouterDeterministicCommand(t *testing.T) {
 	}
 }
 
+func TestRouterCommandDoesNotOvermatch(t *testing.T) {
+	r := newTestRouter("ANSWER")
+	// "/help me debug this" should NOT match /help — it's a question
+	result := r.Classify(context.Background(), "/help me debug this")
+	if result.Intent == IntentCommand {
+		t.Error("Classify('/help me debug this') should NOT match COMMAND")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // LLM fallback tests
 // ---------------------------------------------------------------------------
@@ -380,12 +389,36 @@ func TestShouldRequireApprovalAutoDestructiveStep(t *testing.T) {
 		Task: "clean up",
 		Steps: []core.PlanStep{
 			{ID: 1, Description: "find old files"},
-			{ID: 2, Description: "delete unused modules"},
+			{ID: 2, Description: "delete file unused_module.go"},
 		},
 	}
 
 	if !a.shouldRequireApproval(plan) {
 		t.Error("auto mode: plan with 'delete' step should require approval")
+	}
+}
+
+func TestShouldRequireApprovalAutoNoFalsePositives(t *testing.T) {
+	a := New(
+		config.AgentConfig{Name: "test", PlanApproval: "auto"},
+		&MockProvider{chatResponse: "CHAT"},
+		&mockBrain{},
+		&mockSkillRegistry{},
+		&mockMCPReg{},
+	)
+
+	// Benign steps containing substrings of danger words should NOT trigger approval
+	plan := &core.Plan{
+		Task: "build a dropdown menu",
+		Steps: []core.PlanStep{
+			{ID: 1, Description: "create a drop-down component"},
+			{ID: 2, Description: "add push notification support"},
+			{ID: 3, Description: "reset filter state on close"},
+		},
+	}
+
+	if a.shouldRequireApproval(plan) {
+		t.Error("auto mode: plan with 'drop-down', 'push notification', 'reset filter' should NOT require approval (word boundary matching)")
 	}
 }
 

@@ -524,13 +524,23 @@ func (a *KrillAgent) shouldRequireApproval(plan *core.Plan) bool {
 		if len(plan.Steps) >= 5 {
 			return true
 		}
-		// Plans with destructive hints need approval
+		// Plans with destructive hints need approval.
+		// Use specific phrases to avoid false positives like "drop-down",
+		// "push notification", "reset filter state".
 		for _, step := range plan.Steps {
 			if step.NeedsApproval {
 				return true
 			}
 			lower := strings.ToLower(step.Description)
-			for _, danger := range []string{"delete", "remove", "deploy", "push", "install", "drop", "destroy", "reset"} {
+			for _, danger := range []string{
+				"delete file", "delete dir", "delete database", "delete branch",
+				"remove file", "remove dir", "remove package",
+				"deploy to", "deploy the",
+				"git push", "force push",
+				"npm install", "pip install", "go install",
+				"drop table", "drop database", "drop collection",
+				"destroy", "rm -", "reset --hard",
+			} {
 				if strings.Contains(lower, danger) {
 					return true
 				}
@@ -1029,12 +1039,6 @@ func (a *KrillAgent) recordFeedback(_ context.Context, input, response string) {
 	}
 }
 
-// shouldSearch is kept for backward compatibility. The router now handles search
-// detection via IntentToolTask, but other code may still call this.
-func (a *KrillAgent) shouldSearch(msg string) bool {
-	lower := strings.ToLower(msg)
-	return matchesAny(lower, searchTriggers)
-}
 
 // saveTurn persists a single turn to the durable conversation store.
 // Runs inline (not goroutine) to ensure ordering.
@@ -1152,7 +1156,9 @@ func containsWord(text, word string) bool {
 	}
 }
 
-// isWordChar returns true if c is a letter, digit, or apostrophe.
+// isWordChar returns true if c is a letter, digit, apostrophe, or hyphen.
+// Hyphen is included so that "drop-down" is treated as one word and
+// "drop" alone does not match it.
 func isWordChar(c byte) bool {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '\''
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '\'' || c == '-'
 }

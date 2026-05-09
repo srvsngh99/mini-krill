@@ -48,10 +48,14 @@ func NewIntentRouter(skills core.SkillRegistry, llm core.LLMProvider) *IntentRou
 	return &IntentRouter{skills: skills, llm: llm}
 }
 
-// commandPrefixes that are handled by handleProviderCommand.
+// commandExact are commands matched exactly (no arguments).
+var commandExact = []string{
+	"/model", "/models", "/help", "/status", "/tasks",
+}
+
+// commandPrefixes are commands that take arguments — matched as prefix+" ".
 var commandPrefixes = []string{
-	"/model", "/models", "/use ", "/auth ",
-	"/help", "/status", "/tasks", "/task ", "/cancel ",
+	"/use ", "/auth ", "/task ", "/cancel ",
 }
 
 // greetings that should always route to chat.
@@ -157,9 +161,14 @@ var selfSkillMap = []struct {
 func (r *IntentRouter) Classify(ctx context.Context, input string) RouteResult {
 	lower := strings.ToLower(strings.TrimSpace(input))
 
-	// 1. Command prefix — handled by handleProviderCommand / task commands
+	// 1. Commands — exact match or prefix with arguments
+	for _, cmd := range commandExact {
+		if lower == cmd {
+			return RouteResult{Intent: IntentCommand}
+		}
+	}
 	for _, prefix := range commandPrefixes {
-		if strings.HasPrefix(lower, prefix) || lower == strings.TrimSpace(prefix) {
+		if strings.HasPrefix(lower, prefix) {
 			return RouteResult{Intent: IntentCommand}
 		}
 	}
