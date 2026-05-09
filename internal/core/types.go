@@ -221,10 +221,12 @@ type MCPRegistry interface {
 
 // PlanStep is one step in an execution plan.
 type PlanStep struct {
-	ID          int    `json:"id"`
-	Description string `json:"description"`
-	Status      string `json:"status"` // pending, running, done, failed, skipped
-	Output      string `json:"output,omitempty"`
+	ID            int    `json:"id"`
+	Description   string `json:"description"`
+	Status        string `json:"status"` // pending, running, done, failed, skipped
+	Output        string `json:"output,omitempty"`
+	ToolHint      string `json:"tool_hint,omitempty"`      // suggested tool from planner
+	NeedsApproval bool   `json:"needs_approval,omitempty"` // destructive step flag
 }
 
 // Plan is a set of steps the agent proposes before executing a task.
@@ -249,6 +251,26 @@ type Agent interface {
 	Plan(ctx context.Context, task string) (*Plan, error)
 	ExecutePlan(ctx context.Context, plan *Plan) (string, error)
 	SpawnKrill(ctx context.Context, task string) (*SubKrill, error)
+}
+
+// TaskInfo is a serialisable snapshot of a durable task.
+type TaskInfo struct {
+	ID        string    `json:"id"`
+	Task      string    `json:"task"`
+	Status    string    `json:"status"` // queued, running, done, failed, cancelled
+	Result    string    `json:"result,omitempty"`
+	Error     string    `json:"error,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// TaskManager tracks long-running background tasks.
+// Kept separate from Agent so the existing Agent contract stays unchanged.
+type TaskManager interface {
+	SubmitTask(ctx context.Context, userID, platform, chatID, task string) (taskID string, err error)
+	ListTasks(userID string) []TaskInfo
+	GetTask(id string) (*TaskInfo, bool)
+	CancelTask(id string) error
 }
 
 // ---------------------------------------------------------------------------

@@ -12,8 +12,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.LLM.Provider != "ollama" {
 		t.Errorf("LLM.Provider = %q, want %q", cfg.LLM.Provider, "ollama")
 	}
-	if cfg.Agent.PlanApproval != true {
-		t.Error("Agent.PlanApproval = false, want true")
+	if cfg.Agent.PlanApproval != "auto" {
+		t.Errorf("Agent.PlanApproval = %q, want %q", cfg.Agent.PlanApproval, "auto")
 	}
 	if cfg.Agent.Name != "krill" {
 		t.Errorf("Agent.Name = %q, want %q", cfg.Agent.Name, "krill")

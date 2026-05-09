@@ -107,7 +107,7 @@ func (r *mockMCPReg) IsEnabled(_ string) bool                   { return true }
 
 func newTestAgent(response string) *KrillAgent {
 	return New(
-		config.AgentConfig{Name: "test-krill", MaxSubKrills: 3, PlanApproval: true},
+		config.AgentConfig{Name: "test-krill", MaxSubKrills: 3, PlanApproval: "always"},
 		&MockProvider{chatResponse: response},
 		&mockBrain{},
 		&mockSkillRegistry{},
@@ -155,8 +155,8 @@ func TestAgentChatMultipleMessages(t *testing.T) {
 }
 
 func TestAgentPlanApproval(t *testing.T) {
-	// The mock LLM returns "CHAT" for classification (since "Just chatting"
-	// doesn't contain "TASK"), so this tests the chat path.
+	// "build me a website" hits the LLM fallback, mock returns "Just chatting"
+	// which doesn't match any intent → defaults to IntentAnswer → chat path.
 	a := newTestAgent("Just chatting")
 
 	resp, err := a.Chat(context.Background(), "build me a website")
@@ -169,18 +169,18 @@ func TestAgentPlanApproval(t *testing.T) {
 }
 
 func TestAgentPlanApprovalWithTaskClassification(t *testing.T) {
-	// Use a provider that returns "TASK" for classification, then a plan response
+	// Use a provider that returns "LONG_TASK" for the LLM intent fallback, then a plan response
 	callCount := 0
 	provider := &sequentialMockProvider{
 		responses: []string{
-			"TASK",
-			"SUMMARY: Build a website\nSTEP 1: Set up\nSTEP 2: Code",
+			"LONG_TASK",
+			"SUMMARY: Build a website\nSTEP 1: Set up\nSTEP 2: Code\nSTEP 3: Deploy\nSTEP 4: Test\nSTEP 5: Monitor",
 		},
 		callCount: &callCount,
 	}
 
 	agent := New(
-		config.AgentConfig{Name: "test-krill", MaxSubKrills: 3, PlanApproval: true},
+		config.AgentConfig{Name: "test-krill", MaxSubKrills: 3, PlanApproval: "always"},
 		provider,
 		&mockBrain{},
 		&mockSkillRegistry{},
@@ -371,7 +371,7 @@ func newProviderControlTestAgent() *KrillAgent {
 		},
 	}
 	return New(
-		config.AgentConfig{Name: "test-krill", MaxSubKrills: 3, PlanApproval: true},
+		config.AgentConfig{Name: "test-krill", MaxSubKrills: 3, PlanApproval: "always"},
 		provider,
 		&mockBrain{},
 		&mockSkillRegistry{},

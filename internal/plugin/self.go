@@ -401,11 +401,17 @@ func selfConfigure(sc SelfContext) core.Skill {
 
 			// Plan approval
 			if strings.Contains(lower, "auto approve") || strings.Contains(lower, "skip approval") {
-				sc.Config.Agent.PlanApproval = false
-				changes = append(changes, "plan_approval: true -> false")
-			} else if strings.Contains(lower, "require approval") || strings.Contains(lower, "plan approval on") {
-				sc.Config.Agent.PlanApproval = true
-				changes = append(changes, "plan_approval: false -> true")
+				old := sc.Config.Agent.PlanApproval
+				sc.Config.Agent.PlanApproval = "never"
+				changes = append(changes, fmt.Sprintf("plan_approval: %s -> never", old))
+			} else if strings.Contains(lower, "require approval") || strings.Contains(lower, "plan approval on") || strings.Contains(lower, "always approve") {
+				old := sc.Config.Agent.PlanApproval
+				sc.Config.Agent.PlanApproval = "always"
+				changes = append(changes, fmt.Sprintf("plan_approval: %s -> always", old))
+			} else if strings.Contains(lower, "auto approval") || strings.Contains(lower, "smart approval") {
+				old := sc.Config.Agent.PlanApproval
+				sc.Config.Agent.PlanApproval = "auto"
+				changes = append(changes, fmt.Sprintf("plan_approval: %s -> auto", old))
 			}
 
 			if len(changes) == 0 {

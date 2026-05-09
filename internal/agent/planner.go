@@ -22,20 +22,23 @@ var statusIcons = map[string]string{
 
 // GeneratePlan asks the LLM to decompose a task into concrete, actionable steps.
 // The plan is returned unapproved - the user must greenlight it before execution.
-func GeneratePlan(ctx context.Context, task string, llm core.LLMProvider, skills core.SkillRegistry) (*core.Plan, error) {
-	// Build the skills inventory for the planner's awareness
-	skillList := buildSkillList(skills)
+func GeneratePlan(ctx context.Context, task string, llm core.LLMProvider, skills core.SkillRegistry, mcp core.MCPRegistry) (*core.Plan, error) {
+	// Build the tools inventory for the planner's awareness
+	toolbox := NewToolbox(skills, mcp, llm)
+	toolDescriptions := toolbox.FormatToolsForLLM()
 
 	prompt := fmt.Sprintf(
 		"You are planning a task. Break it into 3-7 concrete steps. "+
 			"For each step, write one clear action sentence. "+
-			"Available skills: %s. "+
+			"If a step should use a tool, add [tool:name] at the end of the step. "+
+			"For shell commands, use [tool:shell]. "+
 			"Format your response as:\n"+
 			"SUMMARY: <one-line summary>\n"+
-			"STEP 1: <action>\n"+
+			"STEP 1: <action> [tool:name]\n"+
 			"STEP 2: <action>\n"+
 			"...\n\n"+
-			"Task: %s", skillList, task,
+			"Available tools:\n%s\n"+
+			"Task: %s", toolDescriptions, task,
 	)
 
 	msgs := []core.Message{
@@ -99,15 +102,18 @@ func FormatPlan(plan *core.Plan) string {
 	return b.String()
 }
 
-// ExecutePlanSteps iterates through each plan step, sending it to the LLM for execution.
+// ExecutePlanSteps iterates through each plan step, dispatching real tools when
+// possible and falling back to LLM narration when no tool applies.
 // Context from previous steps feeds forward so each step builds on the last.
-// Like a krill swarm moving in coordinated waves through the ocean column.
-func ExecutePlanSteps(ctx context.Context, plan *core.Plan, llm core.LLMProvider, brain core.Brain, skills core.SkillRegistry) (string, error) {
+func ExecutePlanSteps(ctx context.Context, plan *core.Plan, llm core.LLMProvider, brain core.Brain, skills core.SkillRegistry, mcp core.MCPRegistry) (string, error) {
 	if !plan.Approved {
 		return "", fmt.Errorf("this krill refuses to dive without an approved plan")
 	}
 
 	log.Info("executing plan", "task", plan.Task, "steps", len(plan.Steps))
+
+	toolbox := NewToolbox(skills, mcp, llm)
+	toolDescriptions := toolbox.FormatToolsForLLM()
 
 	var previousOutputs []string
 	var results strings.Builder
@@ -123,7 +129,6 @@ func ExecutePlanSteps(ctx context.Context, plan *core.Plan, llm core.LLMProvider
 			step.Status = "skipped"
 			log.Warn("plan execution cancelled", "step", step.ID, "reason", ctx.Err())
 			results.WriteString(fmt.Sprintf("Step %d: SKIPPED (cancelled)\n", step.ID))
-			// Mark remaining steps as skipped
 			for j := i + 1; j < len(plan.Steps); j++ {
 				plan.Steps[j].Status = "skipped"
 			}
@@ -143,33 +148,22 @@ func ExecutePlanSteps(ctx context.Context, plan *core.Plan, llm core.LLMProvider
 			contextStr = "This is the first step."
 		}
 
-		prompt := fmt.Sprintf(
-			"Execute this step: %s\n\n%s\n\nProvide a clear, concise result.",
-			step.Description, contextStr,
-		)
+		// Try tool-assisted execution: ask LLM what tool to call
+		stepOutput, err := executeStepWithTools(ctx, step, contextStr, toolbox, toolDescriptions, llm, brain)
 
-		msgs := brain.EnrichMessages([]core.Message{
-			{Role: "user", Content: prompt},
-		})
-
-		resp, err := llm.Chat(ctx, msgs)
 		if err != nil {
 			step.Status = "failed"
 			step.Output = fmt.Sprintf("Error: %v", err)
 			log.Error("step execution failed", "step_id", step.ID, "error", err)
-
 			results.WriteString(fmt.Sprintf("Step %d [!] %s\n  Error: %v\n\n", step.ID, step.Description, err))
-
-			// Continue with remaining steps - a krill swarm adapts around obstacles
 			previousOutputs = append(previousOutputs, fmt.Sprintf("Step %d FAILED: %v", step.ID, err))
 			continue
 		}
 
 		step.Status = "done"
-		step.Output = resp.Content
-		previousOutputs = append(previousOutputs, fmt.Sprintf("Step %d: %s", step.ID, resp.Content))
-
-		results.WriteString(fmt.Sprintf("Step %d [x] %s\n  %s\n\n", step.ID, step.Description, resp.Content))
+		step.Output = stepOutput
+		previousOutputs = append(previousOutputs, fmt.Sprintf("Step %d: %s", step.ID, stepOutput))
+		results.WriteString(fmt.Sprintf("Step %d [x] %s\n  %s\n\n", step.ID, step.Description, stepOutput))
 		log.Debug("step completed", "step_id", step.ID)
 	}
 
@@ -193,6 +187,195 @@ func ExecutePlanSteps(ctx context.Context, plan *core.Plan, llm core.LLMProvider
 
 	log.Info("plan execution complete", "task", plan.Task, "done", done, "failed", failed)
 	return results.String(), nil
+}
+
+// executeStepWithTools handles a single plan step by asking the LLM if a tool
+// should be used. If the LLM responds with a TOOL_CALL directive, the tool is
+// dispatched via the toolbox and the real output is fed back to the LLM for
+// synthesis. If no tool is called, the LLM's direct response is used.
+func executeStepWithTools(ctx context.Context, step *core.PlanStep, contextStr string, toolbox *Toolbox, toolDescriptions string, llm core.LLMProvider, brain core.Brain) (string, error) {
+	// If the step already has a tool hint from plan generation, try it directly
+	if step.ToolHint != "" {
+		toolOutput, err := dispatchToolHint(ctx, step, toolbox)
+		if err == nil && toolOutput != "" {
+			// Synthesize the raw tool output into a useful summary via LLM
+			return synthesizeToolOutput(ctx, step.Description, toolOutput, llm, brain)
+		}
+		log.Debug("tool hint dispatch failed, falling back to LLM", "tool", step.ToolHint, "error", err)
+	}
+
+	// Ask LLM to execute the step, optionally using a tool
+	prompt := fmt.Sprintf(
+		"Execute this step: %s\n\n%s\n\n"+
+			"Available tools:\n%s\n"+
+			"If you need to use a tool, respond with EXACTLY this format:\n"+
+			"TOOL_CALL: tool_name\n"+
+			"ARGS: {\"key\": \"value\"}\n\n"+
+			"If no tool is needed, provide your analysis directly.",
+		step.Description, contextStr, toolDescriptions,
+	)
+
+	msgs := brain.EnrichMessages([]core.Message{
+		{Role: "user", Content: prompt},
+	})
+
+	resp, err := llm.Chat(ctx, msgs)
+	if err != nil {
+		return "", err
+	}
+
+	// Check if the LLM wants to call a tool
+	toolName, toolArgs := parseToolCall(resp.Content)
+	if toolName != "" {
+		log.Info("LLM requested tool call", "tool", toolName)
+		toolOutput, err := toolbox.ExecuteTool(ctx, toolName, toolArgs)
+		if err != nil {
+			log.Warn("tool call failed, using LLM narration", "tool", toolName, "error", err)
+			// Return the error info along with the original LLM response
+			return fmt.Sprintf("[tool %s failed: %v]\n%s", toolName, err, cleanToolCallFromResponse(resp.Content)), nil
+		}
+		// Feed real tool output back to LLM for synthesis
+		return synthesizeToolOutput(ctx, step.Description, toolOutput, llm, brain)
+	}
+
+	// No tool call — use LLM response directly (narration fallback)
+	return resp.Content, nil
+}
+
+// dispatchToolHint tries to execute a tool based on the ToolHint from plan generation.
+func dispatchToolHint(ctx context.Context, step *core.PlanStep, toolbox *Toolbox) (string, error) {
+	args := map[string]string{"input": step.Description}
+
+	// For shell tool, try to extract a command from the step description
+	if step.ToolHint == "shell" {
+		cmd := extractShellCommand(step.Description)
+		if cmd != "" {
+			args = map[string]string{"command": cmd}
+		} else {
+			return "", fmt.Errorf("could not extract shell command from step description")
+		}
+	}
+
+	return toolbox.ExecuteTool(ctx, step.ToolHint, args)
+}
+
+// synthesizeToolOutput sends real tool output back to the LLM for a concise summary.
+func synthesizeToolOutput(ctx context.Context, stepDescription, toolOutput string, llm core.LLMProvider, brain core.Brain) (string, error) {
+	prompt := fmt.Sprintf(
+		"You executed: %s\n\nHere is the real output:\n```\n%s\n```\n\n"+
+			"Provide a concise summary of the results. Include key findings.",
+		stepDescription, truncate(toolOutput, 4000),
+	)
+
+	msgs := brain.EnrichMessages([]core.Message{
+		{Role: "user", Content: prompt},
+	})
+
+	resp, err := llm.Chat(ctx, msgs)
+	if err != nil {
+		// If synthesis fails, return raw tool output
+		return toolOutput, nil
+	}
+
+	return resp.Content, nil
+}
+
+// parseToolCall extracts a TOOL_CALL directive and its arguments from LLM output.
+// Expected format:
+//
+//	TOOL_CALL: tool_name
+//	ARGS: {"key": "value"}
+func parseToolCall(response string) (string, map[string]string) {
+	lines := strings.Split(response, "\n")
+
+	var toolName string
+	args := make(map[string]string)
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		if strings.HasPrefix(strings.ToUpper(trimmed), "TOOL_CALL:") {
+			toolName = strings.TrimSpace(trimmed[len("TOOL_CALL:"):])
+			// Look for ARGS on the next line
+			if i+1 < len(lines) {
+				argsLine := strings.TrimSpace(lines[i+1])
+				if strings.HasPrefix(strings.ToUpper(argsLine), "ARGS:") {
+					argsStr := strings.TrimSpace(argsLine[len("ARGS:"):])
+					args = parseSimpleJSON(argsStr)
+				}
+			}
+			break
+		}
+	}
+
+	return toolName, args
+}
+
+// parseSimpleJSON does a lightweight parse of {"key": "value"} JSON.
+// We avoid pulling in encoding/json for this simple case.
+func parseSimpleJSON(s string) map[string]string {
+	result := make(map[string]string)
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "{")
+	s = strings.TrimSuffix(s, "}")
+
+	// Split on commas (simplistic but sufficient for tool args)
+	pairs := strings.Split(s, ",")
+	for _, pair := range pairs {
+		pair = strings.TrimSpace(pair)
+		colonIdx := strings.Index(pair, ":")
+		if colonIdx < 0 {
+			continue
+		}
+		key := strings.Trim(strings.TrimSpace(pair[:colonIdx]), "\"")
+		value := strings.Trim(strings.TrimSpace(pair[colonIdx+1:]), "\"")
+		if key != "" {
+			result[key] = value
+		}
+	}
+	return result
+}
+
+// cleanToolCallFromResponse removes the TOOL_CALL/ARGS block from a response
+// so we can use the remaining text as narration.
+func cleanToolCallFromResponse(response string) string {
+	lines := strings.Split(response, "\n")
+	var clean []string
+	skip := false
+	for _, line := range lines {
+		upper := strings.ToUpper(strings.TrimSpace(line))
+		if strings.HasPrefix(upper, "TOOL_CALL:") {
+			skip = true
+			continue
+		}
+		if skip && strings.HasPrefix(upper, "ARGS:") {
+			skip = false
+			continue
+		}
+		skip = false
+		clean = append(clean, line)
+	}
+	return strings.TrimSpace(strings.Join(clean, "\n"))
+}
+
+// extractShellCommand attempts to extract a shell command from a step description.
+// It looks for backtick-quoted commands or common patterns.
+func extractShellCommand(desc string) string {
+	// Check for backtick-quoted command
+	if idx := strings.Index(desc, "`"); idx >= 0 {
+		end := strings.Index(desc[idx+1:], "`")
+		if end >= 0 {
+			return desc[idx+1 : idx+1+end]
+		}
+	}
+	// Check for common "run X" patterns
+	lower := strings.ToLower(desc)
+	for _, prefix := range []string{"run ", "execute "} {
+		if idx := strings.Index(lower, prefix); idx >= 0 {
+			return strings.TrimSpace(desc[idx+len(prefix):])
+		}
+	}
+	return ""
 }
 
 // parsePlanResponse extracts a structured Plan from the LLM's text response.
@@ -225,10 +408,20 @@ func parsePlanResponse(task, response string) *core.Plan {
 			if colonIdx >= 0 {
 				stepCounter++
 				desc := strings.TrimSpace(line[colonIdx+1:])
+				// Extract [tool:name] hint if present
+				toolHint := ""
+				if tidx := strings.Index(desc, "[tool:"); tidx >= 0 {
+					end := strings.Index(desc[tidx:], "]")
+					if end >= 0 {
+						toolHint = strings.TrimSpace(desc[tidx+len("[tool:") : tidx+end])
+						desc = strings.TrimSpace(desc[:tidx] + desc[tidx+end+1:])
+					}
+				}
 				plan.Steps = append(plan.Steps, core.PlanStep{
 					ID:          stepCounter,
 					Description: desc,
 					Status:      "pending",
+					ToolHint:    toolHint,
 				})
 			}
 		}

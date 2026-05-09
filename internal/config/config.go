@@ -33,7 +33,7 @@ type AgentConfig struct {
 	Name          string `yaml:"name"`
 	Personality   string `yaml:"personality"` // active personality profile (default: "krill")
 	MaxSubKrills  int    `yaml:"max_sub_krills"`
-	PlanApproval  bool   `yaml:"plan_approval"`  // require user approval before executing plans
+	PlanApproval  string `yaml:"plan_approval"`  // "auto" (default), "always", or "never"
 	RecoveryTurns int    `yaml:"recovery_turns"` // turns to load on cold start (default 10, from brain config)
 }
 
@@ -136,7 +136,7 @@ func DefaultConfig() *Config {
 		Agent: AgentConfig{
 			Name:         "krill",
 			MaxSubKrills: 3,
-			PlanApproval: true,
+			PlanApproval: "auto",
 		},
 		LLM: LLMConfig{
 			Provider:    "ollama",
@@ -220,6 +220,17 @@ func fillDefaults(cfg *Config) {
 	}
 	if cfg.Agent.Personality == "" {
 		cfg.Agent.Personality = "krill"
+	}
+	// Normalize PlanApproval: support legacy bool values from old configs.
+	switch strings.ToLower(cfg.Agent.PlanApproval) {
+	case "auto", "always", "never":
+		// valid
+	case "true":
+		cfg.Agent.PlanApproval = "always"
+	case "false":
+		cfg.Agent.PlanApproval = "never"
+	default:
+		cfg.Agent.PlanApproval = "auto"
 	}
 	if cfg.Telegram.BotMaxTurns == 0 {
 		cfg.Telegram.BotMaxTurns = 3
