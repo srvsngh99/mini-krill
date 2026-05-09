@@ -989,12 +989,6 @@ func memoryKey(s string) string {
 	return key
 }
 
-// detectSelfSkill delegates to the router's detectSelfSkillTrigger.
-// Kept for backward compatibility with any callers outside the main Chat() path.
-func (a *KrillAgent) detectSelfSkill(msg string) (skillName, skillInput string) {
-	return detectSelfSkillTrigger(msg)
-}
-
 // recordFeedback silently stores interaction signals for adaptive personality evolution.
 // Runs in background goroutine - never blocks the response.
 func (a *KrillAgent) recordFeedback(_ context.Context, input, response string) {
@@ -1110,22 +1104,6 @@ func (a *KrillAgent) appendMessage(msg core.Message) {
 		trimmed = append(trimmed, a.history[1+excess:]...)
 		a.history = trimmed
 	}
-}
-
-// looksLikeRecallRequest detects if the user is asking about previous conversations.
-func looksLikeRecallRequest(msg string) bool {
-	lower := strings.ToLower(msg)
-	triggers := []string{
-		"last conversation", "previous conversation", "remember when",
-		"do you remember", "we talked about", "earlier we", "last time",
-		"our last", "previously", "last chat", "before this",
-	}
-	for _, t := range triggers {
-		if strings.Contains(lower, t) {
-			return true
-		}
-	}
-	return false
 }
 
 // buildSkillSummary returns a short comma-separated list of enabled skill names

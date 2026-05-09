@@ -451,27 +451,3 @@ func parsePlanResponse(task, response string) *core.Plan {
 	return plan
 }
 
-// buildSkillList creates a comma-separated inventory of available skills.
-func buildSkillList(skills core.SkillRegistry) string {
-	if skills == nil {
-		return "none"
-	}
-
-	infos := skills.List()
-	if len(infos) == 0 {
-		return "none"
-	}
-
-	var parts []string
-	for _, info := range infos {
-		if info.Enabled {
-			parts = append(parts, fmt.Sprintf("%s (%s)", info.Name, info.Description))
-		}
-	}
-
-	if len(parts) == 0 {
-		return "none"
-	}
-
-	return strings.Join(parts, ", ")
-}

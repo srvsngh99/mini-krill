@@ -188,8 +188,14 @@ func (s *TaskStore) persistLocked() {
 		if err != nil {
 			continue
 		}
-		f.Write(data)
-		f.Write([]byte("\n"))
+		if _, err := f.Write(data); err != nil {
+			log.Warn("failed to write task entry", "error", err)
+			return
+		}
+		if _, err := f.Write([]byte("\n")); err != nil {
+			log.Warn("failed to write task separator", "error", err)
+			return
+		}
 	}
 }
 
