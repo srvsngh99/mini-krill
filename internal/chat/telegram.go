@@ -526,6 +526,9 @@ func (t *TelegramBot) handleCommand(chatID int64, msg *tgbotapi.Message) {
 			"/switch  - Switch provider (e.g. /switch local, /switch codex gpt-5.5)",
 			"/fact    - Learn something about real krill",
 			"/plan    - Start a dive plan for a task",
+			"/tasks   - List active and recent tasks",
+			"/task ID - Show details of a specific task",
+			"/cancel ID - Cancel a running task",
 			"",
 			"Or say 'remember that ...', 'what do you remember', or 'switch to claude' naturally!",
 		}, "\n"))
@@ -555,12 +558,43 @@ func (t *TelegramBot) handleCommand(chatID int64, msg *tgbotapi.Message) {
 			"Tell me what you need done and I'll draft a dive plan for your approval! "+
 				"Just describe the task in your next message.")
 
+	case "tasks", "task", "cancel":
+		// Task management commands are handled by the agent via Chat()
+		t.handleTaskViaAgent(chatID, msg)
+
 	default:
 		t.sendMessage(chatID, fmt.Sprintf(
 			"Unknown command /%s. Try /help to see what I can do!",
 			msg.Command(),
 		))
 	}
+}
+
+// handleTaskViaAgent forwards task management commands (/tasks, /task, /cancel)
+// through the normal agent Chat() path so the agent handles them.
+func (t *TelegramBot) handleTaskViaAgent(chatID int64, msg *tgbotapi.Message) {
+	fullText := "/" + msg.Command()
+	if args := msg.CommandArguments(); args != "" {
+		fullText += " " + args
+	}
+
+	msgCtx, msgCancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer msgCancel()
+
+	chatMsg := core.ChatMessage{
+		Platform: "telegram",
+		ChatID:   fmt.Sprintf("%d", chatID),
+		UserID:   fmt.Sprintf("%d", msg.From.ID),
+		Username: msg.From.UserName,
+		Text:     fullText,
+	}
+
+	resp, err := t.handler.HandleMessage(msgCtx, chatMsg)
+	if err != nil {
+		t.sendMessage(chatID, "Something went wrong: "+err.Error())
+		return
+	}
+	t.sendLong(chatID, resp)
 }
 
 // ── Model/provider command handlers ─────────────────────────────────────────

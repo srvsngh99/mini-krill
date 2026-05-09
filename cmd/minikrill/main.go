@@ -179,6 +179,9 @@ func initStack(quiet bool) (*krillStack, error) {
 	cfg.Agent.RecoveryTurns = cfg.Brain.RecoveryTurns
 
 	krillAgent := agent.New(cfg.Agent, providerMgr, krillBrain, skillReg, mcpReg)
+	// Tasks are orchestration state, not memories — keep them out of the brain dir
+	// so clearing memory doesn't wipe in-flight task records.
+	krillAgent.InitTaskSystem(filepath.Join(config.DataDir(), "tasks"), 3)
 	chatHandler := chat.NewHandler(krillAgent, reminderStore)
 
 	return &krillStack{
