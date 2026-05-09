@@ -492,6 +492,24 @@ func startBots(ctx context.Context, stack *krillStack) botStatus {
 					AccessedAt: time.Now(),
 				})
 			})
+			// Wire durable task notifications back to Telegram. RegisterNotifier
+			// scopes this to the "telegram" platform so other platforms (CLI,
+			// TUI, future Discord) don't accidentally receive Telegram-shaped
+			// callbacks.
+			if runner := stack.agent.TaskRunnerRef(); runner != nil {
+				localBot := tgBot // capture for closure
+				runner.RegisterNotifier("telegram", func(chatID, message string) {
+					if chatID == "" {
+						return
+					}
+					id, err := strconv.ParseInt(chatID, 10, 64)
+					if err != nil {
+						klog.Warn("telegram notify: invalid chat id", "chat_id", chatID, "error", err)
+						return
+					}
+					localBot.SendToChat(id, message)
+				})
+			}
 			go func() {
 				if err := tgBot.Start(ctx); err != nil {
 					klog.Error("telegram error", "error", err)

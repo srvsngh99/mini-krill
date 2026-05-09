@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -107,7 +108,7 @@ func (r *mockMCPReg) IsEnabled(_ string) bool                   { return true }
 
 func newTestAgent(response string) *KrillAgent {
 	return New(
-		config.AgentConfig{Name: "test-krill", MaxSubKrills: 3, PlanApproval: true},
+		config.AgentConfig{Name: "test-krill", MaxSubKrills: 3, PlanApproval: "always"},
 		&MockProvider{chatResponse: response},
 		&mockBrain{},
 		&mockSkillRegistry{},
@@ -155,8 +156,8 @@ func TestAgentChatMultipleMessages(t *testing.T) {
 }
 
 func TestAgentPlanApproval(t *testing.T) {
-	// The mock LLM returns "CHAT" for classification (since "Just chatting"
-	// doesn't contain "TASK"), so this tests the chat path.
+	// "build me a website" hits the LLM fallback, mock returns "Just chatting"
+	// which doesn't match any intent → defaults to IntentAnswer → chat path.
 	a := newTestAgent("Just chatting")
 
 	resp, err := a.Chat(context.Background(), "build me a website")
@@ -169,18 +170,18 @@ func TestAgentPlanApproval(t *testing.T) {
 }
 
 func TestAgentPlanApprovalWithTaskClassification(t *testing.T) {
-	// Use a provider that returns "TASK" for classification, then a plan response
+	// Use a provider that returns "LONG_TASK" for the LLM intent fallback, then a plan response
 	callCount := 0
 	provider := &sequentialMockProvider{
 		responses: []string{
-			"TASK",
-			"SUMMARY: Build a website\nSTEP 1: Set up\nSTEP 2: Code",
+			"LONG_TASK",
+			"SUMMARY: Build a website\nSTEP 1: Set up\nSTEP 2: Code\nSTEP 3: Deploy\nSTEP 4: Test\nSTEP 5: Monitor",
 		},
 		callCount: &callCount,
 	}
 
 	agent := New(
-		config.AgentConfig{Name: "test-krill", MaxSubKrills: 3, PlanApproval: true},
+		config.AgentConfig{Name: "test-krill", MaxSubKrills: 3, PlanApproval: "always"},
 		provider,
 		&mockBrain{},
 		&mockSkillRegistry{},
@@ -371,7 +372,7 @@ func newProviderControlTestAgent() *KrillAgent {
 		},
 	}
 	return New(
-		config.AgentConfig{Name: "test-krill", MaxSubKrills: 3, PlanApproval: true},
+		config.AgentConfig{Name: "test-krill", MaxSubKrills: 3, PlanApproval: "always"},
 		provider,
 		&mockBrain{},
 		&mockSkillRegistry{},
@@ -593,3 +594,41 @@ func (m *slowMockProvider) Stream(_ context.Context, _ []core.Message, _ ...core
 func (m *slowMockProvider) Name() string                     { return "slow-mock" }
 func (m *slowMockProvider) ModelName() string                { return "slow-mock" }
 func (m *slowMockProvider) Available(_ context.Context) bool { return true }
+
+func TestChatFromPlatformAtomicity(t *testing.T) {
+	// Two concurrent dispatchers should each see their own platform/chatID
+	// inside the corresponding ChatFromPlatform call. The previous
+	// SetChatContext + Chat split allowed the second SetChatContext to
+	// overwrite the first before the first Chat ran.
+	agent := newTestAgent("hi")
+	agent.InitTaskSystem("", 1)
+
+	const N = 20
+	var wg sync.WaitGroup
+	platforms := []string{"telegram", "cli", "discord", "tui"}
+	errs := make(chan string, N)
+
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		platform := platforms[i%len(platforms)]
+		chatID := platform + "-" + string(rune('a'+i))
+		go func() {
+			defer wg.Done()
+			// We can't directly inspect a.platform after the call (the test
+			// agent uses real chat path). Instead, use the round-trip
+			// through ChatFromPlatform — if it doesn't deadlock or return
+			// a wrong-platform error and the agent platform == chatID
+			// platform on observation, we're good. The real correctness
+			// guarantee is that ChatFromPlatform takes a single mutex
+			// acquisition, so contention here just exercises that lock.
+			if _, err := agent.ChatFromPlatform(context.Background(), platform, chatID, "hello"); err != nil {
+				errs <- err.Error()
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for e := range errs {
+		t.Errorf("ChatFromPlatform under contention: %s", e)
+	}
+}

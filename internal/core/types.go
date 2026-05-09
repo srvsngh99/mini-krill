@@ -76,11 +76,14 @@ type LLMProvider interface {
 
 // MemoryEntry is a single item in the krill's memory.
 type MemoryEntry struct {
-	Key        string    `json:"key"`
-	Value      string    `json:"value"`
-	Tags       []string  `json:"tags,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	AccessedAt time.Time `json:"accessed_at"`
+	Key         string    `json:"key"`
+	Value       string    `json:"value"`
+	Tags        []string  `json:"tags,omitempty"`
+	Scope       string    `json:"scope,omitempty"`        // "user", "project", "group", "task-outcome", "system"
+	Source      string    `json:"source,omitempty"`        // "user-explicit", "auto-learned", "task-outcome", "reflection", "feedback"
+	AccessCount int       `json:"access_count,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	AccessedAt  time.Time `json:"accessed_at"`
 }
 
 // Personality defines the krill's character traits.
@@ -117,6 +120,7 @@ type Memory interface {
 	Store(ctx context.Context, entry MemoryEntry) error
 	Recall(ctx context.Context, key string) (*MemoryEntry, error)
 	Search(ctx context.Context, query string, limit int) ([]MemoryEntry, error)
+	RankedSearch(ctx context.Context, query string, scope string, limit int) ([]MemoryEntry, error)
 	Forget(ctx context.Context, key string) error
 	List(ctx context.Context) ([]MemoryEntry, error)
 	Count() int
@@ -221,10 +225,12 @@ type MCPRegistry interface {
 
 // PlanStep is one step in an execution plan.
 type PlanStep struct {
-	ID          int    `json:"id"`
-	Description string `json:"description"`
-	Status      string `json:"status"` // pending, running, done, failed, skipped
-	Output      string `json:"output,omitempty"`
+	ID            int    `json:"id"`
+	Description   string `json:"description"`
+	Status        string `json:"status"` // pending, running, done, failed, skipped
+	Output        string `json:"output,omitempty"`
+	ToolHint      string `json:"tool_hint,omitempty"`      // suggested tool from planner
+	NeedsApproval bool   `json:"needs_approval,omitempty"` // destructive step flag
 }
 
 // Plan is a set of steps the agent proposes before executing a task.
@@ -249,6 +255,34 @@ type Agent interface {
 	Plan(ctx context.Context, task string) (*Plan, error)
 	ExecutePlan(ctx context.Context, plan *Plan) (string, error)
 	SpawnKrill(ctx context.Context, task string) (*SubKrill, error)
+}
+
+// PlatformAwareAgent extends Agent with a platform-aware entry point.
+// Implementations process platform/chatID atomically with the message so
+// background-task routing has the right destination.
+type PlatformAwareAgent interface {
+	Agent
+	ChatFromPlatform(ctx context.Context, platform, chatID, input string) (string, error)
+}
+
+// TaskInfo is a serialisable snapshot of a durable task.
+type TaskInfo struct {
+	ID        string    `json:"id"`
+	Task      string    `json:"task"`
+	Status    string    `json:"status"` // queued, running, done, failed, cancelled
+	Result    string    `json:"result,omitempty"`
+	Error     string    `json:"error,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// TaskManager tracks long-running background tasks.
+// Kept separate from Agent so the existing Agent contract stays unchanged.
+type TaskManager interface {
+	SubmitTask(ctx context.Context, userID, platform, chatID, task string) (taskID string, err error)
+	ListTasks(userID string) []TaskInfo
+	GetTask(id string) (*TaskInfo, bool)
+	CancelTask(id string) error
 }
 
 // ---------------------------------------------------------------------------
