@@ -48,6 +48,12 @@ func (h *ChatHandlerImpl) HandleMessage(ctx context.Context, msg core.ChatMessag
 		return response, nil
 	}
 
+	// Set platform + chat ID on the agent so it knows whether to run tasks
+	// in background and where to deliver results.
+	if ps, ok := h.agent.(interface{ SetChatContext(string, string) }); ok {
+		ps.SetChatContext(msg.Platform, msg.ChatID)
+	}
+
 	resp, err := h.agent.Chat(ctx, msg.Text)
 	if err != nil {
 		log.Error("agent.Chat failed",

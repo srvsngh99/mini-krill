@@ -49,8 +49,11 @@ func NewIntentRouter(skills core.SkillRegistry, llm core.LLMProvider) *IntentRou
 }
 
 // commandExact are commands matched exactly (no arguments).
+// Note: /status and /help are handled by platform bots (Telegram, Discord)
+// directly in their command dispatch, not by the agent. They are NOT listed
+// here so that "status" or "help" in natural language falls through to chat.
 var commandExact = []string{
-	"/model", "/models", "/help", "/status", "/tasks",
+	"/model", "/models", "/tasks",
 }
 
 // commandPrefixes are commands that take arguments — matched as prefix+" ".

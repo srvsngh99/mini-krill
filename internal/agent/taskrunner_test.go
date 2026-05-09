@@ -42,7 +42,7 @@ func TestTaskRunnerSubmitAndComplete(t *testing.T) {
 		t.Fatalf("Submit error: %v", err)
 	}
 
-	// Wait for completion
+	// Wait for completion — Get returns a value copy, safe to read without lock
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		got, ok := store.Get(dt.ID)

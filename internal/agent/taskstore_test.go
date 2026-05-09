@@ -30,6 +30,12 @@ func TestTaskStoreCreateAndGet(t *testing.T) {
 	if got.ID != dt.ID {
 		t.Errorf("Get ID = %q, want %q", got.ID, dt.ID)
 	}
+	// Verify Get returns a copy — mutating it should not affect the store
+	got.Status = "mutated"
+	got2, _ := store.Get(dt.ID)
+	if got2.Status == "mutated" {
+		t.Error("Get should return a copy, but mutation leaked back")
+	}
 }
 
 func TestTaskStoreGetNotFound(t *testing.T) {

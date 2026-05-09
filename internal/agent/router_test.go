@@ -215,7 +215,6 @@ func TestRouterDeterministicCommand(t *testing.T) {
 		"/models",
 		"/use codex",
 		"/auth claude",
-		"/help",
 		"/tasks",
 		"/task 001",
 		"/cancel 001",

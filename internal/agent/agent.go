@@ -62,6 +62,7 @@ type KrillAgent struct {
 	router      *IntentRouter
 	channel     string // durable conversation channel; default is unified across interfaces
 	platform    string // current chat platform (telegram, discord, cli, tui)
+	chatID      string // current chat ID for background task notifications
 	history     []core.Message
 	pendingPlan *core.Plan
 	subMgr      *SubKrillManager
@@ -113,12 +114,21 @@ func (a *KrillAgent) SetChannel(channel string) {
 	a.channel = unifiedConversationChannel
 }
 
-// SetPlatform records which chat platform the agent is currently serving.
-// Used to decide whether to run tasks synchronously or in the background.
+// SetPlatform records which chat platform and chat ID the agent is currently
+// serving. Used to decide whether to run tasks in the background and where
+// to deliver results. Safe to call concurrently — serialised by a.mu.
 func (a *KrillAgent) SetPlatform(platform string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.platform = platform
+}
+
+// SetChatContext records the current platform and chat ID for background task routing.
+func (a *KrillAgent) SetChatContext(platform, chatID string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.platform = platform
+	a.chatID = chatID
 }
 
 // InitTaskSystem sets up the durable task store and runner.
@@ -191,6 +201,10 @@ func (a *KrillAgent) CancelTask(id string) error {
 
 // Chat is the main entry point - every user message flows through here.
 // It handles pending plan approval, intent classification, and response generation.
+// Note: Chat holds a.mu for its entire duration. The platform field is safe to
+// read because SetPlatform also holds a.mu, so they cannot race. For multi-
+// platform concurrency (Telegram + CLI simultaneously), callers must set
+// platform before each Chat call, which is serialised by the lock.
 func (a *KrillAgent) Chat(ctx context.Context, input string) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -435,7 +449,7 @@ func (a *KrillAgent) shouldRunInBackground(plan *core.Plan) bool {
 
 // submitBackgroundTask creates a durable task and returns an immediate ack.
 func (a *KrillAgent) submitBackgroundTask(input string) (string, error) {
-	taskID, err := a.SubmitTask(context.Background(), "", a.platform, "", input)
+	taskID, err := a.SubmitTask(context.Background(), "", a.platform, a.chatID, input)
 	if err != nil {
 		log.Error("background task submission failed", "error", err)
 		return fmt.Sprintf("Could not start background task: %v", err), nil

@@ -92,24 +92,28 @@ func (s *TaskStore) Create(userID, platform, chatID, task string) *DurableTask {
 	return t
 }
 
-// Get retrieves a task by ID.
-func (s *TaskStore) Get(id string) (*DurableTask, bool) {
+// Get retrieves a copy of a task by ID. Returns a value copy so callers
+// cannot race with Update.
+func (s *TaskStore) Get(id string) (DurableTask, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	t, ok := s.tasks[id]
-	return t, ok
+	if !ok {
+		return DurableTask{}, false
+	}
+	return *t, true
 }
 
-// List returns tasks for a given user (or all tasks if userID is empty),
-// sorted by creation time descending (newest first).
-func (s *TaskStore) List(userID string) []*DurableTask {
+// List returns value copies of tasks for a given user (or all tasks if
+// userID is empty), sorted by creation time descending (newest first).
+func (s *TaskStore) List(userID string) []DurableTask {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var result []*DurableTask
+	var result []DurableTask
 	for _, t := range s.tasks {
 		if userID == "" || t.UserID == userID {
-			result = append(result, t)
+			result = append(result, *t)
 		}
 	}
 

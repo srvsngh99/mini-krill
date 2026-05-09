@@ -179,6 +179,7 @@ func initStack(quiet bool) (*krillStack, error) {
 	cfg.Agent.RecoveryTurns = cfg.Brain.RecoveryTurns
 
 	krillAgent := agent.New(cfg.Agent, providerMgr, krillBrain, skillReg, mcpReg)
+	krillAgent.InitTaskSystem(cfg.Brain.DataDir, 3)
 	chatHandler := chat.NewHandler(krillAgent, reminderStore)
 
 	return &krillStack{
