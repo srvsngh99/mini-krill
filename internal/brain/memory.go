@@ -65,6 +65,9 @@ func (m *FileMemory) Store(_ context.Context, entry core.MemoryEntry) error {
 		entry.CreatedAt = now
 	}
 	entry.AccessedAt = now
+	if entry.Scope == "" {
+		entry.Scope = "system"
+	}
 
 	data, err := json.MarshalIndent(entry, "", "  ")
 	if err != nil {
@@ -100,8 +103,9 @@ func (m *FileMemory) Recall(_ context.Context, key string) (*core.MemoryEntry, e
 		return nil, fmt.Errorf("unmarshal memory %q: %w", key, err)
 	}
 
-	// Update access time (best-effort)
+	// Update access time and count (best-effort)
 	entry.AccessedAt = time.Now().UTC()
+	entry.AccessCount++
 	if updated, err := json.MarshalIndent(entry, "", "  "); err == nil {
 		_ = os.WriteFile(path, updated, 0600)
 	}
@@ -137,6 +141,134 @@ func (m *FileMemory) Search(_ context.Context, query string, limit int) ([]core.
 
 	log.Debug("memory search complete", "query", query, "found", len(results))
 	return results, nil
+}
+
+// RankedSearch performs a relevance-ranked search across memory entries.
+// If scope is non-empty, only entries with that scope are considered.
+// Results are sorted by relevance score descending and limited to the given count.
+func (m *FileMemory) RankedSearch(_ context.Context, query string, scope string, limit int) ([]core.MemoryEntry, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	entries, err := m.listAll()
+	if err != nil {
+		return nil, err
+	}
+
+	type scored struct {
+		entry core.MemoryEntry
+		score float64
+	}
+
+	queryLower := strings.ToLower(query)
+	queryWords := strings.Fields(queryLower)
+
+	var results []scored
+	for _, entry := range entries {
+		// Scope filter
+		if scope != "" && entry.Scope != scope {
+			continue
+		}
+
+		score := scoreEntry(entry, queryLower, queryWords)
+		if score > 0 {
+			results = append(results, scored{entry: entry, score: score})
+		}
+	}
+
+	// Sort by score descending
+	for i := 0; i < len(results); i++ {
+		for j := i + 1; j < len(results); j++ {
+			if results[j].score > results[i].score {
+				results[i], results[j] = results[j], results[i]
+			}
+		}
+	}
+
+	// Limit
+	if limit > 0 && len(results) > limit {
+		results = results[:limit]
+	}
+
+	out := make([]core.MemoryEntry, len(results))
+	for i, r := range results {
+		out[i] = r.entry
+	}
+
+	log.Debug("ranked search complete", "query", query, "scope", scope, "found", len(out))
+	return out, nil
+}
+
+// scoreEntry computes a relevance score for a memory entry against a query.
+func scoreEntry(entry core.MemoryEntry, queryLower string, queryWords []string) float64 {
+	var score float64
+	keyLower := strings.ToLower(entry.Key)
+	valueLower := strings.ToLower(entry.Value)
+
+	// Exact key match
+	if keyLower == queryLower {
+		score += 1.0
+	} else if strings.Contains(keyLower, queryLower) {
+		score += 0.5
+	}
+
+	// Value word overlap (Jaccard-like)
+	if len(queryWords) > 0 {
+		valueWords := strings.Fields(valueLower)
+		shared := 0
+		for _, qw := range queryWords {
+			for _, vw := range valueWords {
+				if qw == vw {
+					shared++
+					break
+				}
+			}
+		}
+		total := len(queryWords)
+		if len(valueWords) > total {
+			total = len(valueWords)
+		}
+		if total > 0 {
+			score += 0.4 * float64(shared) / float64(total)
+		}
+	}
+
+	// Value substring match (weaker signal)
+	if strings.Contains(valueLower, queryLower) {
+		score += 0.2
+	}
+
+	// Tag match
+	for _, qw := range queryWords {
+		for _, tag := range entry.Tags {
+			if strings.ToLower(tag) == qw {
+				score += 0.2
+				break
+			}
+		}
+	}
+
+	// Recency bonus (up to 0.1, decays over 365 days)
+	if !entry.AccessedAt.IsZero() {
+		daysSince := time.Since(entry.AccessedAt).Hours() / 24
+		if daysSince < 0 {
+			daysSince = 0
+		}
+		recency := 1.0 - daysSince/365.0
+		if recency < 0 {
+			recency = 0
+		}
+		score += 0.1 * recency
+	}
+
+	// Access frequency bonus (up to 0.05)
+	accessCount := entry.AccessCount
+	if accessCount > 10 {
+		accessCount = 10
+	}
+	score += 0.05 * float64(accessCount) / 10.0
+
+	return score
 }
 
 // Forget removes a memory entry by key.

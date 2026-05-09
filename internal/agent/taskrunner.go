@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/srvsngh99/mini-krill/internal/brain"
 	"github.com/srvsngh99/mini-krill/internal/core"
 	log "github.com/srvsngh99/mini-krill/internal/log"
 )
@@ -109,7 +110,7 @@ func (r *TaskRunner) notify(task *DurableTask, message string) {
 	r.notifyFn(task.Platform, task.ChatID, message)
 }
 
-// storeAsMemory saves a task outcome as a durable memory.
+// storeAsMemory saves a task outcome as a durable memory and generates a reflection.
 func (r *TaskRunner) storeAsMemory(task *DurableTask, result string) {
 	mem := r.agent.brain.Memory()
 	if mem == nil {
@@ -122,11 +123,21 @@ func (r *TaskRunner) storeAsMemory(task *DurableTask, result string) {
 		Key:        key,
 		Value:      fmt.Sprintf("Task: %s\nResult: %s", task.Task, summary),
 		Tags:       []string{"task-outcome", task.ID},
+		Scope:      "task-outcome",
+		Source:     "task-outcome",
 		CreatedAt:  time.Now(),
 		AccessedAt: time.Now(),
 	}
 
 	if err := mem.Store(context.Background(), entry); err != nil {
 		log.Debug("failed to store task outcome", "id", task.ID, "error", err)
+	}
+
+	// Generate a structured reflection if the memory is a FileMemory
+	if fileMem, ok := mem.(*brain.FileMemory); ok {
+		consolidator := brain.NewConsolidator(fileMem, r.agent.llm)
+		if err := consolidator.ReflectOnTask(context.Background(), result, task.Task); err != nil {
+			log.Debug("task reflection failed", "id", task.ID, "error", err)
+		}
 	}
 }

@@ -61,6 +61,7 @@ func NewSelfSkills(sc SelfContext) []core.Skill {
 		selfAddSkill(sc),
 		selfHeal(sc),
 		selfReflect(sc),
+		selfConsolidate(sc),
 	}
 }
 
@@ -931,4 +932,32 @@ func extractYAMLBlock(s string) string {
 	}
 	// No code block, return as-is (might be raw YAML)
 	return strings.TrimSpace(s)
+}
+
+// selfConsolidate merges redundant memories to keep the memory store lean.
+func selfConsolidate(sc SelfContext) core.Skill {
+	return &selfSkill{
+		name: "self:consolidate",
+		desc: "Consolidate and clean up redundant memories",
+		exec: func(ctx context.Context, _ string, llm core.LLMProvider) (string, error) {
+			mem := sc.Brain.Memory()
+			if mem == nil {
+				return "No memory store available.", nil
+			}
+			fileMem, ok := mem.(*brain.FileMemory)
+			if !ok {
+				return "Memory store does not support consolidation.", nil
+			}
+
+			consolidator := brain.NewConsolidator(fileMem, llm)
+			merged, removed, err := consolidator.Consolidate(ctx)
+			if err != nil {
+				return fmt.Sprintf("Consolidation failed: %v", err), nil
+			}
+			if merged == 0 {
+				return "Memory is already lean — no duplicates found to consolidate.", nil
+			}
+			return fmt.Sprintf("Memory consolidation complete: %d clusters merged, %d entries removed.", merged, removed), nil
+		},
+	}
 }

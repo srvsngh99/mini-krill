@@ -142,6 +142,7 @@ var selfSkillMap = []struct {
 	{[]string{"heal yourself", "fix yourself", "self heal", "self-heal", "repair yourself"}, "self:heal"},
 	{[]string{"switch to ollama", "switch to codex", "switch to claude", "switch to openai", "switch to anthropic", "switch to google", "auto approve", "require approval", "log level"}, "self:configure"},
 	{[]string{"reflect on yourself", "reflect on our conversations", "evolve yourself", "how have i changed you", "what have you learned about me"}, "self:reflect"},
+	{[]string{"consolidate memories", "clean up memories", "merge memories", "deduplicate memories"}, "self:consolidate"},
 	// Read-only introspection
 	{[]string{"your health", "check yourself", "are you ok", "how are you feeling", "diagnose yourself"}, "self:health"},
 	{[]string{"your personality", "who are you", "describe yourself", "about yourself", "your identity", "your traits"}, "self:inspect"},

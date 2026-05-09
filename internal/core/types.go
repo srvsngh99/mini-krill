@@ -76,11 +76,14 @@ type LLMProvider interface {
 
 // MemoryEntry is a single item in the krill's memory.
 type MemoryEntry struct {
-	Key        string    `json:"key"`
-	Value      string    `json:"value"`
-	Tags       []string  `json:"tags,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	AccessedAt time.Time `json:"accessed_at"`
+	Key         string    `json:"key"`
+	Value       string    `json:"value"`
+	Tags        []string  `json:"tags,omitempty"`
+	Scope       string    `json:"scope,omitempty"`        // "user", "project", "group", "task-outcome", "system"
+	Source      string    `json:"source,omitempty"`        // "user-explicit", "auto-learned", "task-outcome", "reflection", "feedback"
+	AccessCount int       `json:"access_count,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	AccessedAt  time.Time `json:"accessed_at"`
 }
 
 // Personality defines the krill's character traits.
@@ -117,6 +120,7 @@ type Memory interface {
 	Store(ctx context.Context, entry MemoryEntry) error
 	Recall(ctx context.Context, key string) (*MemoryEntry, error)
 	Search(ctx context.Context, query string, limit int) ([]MemoryEntry, error)
+	RankedSearch(ctx context.Context, query string, scope string, limit int) ([]MemoryEntry, error)
 	Forget(ctx context.Context, key string) error
 	List(ctx context.Context) ([]MemoryEntry, error)
 	Count() int
