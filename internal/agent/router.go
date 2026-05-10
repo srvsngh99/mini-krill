@@ -68,13 +68,31 @@ var greetings = map[string]bool{
 	"good evening": true, "good night": true, "gm": true, "gn": true,
 }
 
-// actionVerbs indicate the user wants something done (not just chat).
-var actionVerbs = []string{
-	"create", "build", "deploy", "analyze", "fix", "set up", "implement",
-	"research", "find", "check", "run", "test", "debug", "write", "install",
-	"refactor", "migrate", "configure", "generate", "update", "delete",
-	"remove", "add", "make", "develop", "optimize", "review", "scan",
+// hardActionVerbs strongly imply concrete multi-step work touching real
+// systems (filesystem, network, packages, services) or producing concrete
+// artifacts (code, files, websites). These bias toward LONG_TASK classification.
+var hardActionVerbs = []string{
+	"deploy", "install", "uninstall", "refactor", "migrate", "configure",
+	"set up", "scaffold", "bootstrap", "provision", "rollback", "publish",
+	"merge", "rebase", "commit", "push", "pull", "checkout",
+	"build", "create", "make", "write", "implement", "develop",
+	"fix", "debug", "generate",
 }
+
+// softActionVerbs are commonly ideation/explanation phrasing ("give me ideas",
+// "find me some news", "write a summary"). Alone they should NOT trigger plan
+// mode — they're conversational asks. They route to ANSWER/CHAT unless paired
+// with a hard verb or a concrete artifact.
+var softActionVerbs = []string{
+	"find", "give", "show", "tell", "explain", "describe", "list",
+	"suggest", "recommend", "compare", "review", "analyze", "research",
+	"think", "brainstorm", "draft", "summarize",
+}
+
+// actionVerbs is the legacy combined list, kept for callers that just want
+// "does this look like a request to do something" without distinguishing
+// hard vs soft.
+var actionVerbs = append(append([]string{}, hardActionVerbs...), softActionVerbs...)
 
 // memoryStoreTriggers indicate the user wants to store something in memory.
 var memoryStoreTriggers = []string{
@@ -117,10 +135,26 @@ var timeTriggers = []string{
 	"what's the date", "what day", "what's today",
 }
 
-// searchTriggers route directly to the search skill.
+// searchTriggers route directly to the search skill. The list is intentionally
+// generous so phrases people actually type ("find me", "latest news on") get
+// caught here instead of falling to the LLM classifier where the model tends
+// to invent a "I need permission" response.
 var searchTriggers = []string{
-	"search for", "search the web", "search online", "look up",
-	"google", "look online", "find me info",
+	"search for", "search the web", "search online", "look up", "lookup",
+	"google", "look online", "find me info", "find me", "find some",
+	"news on", "news about", "latest on", "latest news", "any news",
+	"any updates on", "what's new with", "whats new with", "what's happening with",
+	"digest", "headlines", "recent updates", "recent news",
+	"what happened today", "what happened yesterday", "today in",
+	"current price of", "price of", "stock price",
+}
+
+// freshnessKeywords pair a topic with a time-cue. When both are present we
+// route to the search tool automatically — the user wants up-to-date info,
+// not whatever the model remembers.
+var freshnessKeywords = []string{
+	"today", "this week", "this month", "right now", "latest", "current",
+	"recent", "just announced", "breaking", "as of now", "live",
 }
 
 // sysInfoTriggers route directly to the sysinfo skill.
@@ -206,6 +240,12 @@ func (r *IntentRouter) Classify(ctx context.Context, input string) RouteResult {
 	if matchesAny(lower, searchTriggers) {
 		return RouteResult{Intent: IntentToolTask, ToolName: "search"}
 	}
+	// Freshness auto-route: a time cue ("today", "latest") plus a topic noun
+	// nearly always means "go search the web". Catches things like
+	// "find me some AI digest from today" that don't match an explicit search trigger.
+	if matchesAny(lower, freshnessKeywords) && len(strings.Fields(lower)) >= 3 {
+		return RouteResult{Intent: IntentToolTask, ToolName: "search"}
+	}
 	// URL detection: YouTube vs generic web
 	if urlPattern.MatchString(lower) {
 		if youtubePattern.MatchString(lower) {
@@ -244,14 +284,18 @@ func detectSelfSkillTrigger(msg string) (skillName, skillInput string) {
 }
 
 // isGreetingOrSmallTalk returns true for casual short messages.
+// Soft verbs ("find me ideas", "give me suggestions") are allowed through —
+// they're conversational asks that should land in CHAT/ANSWER, not LONG_TASK.
 func isGreetingOrSmallTalk(lower string) bool {
 	// Exact greeting match
 	if greetings[lower] {
 		return true
 	}
-	// Short message without action verbs → chat
+	// Short message without HARD action verbs → chat. Soft verbs alone don't
+	// disqualify it, so "give me ideas" still routes here instead of being
+	// pushed into the LLM classifier where it tends to come back LONG_TASK.
 	words := strings.Fields(lower)
-	if len(words) <= 6 && !containsAnyWord(lower, actionVerbs) {
+	if len(words) <= 6 && !containsAnyWord(lower, hardActionVerbs) {
 		// But not if it looks like a question about errors
 		if !strings.Contains(lower, "error") && !strings.Contains(lower, "bug") {
 			return true
@@ -282,12 +326,14 @@ func (r *IntentRouter) classifyWithLLM(ctx context.Context, input string) RouteR
 	prompt := `Classify this message into exactly one category. Reply with ONLY the category name, nothing else.
 
 Categories:
-- CHAT: casual conversation, greetings, banter, opinions
-- ANSWER: factual question that needs a direct answer
+- CHAT: casual conversation, greetings, banter, opinions, "what should we build", "tell me about yourself"
+- ANSWER: factual question that needs a direct answer, including ideation/brainstorming asks ("give me ideas", "suggest options", "what are some approaches")
 - DIAGNOSE: error analysis, debugging, troubleshooting
-- LONG_TASK: multi-step work (build, create, deploy, refactor, set up, implement)
-- TOOL_TASK: single action (search, look up, check time, get system info)
+- LONG_TASK: multi-step work that actually touches real systems — deploys, installs, migrations, refactors, file changes, scaffolding new projects. Brainstorming, suggesting, listing, explaining, or thinking are NOT long tasks.
+- TOOL_TASK: single action (search, look up, check time, get system info, fetch a URL)
 - REMEMBER: memory operations (remember, recall, forget)
+
+Important: ideation, advice, recommendations, and explanations are CHAT or ANSWER, never LONG_TASK. LONG_TASK requires the user to want something built or changed in their environment.
 
 Message: ` + input
 

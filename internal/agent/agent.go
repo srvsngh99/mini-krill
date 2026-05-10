@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -30,31 +31,13 @@ const maxHistory = 20
 
 const unifiedConversationChannel = "unified"
 
-// approvalWords are inputs that greenlight a pending plan.
-var approvalWords = map[string]bool{
-	"yes":      true,
-	"approve":  true,
-	"go":       true,
-	"do it":    true,
-	"lgtm":     true,
-	"go ahead": true,
-	"y":        true,
-	"yep":      true,
-	"sure":     true,
-	"proceed":  true,
-}
+// approvalRegex matches obvious approval shorthand on the fast path so we
+// don't burn an LLM call on "yes". Anything not matched here OR by
+// rejectionRegex falls through to the LLM-judged classifier.
+var approvalRegex = regexp.MustCompile(`^(?:y|yes|yea|yeah|yep|yup|ya|sure|ok|okay|k|👍|do it|go|go ahead|let'?s go|lgtm|proceed|approve|approved|fine|alright|sounds good)[\s\.!]*$`)
 
-// rejectionWords are inputs that scrap a pending plan.
-var rejectionWords = map[string]bool{
-	"no":     true,
-	"reject": true,
-	"cancel": true,
-	"stop":   true,
-	"nah":    true,
-	"nope":   true,
-	"n":      true,
-	"abort":  true,
-}
+// rejectionRegex covers obvious "scrap it" shorthand.
+var rejectionRegex = regexp.MustCompile(`^(?:n|no|nah|nope|cancel|cancelled|stop|abort|reject|rejected|skip|nevermind|never mind|forget it|don'?t)[\s\.!]*$`)
 
 // KrillAgent is the main agent that implements core.Agent.
 // It is the executive function of the krill brain - classifying intent,
@@ -228,8 +211,19 @@ func (a *KrillAgent) ChatFromPlatform(ctx context.Context, platform, chatID, inp
 	}
 
 	// --- Phase 1: Check for pending plan approval ---
+	// Even with a pending plan, we still want preference learning to fire so
+	// "stop asking me to approve" gets captured *during* the approval state,
+	// not after. The pending-plan handler itself decides whether to consume
+	// the input or release it back to normal routing.
 	if a.pendingPlan != nil {
-		return a.handlePendingPlan(ctx, input)
+		a.maybeStoreUserPreference(ctx, input)
+		response, handled := a.handlePendingPlan(ctx, input)
+		if handled {
+			return response, nil
+		}
+		// Fell through: input was unrelated to the pending plan. Drop the
+		// pending plan and route the input normally.
+		a.pendingPlan = nil
 	}
 
 	// --- Phase 2: Record user message ---
@@ -379,38 +373,105 @@ func authInstructions(provider string) string {
 	}
 }
 
-// handlePendingPlan processes user input when a plan is awaiting approval.
-func (a *KrillAgent) handlePendingPlan(ctx context.Context, input string) (string, error) {
-	normalized := strings.ToLower(strings.TrimSpace(input))
+// approvalDecision is the four-way outcome of judging a user reply against a
+// pending plan. It replaces the old yes/no/else trichotomy that looped on
+// anything outside a static word list.
+type approvalDecision string
 
-	// Check approval
-	if approvalWords[normalized] {
+const (
+	decisionApprove   approvalDecision = "APPROVE"   // run the plan
+	decisionReject    approvalDecision = "REJECT"    // scrap the plan
+	decisionModify    approvalDecision = "MODIFY"    // adjust the plan with new instructions
+	decisionUnrelated approvalDecision = "UNRELATED" // user moved on; drop pending plan and re-route
+)
+
+// handlePendingPlan processes user input when a plan is awaiting approval.
+// Returns (response, true) when the input was consumed by the approval flow,
+// or ("", false) when the caller should route the input as a fresh message.
+func (a *KrillAgent) handlePendingPlan(ctx context.Context, input string) (string, bool) {
+	decision := a.classifyApprovalReply(ctx, input)
+	switch decision {
+	case decisionApprove:
 		log.Info("plan approved by user", "task", a.pendingPlan.Task)
 		a.pendingPlan.Approved = true
 		plan := a.pendingPlan
 		a.pendingPlan = nil
-
 		result, err := a.ExecutePlan(ctx, plan)
 		if err != nil {
-			return fmt.Sprintf("This krill hit a reef executing the plan: %v", err), nil
+			return fmt.Sprintf("This krill hit a reef executing the plan: %v", err), true
 		}
-
 		a.appendMessage(core.Message{Role: "assistant", Content: result})
 		a.saveTurn("assistant", result)
-		return result, nil
-	}
+		return result, true
 
-	// Check rejection
-	if rejectionWords[normalized] {
+	case decisionReject:
 		log.Info("plan rejected by user", "task", a.pendingPlan.Task)
 		a.pendingPlan = nil
-		return "Plan scrapped. What else?", nil
+		return "Plan scrapped. What else?", true
+
+	case decisionModify:
+		// Regenerate from the user's new instructions instead of re-rendering
+		// the same prompt. This kills the loop that re-asked forever.
+		log.Info("plan modification requested", "task", a.pendingPlan.Task)
+		oldTask := a.pendingPlan.Task
+		a.pendingPlan = nil
+		// Compose: original task + user's modifier. Cheap and good enough.
+		newTask := oldTask + " — adjustment: " + strings.TrimSpace(input)
+		response, err := a.handleTask(ctx, newTask)
+		if err != nil {
+			return fmt.Sprintf("Could not adjust the plan: %v", err), true
+		}
+		return response, true
+
+	default: // decisionUnrelated
+		// User moved on. Release control so the caller routes the input as a
+		// brand new message.
+		log.Debug("pending plan released — input unrelated", "input_preview", truncate(input, 50))
+		return "", false
+	}
+}
+
+// classifyApprovalReply judges a user reply against a pending plan: regex fast
+// path for unambiguous yes/no, LLM fallback for everything else.
+func (a *KrillAgent) classifyApprovalReply(ctx context.Context, input string) approvalDecision {
+	normalized := strings.ToLower(strings.TrimSpace(input))
+	if approvalRegex.MatchString(normalized) {
+		return decisionApprove
+	}
+	if rejectionRegex.MatchString(normalized) {
+		return decisionReject
 	}
 
-	// Neither approval nor rejection - treat as modification request
-	log.Debug("ambiguous plan response", "input", normalized)
-	return fmt.Sprintf("I have a plan waiting for your call.\n\n%s\nReply with **yes** to approve, **no** to scrap, or describe what you want changed.",
-		FormatPlan(a.pendingPlan)), nil
+	// LLM judge — runs only on genuinely ambiguous replies.
+	prompt := `A user was shown a plan and asked to approve, reject, or modify it. Classify their reply into exactly ONE of:
+
+APPROVE   — they accept the plan as-is
+REJECT    — they want it scrapped entirely
+MODIFY    — they want changes to this specific plan
+UNRELATED — they ignored the plan and asked something else
+
+Reply with ONLY the category name. No explanation.
+
+Plan task: ` + a.pendingPlan.Task + `
+User reply: ` + input
+
+	resp, err := a.llm.Chat(ctx, []core.Message{{Role: "user", Content: prompt}},
+		core.WithTemperature(0.0), core.WithMaxTokens(8))
+	if err != nil {
+		log.Warn("approval LLM judge failed, treating as unrelated", "error", err)
+		return decisionUnrelated
+	}
+	out := strings.ToUpper(strings.TrimSpace(resp.Content))
+	switch {
+	case strings.Contains(out, "APPROVE"):
+		return decisionApprove
+	case strings.Contains(out, "REJECT"):
+		return decisionReject
+	case strings.Contains(out, "MODIFY"):
+		return decisionModify
+	default:
+		return decisionUnrelated
+	}
 }
 
 // handleTask generates a plan and presents it for approval.
@@ -539,6 +600,12 @@ func (a *KrillAgent) handleTaskCommand(input string) (string, bool) {
 
 // shouldRequireApproval decides if a plan needs user approval before execution.
 // Uses a three-way config: "always", "never", or "auto" (smart default).
+//
+// Explicit config wins (the operator made a deliberate choice). The user's
+// runtime pref:no_plan_approval flag is honoured under "auto" so the agent
+// stops re-asking once the user has said "stop asking" — but destructive
+// plans still gate under "auto" regardless of the pref. That keeps casual
+// "auto approve" phrases from authorising rm -rf.
 func (a *KrillAgent) shouldRequireApproval(plan *core.Plan) bool {
 	switch a.cfg.PlanApproval {
 	case "always":
@@ -546,31 +613,16 @@ func (a *KrillAgent) shouldRequireApproval(plan *core.Plan) bool {
 	case "never":
 		return false
 	default: // "auto"
-		// Large plans (5+ steps) need approval
-		if len(plan.Steps) >= 5 {
+		if planIsDestructive(plan) {
 			return true
 		}
-		// Plans with destructive hints need approval.
-		// Use specific phrases to avoid false positives like "drop-down",
-		// "push notification", "reset filter state".
-		for _, step := range plan.Steps {
-			if step.NeedsApproval {
-				return true
-			}
-			lower := strings.ToLower(step.Description)
-			for _, danger := range []string{
-				"delete file", "delete dir", "delete database", "delete branch",
-				"remove file", "remove dir", "remove package",
-				"deploy to", "deploy the",
-				"git push", "force push",
-				"npm install", "pip install", "go install",
-				"drop table", "drop database", "drop collection",
-				"destroy", "rm -", "reset --hard",
-			} {
-				if strings.Contains(lower, danger) {
-					return true
-				}
-			}
+		// User has said "stop asking" → trust them on non-destructive work.
+		if GetBoolPref(context.Background(), a.brain.Memory(), PrefNoPlanApproval, false) {
+			return false
+		}
+		// Large plans need approval
+		if len(plan.Steps) >= 5 {
+			return true
 		}
 		// Vague task descriptions need approval
 		lower := strings.ToLower(plan.Task)
@@ -582,6 +634,31 @@ func (a *KrillAgent) shouldRequireApproval(plan *core.Plan) bool {
 		}
 		return false
 	}
+}
+
+// planIsDestructive returns true for plans whose steps touch destructive verbs
+// or are explicitly flagged. Kept separate so the safety check is easy to read.
+func planIsDestructive(plan *core.Plan) bool {
+	for _, step := range plan.Steps {
+		if step.NeedsApproval {
+			return true
+		}
+		lower := strings.ToLower(step.Description)
+		for _, danger := range []string{
+			"delete file", "delete dir", "delete database", "delete branch",
+			"remove file", "remove dir", "remove package",
+			"deploy to", "deploy the",
+			"git push", "force push",
+			"npm install", "pip install", "go install",
+			"drop table", "drop database", "drop collection",
+			"destroy", "rm -", "reset --hard",
+		} {
+			if strings.Contains(lower, danger) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // handleChat generates a conversational response using the LLM with brain enrichment.
@@ -606,6 +683,11 @@ func (a *KrillAgent) handleChat(ctx context.Context) (string, error) {
 			Content: "Known user preferences and durable memories. Use these quietly for personalization; do not mention them unless relevant:\n\n" + memoryCtx,
 		}
 		enriched = append(enriched[:len(enriched)-1], memoryMsg, enriched[len(enriched)-1])
+	}
+
+	if styleDirective := buildStyleDirective(ctx, a.brain.Memory()); styleDirective != "" {
+		styleMsg := core.Message{Role: "system", Content: styleDirective}
+		enriched = append(enriched[:len(enriched)-1], styleMsg, enriched[len(enriched)-1])
 	}
 
 	resp, err := a.llm.Chat(ctx, enriched)
@@ -839,6 +921,11 @@ func (a *KrillAgent) handleAnswer(ctx context.Context) (string, error) {
 		enriched = append(enriched[:len(enriched)-1], memoryMsg, enriched[len(enriched)-1])
 	}
 
+	if styleDirective := buildStyleDirective(ctx, a.brain.Memory()); styleDirective != "" {
+		styleMsg := core.Message{Role: "system", Content: styleDirective}
+		enriched = append(enriched[:len(enriched)-1], styleMsg, enriched[len(enriched)-1])
+	}
+
 	resp, err := a.llm.Chat(ctx, enriched)
 	if err != nil {
 		log.Error("LLM answer failed", "error", err)
@@ -859,6 +946,16 @@ func (a *KrillAgent) maybeStoreUserPreference(ctx context.Context, input string)
 	if text == "" {
 		return
 	}
+
+	// Typed preferences first — these get a stable key so decision sites
+	// (shouldRequireApproval, persona builder) can read them directly without
+	// scanning free-text memories.
+	if key, value, matched := detectTypedPreference(text); matched {
+		SetBoolPref(ctx, mem, key, value)
+		log.Info("typed preference stored", "key", key, "value", value)
+		// Fall through so a free-text record is also kept for human-readable recall.
+	}
+
 	lower := strings.ToLower(text)
 	for _, explicit := range []string{"remember ", "remember that ", "learn ", "learn that ", "note ", "note that ", "memorize ", "memorize that "} {
 		if strings.HasPrefix(lower, explicit) {
@@ -874,6 +971,25 @@ func (a *KrillAgent) maybeStoreUserPreference(ctx context.Context, input string)
 		"please always ",
 		"please don't ",
 		"do not ",
+		"no need for ",
+		"no need to ",
+		"stop asking",
+		"don't ask",
+		"skip approval",
+		"auto approve",
+		"auto-approve",
+		"just do it",
+		"ask me before",
+		"require approval",
+		"be terse",
+		"be brief",
+		"be concise",
+		"shorter responses",
+		"keep it short",
+		"less verbose",
+		"no metaphor",
+		"drop the metaphor",
+		"stop with the metaphor",
 	}
 	matched := false
 	for _, trigger := range triggers {
@@ -1056,6 +1172,61 @@ func (a *KrillAgent) recordFeedback(_ context.Context, input, response string) {
 
 	if err := a.brain.Memory().Store(ctx, entry); err != nil {
 		log.Debug("failed to store feedback", "error", err)
+	}
+
+	// Adaptive personality: if the user has corrected us several times in
+	// rapid succession (and hasn't already opted into terse mode), assume
+	// they want shorter responses and flip the pref. They can undo this by
+	// asking for more detail later.
+	if signal == "correction" || signal == "negative" {
+		a.maybeAutoEvolveStyle(ctx, signal)
+	}
+}
+
+// maybeAutoEvolveStyle counts recent negative/correction signals and, when
+// they cross a threshold, flips a style preference automatically. This is
+// the "evolves with usage" loop — explicit feedback is great, but most users
+// communicate through corrections, not config commands.
+func (a *KrillAgent) maybeAutoEvolveStyle(ctx context.Context, latestSignal string) {
+	mem := a.brain.Memory()
+	if mem == nil {
+		return
+	}
+
+	// Already terse? Nothing to do.
+	if GetBoolPref(ctx, mem, PrefStyleTerse, false) {
+		return
+	}
+
+	// Look at recent feedback within the last hour. Three corrections in
+	// that window is a strong-enough signal.
+	entries, err := mem.Search(ctx, "personality-feedback", 20)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-1 * time.Hour)
+	count := 0
+	for _, e := range entries {
+		if e.CreatedAt.Before(cutoff) {
+			continue
+		}
+		for _, tag := range e.Tags {
+			if tag == "correction" || tag == "negative" {
+				count++
+				break
+			}
+		}
+	}
+	// +1 for the signal we just observed (which is already stored above
+	// but may not be returned by Search depending on the backend's freshness).
+	if latestSignal == "correction" || latestSignal == "negative" {
+		count++
+	}
+
+	const threshold = 3
+	if count >= threshold {
+		log.Info("auto-evolving style: switching to terse mode", "recent_corrections", count)
+		SetBoolPref(ctx, mem, PrefStyleTerse, true)
 	}
 }
 
