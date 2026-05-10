@@ -293,7 +293,7 @@ func TestShouldRequireApprovalAlways(t *testing.T) {
 		Steps: []core.PlanStep{{ID: 1, Description: "do something"}},
 	}
 
-	if !a.shouldRequireApproval(plan) {
+	if !a.shouldRequireApproval(context.Background(), plan) {
 		t.Error("PlanApproval=always should always require approval")
 	}
 }
@@ -318,7 +318,7 @@ func TestShouldRequireApprovalNever(t *testing.T) {
 		},
 	}
 
-	if a.shouldRequireApproval(plan) {
+	if a.shouldRequireApproval(context.Background(), plan) {
 		t.Error("PlanApproval=never should never require approval")
 	}
 }
@@ -342,7 +342,7 @@ func TestShouldRequireApprovalAutoSmallSafe(t *testing.T) {
 		},
 	}
 
-	if a.shouldRequireApproval(plan) {
+	if a.shouldRequireApproval(context.Background(), plan) {
 		t.Error("auto mode: 3-step non-destructive plan should NOT require approval")
 	}
 }
@@ -369,7 +369,7 @@ func TestShouldRequireApprovalAutoLargePlan(t *testing.T) {
 		},
 	}
 
-	if !a.shouldRequireApproval(plan) {
+	if !a.shouldRequireApproval(context.Background(), plan) {
 		t.Error("auto mode: 6-step plan should require approval")
 	}
 }
@@ -392,7 +392,7 @@ func TestShouldRequireApprovalAutoDestructiveStep(t *testing.T) {
 		},
 	}
 
-	if !a.shouldRequireApproval(plan) {
+	if !a.shouldRequireApproval(context.Background(), plan) {
 		t.Error("auto mode: plan with 'delete' step should require approval")
 	}
 }
@@ -416,7 +416,7 @@ func TestShouldRequireApprovalAutoNoFalsePositives(t *testing.T) {
 		},
 	}
 
-	if a.shouldRequireApproval(plan) {
+	if a.shouldRequireApproval(context.Background(), plan) {
 		t.Error("auto mode: plan with 'drop-down', 'push notification', 'reset filter' should NOT require approval (word boundary matching)")
 	}
 }
@@ -439,7 +439,7 @@ func TestShouldRequireApprovalAutoVagueTask(t *testing.T) {
 		},
 	}
 
-	if !a.shouldRequireApproval(plan) {
+	if !a.shouldRequireApproval(context.Background(), plan) {
 		t.Error("auto mode: vague task should require approval")
 	}
 }
@@ -447,6 +447,80 @@ func TestShouldRequireApprovalAutoVagueTask(t *testing.T) {
 // ---------------------------------------------------------------------------
 // detectSelfSkillTrigger
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Soft-verb / hard-verb behaviour — ideation should NOT route to LONG_TASK
+// ---------------------------------------------------------------------------
+
+func TestRouterSoftVerbsRouteToChat(t *testing.T) {
+	// "give me ideas", "find me suggestions" — soft verbs only, short message.
+	// They must be small-talk-classified so the LLM fallback never fires
+	// (which is where DIVE PLAN got triggered in the original transcript).
+	r := newTestRouter("LONG_TASK") // would mis-classify if it ran
+	cases := []string{
+		"give me some ideas",
+		"suggest a few options",
+		"any recommendations",
+		"tell me about it",
+	}
+	for _, input := range cases {
+		result := r.Classify(context.Background(), input)
+		if result.Intent == IntentLongTask {
+			t.Errorf("Classify(%q) routed to LONG_TASK; soft verbs should stay conversational", input)
+		}
+	}
+}
+
+func TestRouterHardVerbsStillRouteThroughLLM(t *testing.T) {
+	// Hard verbs ("build", "deploy", "refactor") must NOT short-circuit to
+	// chat — they need real classification so production tasks still work.
+	r := newTestRouter("LONG_TASK")
+	cases := []string{
+		"build me a website",
+		"deploy the api to staging",
+		"refactor the auth module",
+	}
+	for _, input := range cases {
+		result := r.Classify(context.Background(), input)
+		if result.Intent != IntentLongTask {
+			t.Errorf("Classify(%q) = %s, want LONG_TASK", input, result.Intent)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Freshness auto-route — "find me some AI digest from today" must hit search
+// ---------------------------------------------------------------------------
+
+func TestRouterFreshnessRoutesToSearch(t *testing.T) {
+	r := newTestRouter("ANSWER")
+	cases := []string{
+		"find me some AI digest from today",
+		"what's the latest news on rust",
+		"any updates on the kubernetes release",
+		"what happened today in tech",
+		"give me the latest headlines",
+	}
+	for _, input := range cases {
+		result := r.Classify(context.Background(), input)
+		if result.Intent != IntentToolTask {
+			t.Errorf("Classify(%q) = %s, want TOOL_TASK", input, result.Intent)
+		}
+		if result.ToolName != "search" {
+			t.Errorf("Classify(%q).ToolName = %q, want 'search'", input, result.ToolName)
+		}
+	}
+}
+
+func TestRouterFreshnessKeywordAloneIsNotEnough(t *testing.T) {
+	// Bare time cue without a topic should not auto-route. Tiny inputs stay
+	// in chat.
+	r := newTestRouter("CHAT")
+	result := r.Classify(context.Background(), "today")
+	if result.Intent == IntentToolTask && result.ToolName == "search" {
+		t.Error("bare 'today' should not auto-route to search")
+	}
+}
 
 func TestDetectSelfSkillTrigger(t *testing.T) {
 	cases := []struct {
