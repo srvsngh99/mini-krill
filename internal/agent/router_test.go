@@ -293,7 +293,7 @@ func TestShouldRequireApprovalAlways(t *testing.T) {
 		Steps: []core.PlanStep{{ID: 1, Description: "do something"}},
 	}
 
-	if !a.shouldRequireApproval(plan) {
+	if !a.shouldRequireApproval(context.Background(), plan) {
 		t.Error("PlanApproval=always should always require approval")
 	}
 }
@@ -318,7 +318,7 @@ func TestShouldRequireApprovalNever(t *testing.T) {
 		},
 	}
 
-	if a.shouldRequireApproval(plan) {
+	if a.shouldRequireApproval(context.Background(), plan) {
 		t.Error("PlanApproval=never should never require approval")
 	}
 }
@@ -342,7 +342,7 @@ func TestShouldRequireApprovalAutoSmallSafe(t *testing.T) {
 		},
 	}
 
-	if a.shouldRequireApproval(plan) {
+	if a.shouldRequireApproval(context.Background(), plan) {
 		t.Error("auto mode: 3-step non-destructive plan should NOT require approval")
 	}
 }
@@ -369,7 +369,7 @@ func TestShouldRequireApprovalAutoLargePlan(t *testing.T) {
 		},
 	}
 
-	if !a.shouldRequireApproval(plan) {
+	if !a.shouldRequireApproval(context.Background(), plan) {
 		t.Error("auto mode: 6-step plan should require approval")
 	}
 }
@@ -392,7 +392,7 @@ func TestShouldRequireApprovalAutoDestructiveStep(t *testing.T) {
 		},
 	}
 
-	if !a.shouldRequireApproval(plan) {
+	if !a.shouldRequireApproval(context.Background(), plan) {
 		t.Error("auto mode: plan with 'delete' step should require approval")
 	}
 }
@@ -416,7 +416,7 @@ func TestShouldRequireApprovalAutoNoFalsePositives(t *testing.T) {
 		},
 	}
 
-	if a.shouldRequireApproval(plan) {
+	if a.shouldRequireApproval(context.Background(), plan) {
 		t.Error("auto mode: plan with 'drop-down', 'push notification', 'reset filter' should NOT require approval (word boundary matching)")
 	}
 }
@@ -439,7 +439,7 @@ func TestShouldRequireApprovalAutoVagueTask(t *testing.T) {
 		},
 	}
 
-	if !a.shouldRequireApproval(plan) {
+	if !a.shouldRequireApproval(context.Background(), plan) {
 		t.Error("auto mode: vague task should require approval")
 	}
 }

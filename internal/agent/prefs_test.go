@@ -186,6 +186,22 @@ func TestDetectTypedPreference_Style(t *testing.T) {
 	}
 }
 
+func TestDetectTypedPreference_VerboseFlipsTerseOff(t *testing.T) {
+	cases := []string{
+		"be verbose",
+		"give me more detail",
+		"longer responses please",
+		"be more thorough",
+	}
+	for _, c := range cases {
+		key, val, matched := detectTypedPreference(c)
+		if !matched || key != PrefStyleTerse || val {
+			t.Errorf("detectTypedPreference(%q) → (%q, %v, %v); want (%q, false, true)",
+				c, key, val, matched, PrefStyleTerse)
+		}
+	}
+}
+
 func TestDetectTypedPreference_NoMatch(t *testing.T) {
 	cases := []string{
 		"hello",
@@ -293,7 +309,7 @@ func TestShouldRequireApproval_PrefSkipsForSafePlan(t *testing.T) {
 		},
 	}
 
-	if a.shouldRequireApproval(plan) {
+	if a.shouldRequireApproval(context.Background(), plan) {
 		t.Error("auto + pref:no_plan_approval should skip approval on non-destructive plan")
 	}
 }
@@ -310,7 +326,7 @@ func TestShouldRequireApproval_PrefDoesNotSkipDestructive(t *testing.T) {
 		},
 	}
 
-	if !a.shouldRequireApproval(plan) {
+	if !a.shouldRequireApproval(context.Background(), plan) {
 		t.Error("destructive plan must still gate even with pref:no_plan_approval=true")
 	}
 }
@@ -325,7 +341,7 @@ func TestShouldRequireApproval_PrefDoesNotOverrideAlways(t *testing.T) {
 		Steps: []core.PlanStep{{ID: 1, Description: "do something"}},
 	}
 
-	if !a.shouldRequireApproval(plan) {
+	if !a.shouldRequireApproval(context.Background(), plan) {
 		t.Error("config 'always' must override the pref")
 	}
 }
@@ -539,7 +555,7 @@ func TestMaybeAutoEvolveStyle_FlipsAfterThreshold(t *testing.T) {
 	}
 
 	// One more correction triggers the threshold.
-	a.maybeAutoEvolveStyle(ctx, "correction")
+	a.maybeAutoEvolveStyle(ctx, "feedback_test_latest", "correction")
 
 	if !GetBoolPref(ctx, mem, PrefStyleTerse, false) {
 		t.Error("expected pref:style_terse to flip after 3 corrections")
@@ -562,10 +578,79 @@ func TestMaybeAutoEvolveStyle_BelowThresholdDoesNothing(t *testing.T) {
 	}
 	_ = mem.Store(ctx, entry)
 
-	a.maybeAutoEvolveStyle(ctx, "correction")
+	a.maybeAutoEvolveStyle(ctx, "feedback_test_latest", "correction")
 
 	if GetBoolPref(ctx, mem, PrefStyleTerse, false) {
 		t.Error("pref:style_terse should not flip below threshold")
+	}
+}
+
+func TestMaybeAutoEvolveStyle_NoDoubleCountOnLatestKey(t *testing.T) {
+	// Reproduces the original review concern: recordFeedback stores the entry
+	// before calling maybeAutoEvolveStyle, so when Memory.Search returns it,
+	// we'd double-count without the latestKey skip. Two stored entries +
+	// one already-stored "latest" should equal 3, not 4.
+	mem := newFakeMemory()
+	a := newAgentWithMemory("auto", mem)
+	ctx := context.Background()
+
+	// Two pre-existing recent corrections.
+	for i := 0; i < 2; i++ {
+		_ = mem.Store(ctx, core.MemoryEntry{
+			Key:        "feedback_pre_" + string(rune('a'+i)),
+			Value:      "signal:correction",
+			Tags:       []string{"personality-feedback", "correction"},
+			Scope:      "system",
+			CreatedAt:  time.Now(),
+			AccessedAt: time.Now(),
+		})
+	}
+
+	// Simulate recordFeedback: store the latest first, then call evolve.
+	latestKey := "feedback_latest"
+	_ = mem.Store(ctx, core.MemoryEntry{
+		Key:        latestKey,
+		Value:      "signal:correction",
+		Tags:       []string{"personality-feedback", "correction"},
+		Scope:      "system",
+		CreatedAt:  time.Now(),
+		AccessedAt: time.Now(),
+	})
+
+	a.maybeAutoEvolveStyle(ctx, latestKey, "correction")
+
+	// Threshold is 3. With the skip, count = 2 (pre) + 1 (explicit) = 3 → flips.
+	// Without the skip, count = 3 (all in store) + 1 (explicit) = 4 → also flips,
+	// so this test on its own can't catch double-counting at threshold. Run a
+	// second sub-case with only ONE pre-stored signal: with skip, count = 1+1=2
+	// (no flip). Without skip, count = 2+1=3 (incorrectly flips).
+	if !GetBoolPref(ctx, mem, PrefStyleTerse, false) {
+		t.Error("expected pref:style_terse to flip with 3 distinct signals")
+	}
+
+	// Sub-case: only one pre-stored + the latest = 2 distinct signals total,
+	// should NOT flip even though the latest is in store.
+	mem2 := newFakeMemory()
+	a2 := newAgentWithMemory("auto", mem2)
+	_ = mem2.Store(ctx, core.MemoryEntry{
+		Key:        "feedback_only_one",
+		Value:      "signal:correction",
+		Tags:       []string{"personality-feedback", "correction"},
+		Scope:      "system",
+		CreatedAt:  time.Now(),
+		AccessedAt: time.Now(),
+	})
+	_ = mem2.Store(ctx, core.MemoryEntry{
+		Key:        "feedback_latest",
+		Value:      "signal:correction",
+		Tags:       []string{"personality-feedback", "correction"},
+		Scope:      "system",
+		CreatedAt:  time.Now(),
+		AccessedAt: time.Now(),
+	})
+	a2.maybeAutoEvolveStyle(ctx, "feedback_latest", "correction")
+	if GetBoolPref(ctx, mem2, PrefStyleTerse, false) {
+		t.Error("with only 2 distinct signals, threshold should NOT trip; double-counting bug detected")
 	}
 }
 
@@ -588,7 +673,7 @@ func TestMaybeAutoEvolveStyle_OldSignalsDontCount(t *testing.T) {
 		_ = mem.Store(ctx, entry)
 	}
 
-	a.maybeAutoEvolveStyle(ctx, "correction")
+	a.maybeAutoEvolveStyle(ctx, "feedback_test_latest", "correction")
 
 	if GetBoolPref(ctx, mem, PrefStyleTerse, false) {
 		t.Error("old corrections (>1h) should not contribute to threshold")

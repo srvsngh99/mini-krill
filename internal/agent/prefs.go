@@ -112,7 +112,7 @@ func detectTypedPreference(input string) (key string, value bool, matched bool) 
 		}
 	}
 
-	// Style: terseness.
+	// Style: terseness — flip on.
 	tersePhrases := []string{
 		"be terse", "be more terse", "be brief", "be more brief",
 		"shorter responses", "keep it short", "be concise", "be more concise",
@@ -121,6 +121,18 @@ func detectTypedPreference(input string) (key string, value bool, matched bool) 
 	for _, p := range tersePhrases {
 		if strings.Contains(lower, p) {
 			return PrefStyleTerse, true, true
+		}
+	}
+
+	// Style: terseness — flip off (verbose mode). Symmetric inverse so a
+	// user who got auto-flipped to terse can recover with natural language.
+	verbosePhrases := []string{
+		"be verbose", "be more verbose", "be detailed", "more detail",
+		"longer responses", "give me more detail", "more thorough",
+	}
+	for _, p := range verbosePhrases {
+		if strings.Contains(lower, p) {
+			return PrefStyleTerse, false, true
 		}
 	}
 

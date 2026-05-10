@@ -215,21 +215,26 @@ func (a *KrillAgent) ChatFromPlatform(ctx context.Context, platform, chatID, inp
 	// "stop asking me to approve" gets captured *during* the approval state,
 	// not after. The pending-plan handler itself decides whether to consume
 	// the input or release it back to normal routing.
+	prefStored := false
 	if a.pendingPlan != nil {
 		a.maybeStoreUserPreference(ctx, input)
+		prefStored = true
 		response, handled := a.handlePendingPlan(ctx, input)
 		if handled {
 			return response, nil
 		}
 		// Fell through: input was unrelated to the pending plan. Drop the
-		// pending plan and route the input normally.
+		// pending plan and route the input normally — but don't store the
+		// preference twice, since pendingPlan already did it above.
 		a.pendingPlan = nil
 	}
 
 	// --- Phase 2: Record user message ---
 	a.appendMessage(core.Message{Role: "user", Content: input})
 	a.saveTurn("user", input)
-	a.maybeStoreUserPreference(ctx, input)
+	if !prefStored {
+		a.maybeStoreUserPreference(ctx, input)
+	}
 
 	// --- Phase 3: Classify intent via multi-intent router ---
 	route := a.router.Classify(ctx, input)
@@ -455,8 +460,11 @@ Reply with ONLY the category name. No explanation.
 Plan task: ` + a.pendingPlan.Task + `
 User reply: ` + input
 
+	// 24 tokens leaves headroom for category names that tokenize larger
+	// than expected (e.g. "UNRELATED" can be 2-3 tokens) plus a leading
+	// newline some instruction-following models emit.
 	resp, err := a.llm.Chat(ctx, []core.Message{{Role: "user", Content: prompt}},
-		core.WithTemperature(0.0), core.WithMaxTokens(8))
+		core.WithTemperature(0.0), core.WithMaxTokens(24))
 	if err != nil {
 		log.Warn("approval LLM judge failed, treating as unrelated", "error", err)
 		return decisionUnrelated
@@ -482,7 +490,7 @@ func (a *KrillAgent) handleTask(ctx context.Context, input string) (string, erro
 		return fmt.Sprintf("This krill's sonar is glitching - could not plan that task: %v", err), nil
 	}
 
-	if a.shouldRequireApproval(plan) {
+	if a.shouldRequireApproval(ctx, plan) {
 		// Store as pending and present for approval
 		a.pendingPlan = plan
 		formatted := FormatPlan(plan)
@@ -606,7 +614,7 @@ func (a *KrillAgent) handleTaskCommand(input string) (string, bool) {
 // stops re-asking once the user has said "stop asking" — but destructive
 // plans still gate under "auto" regardless of the pref. That keeps casual
 // "auto approve" phrases from authorising rm -rf.
-func (a *KrillAgent) shouldRequireApproval(plan *core.Plan) bool {
+func (a *KrillAgent) shouldRequireApproval(ctx context.Context, plan *core.Plan) bool {
 	switch a.cfg.PlanApproval {
 	case "always":
 		return true
@@ -617,7 +625,7 @@ func (a *KrillAgent) shouldRequireApproval(plan *core.Plan) bool {
 			return true
 		}
 		// User has said "stop asking" → trust them on non-destructive work.
-		if GetBoolPref(context.Background(), a.brain.Memory(), PrefNoPlanApproval, false) {
+		if GetBoolPref(ctx, a.brain.Memory(), PrefNoPlanApproval, false) {
 			return false
 		}
 		// Large plans need approval
@@ -674,7 +682,7 @@ func (a *KrillAgent) handleChat(ctx context.Context) (string, error) {
 			Role:    "system",
 			Content: "Your available capabilities: " + skillList + ". You CANNOT do anything outside these capabilities. If asked to do something not listed, say so honestly.",
 		}
-		enriched = append(enriched[:len(enriched)-1], capabilityMsg, enriched[len(enriched)-1])
+		enriched = insertBeforeLast(enriched, capabilityMsg)
 	}
 
 	if memoryCtx := a.buildUserMemoryContext(ctx, 8); memoryCtx != "" {
@@ -682,12 +690,12 @@ func (a *KrillAgent) handleChat(ctx context.Context) (string, error) {
 			Role:    "system",
 			Content: "Known user preferences and durable memories. Use these quietly for personalization; do not mention them unless relevant:\n\n" + memoryCtx,
 		}
-		enriched = append(enriched[:len(enriched)-1], memoryMsg, enriched[len(enriched)-1])
+		enriched = insertBeforeLast(enriched, memoryMsg)
 	}
 
 	if styleDirective := buildStyleDirective(ctx, a.brain.Memory()); styleDirective != "" {
 		styleMsg := core.Message{Role: "system", Content: styleDirective}
-		enriched = append(enriched[:len(enriched)-1], styleMsg, enriched[len(enriched)-1])
+		enriched = insertBeforeLast(enriched, styleMsg)
 	}
 
 	resp, err := a.llm.Chat(ctx, enriched)
@@ -745,7 +753,7 @@ func (a *KrillAgent) handleSelfSkill(ctx context.Context, skillName, skillInput 
 		Role:    "system",
 		Content: "Here is information about yourself that the user is asking about. Use it to respond naturally in first person:\n\n" + result,
 	}
-	enriched = append(enriched[:len(enriched)-1], selfCtx, enriched[len(enriched)-1])
+	enriched = insertBeforeLast(enriched, selfCtx)
 	resp, err := a.llm.Chat(ctx, enriched)
 	if err != nil {
 		// Fallback: return raw self-skill output
@@ -808,7 +816,7 @@ func (a *KrillAgent) handleRemember(ctx context.Context, input, operation string
 					Role:    "system",
 					Content: "Here are the krill's relevant memories. Respond naturally:\n\n" + result,
 				}
-				enriched = append(enriched[:len(enriched)-1], recallCtx, enriched[len(enriched)-1])
+				enriched = insertBeforeLast(enriched, recallCtx)
 				resp, err := a.llm.Chat(ctx, enriched)
 				if err != nil {
 					a.appendMessage(core.Message{Role: "assistant", Content: result})
@@ -862,7 +870,7 @@ func (a *KrillAgent) handleToolTask(ctx context.Context, input, toolName string)
 		Role:    "system",
 		Content: fmt.Sprintf("Here are the results from the %s tool. Use them to answer the user's question:\n\n%s", toolName, result),
 	}
-	enriched = append(enriched[:len(enriched)-1], toolCtx, enriched[len(enriched)-1])
+	enriched = insertBeforeLast(enriched, toolCtx)
 	resp, err := a.llm.Chat(ctx, enriched)
 	if err != nil {
 		// Fallback: return raw tool output
@@ -887,7 +895,7 @@ func (a *KrillAgent) handleDiagnose(ctx context.Context) (string, error) {
 			"suggest concrete fixes, and keep your answer focused and actionable. " +
 			"Do NOT create a plan or ask for approval - just answer directly.",
 	}
-	enriched = append(enriched[:len(enriched)-1], diagMsg, enriched[len(enriched)-1])
+	enriched = insertBeforeLast(enriched, diagMsg)
 
 	resp, err := a.llm.Chat(ctx, enriched)
 	if err != nil {
@@ -911,19 +919,19 @@ func (a *KrillAgent) handleAnswer(ctx context.Context) (string, error) {
 			"Do not create a plan, do not ask for approval, and do not ask follow-up questions " +
 			"unless you truly need clarification to give a useful answer.",
 	}
-	enriched = append(enriched[:len(enriched)-1], answerMsg, enriched[len(enriched)-1])
+	enriched = insertBeforeLast(enriched, answerMsg)
 
 	if memoryCtx := a.buildUserMemoryContext(ctx, 8); memoryCtx != "" {
 		memoryMsg := core.Message{
 			Role:    "system",
 			Content: "Known user preferences:\n\n" + memoryCtx,
 		}
-		enriched = append(enriched[:len(enriched)-1], memoryMsg, enriched[len(enriched)-1])
+		enriched = insertBeforeLast(enriched, memoryMsg)
 	}
 
 	if styleDirective := buildStyleDirective(ctx, a.brain.Memory()); styleDirective != "" {
 		styleMsg := core.Message{Role: "system", Content: styleDirective}
-		enriched = append(enriched[:len(enriched)-1], styleMsg, enriched[len(enriched)-1])
+		enriched = insertBeforeLast(enriched, styleMsg)
 	}
 
 	resp, err := a.llm.Chat(ctx, enriched)
@@ -1176,10 +1184,10 @@ func (a *KrillAgent) recordFeedback(_ context.Context, input, response string) {
 
 	// Adaptive personality: if the user has corrected us several times in
 	// rapid succession (and hasn't already opted into terse mode), assume
-	// they want shorter responses and flip the pref. They can undo this by
-	// asking for more detail later.
+	// they want shorter responses and flip the pref. The user can undo this
+	// by saying "be verbose" / "more detail" — see detectTypedPreference.
 	if signal == "correction" || signal == "negative" {
-		a.maybeAutoEvolveStyle(ctx, signal)
+		a.maybeAutoEvolveStyle(ctx, key, signal)
 	}
 }
 
@@ -1187,7 +1195,13 @@ func (a *KrillAgent) recordFeedback(_ context.Context, input, response string) {
 // they cross a threshold, flips a style preference automatically. This is
 // the "evolves with usage" loop — explicit feedback is great, but most users
 // communicate through corrections, not config commands.
-func (a *KrillAgent) maybeAutoEvolveStyle(ctx context.Context, latestSignal string) {
+//
+// latestKey is the storage key of the entry that recordFeedback just stored;
+// it's skipped during the search loop and counted exactly once via the
+// explicit increment below. Without this guard, a backend that returns the
+// fresh entry would double-count it (loop adds 1, then the explicit +1 adds
+// another), tripping the threshold one signal early.
+func (a *KrillAgent) maybeAutoEvolveStyle(ctx context.Context, latestKey, latestSignal string) {
 	mem := a.brain.Memory()
 	if mem == nil {
 		return
@@ -1207,6 +1221,9 @@ func (a *KrillAgent) maybeAutoEvolveStyle(ctx context.Context, latestSignal stri
 	cutoff := time.Now().Add(-1 * time.Hour)
 	count := 0
 	for _, e := range entries {
+		if e.Key == latestKey {
+			continue // counted once via the explicit increment below
+		}
 		if e.CreatedAt.Before(cutoff) {
 			continue
 		}
@@ -1217,8 +1234,8 @@ func (a *KrillAgent) maybeAutoEvolveStyle(ctx context.Context, latestSignal stri
 			}
 		}
 	}
-	// +1 for the signal we just observed (which is already stored above
-	// but may not be returned by Search depending on the backend's freshness).
+	// Always +1 for the signal we just observed. Combined with the key skip
+	// above this gives an exact count regardless of backend consistency.
 	if latestSignal == "correction" || latestSignal == "negative" {
 		count++
 	}
@@ -1275,6 +1292,30 @@ func (a *KrillAgent) appendMessage(msg core.Message) {
 		trimmed = append(trimmed, a.history[1+excess:]...)
 		a.history = trimmed
 	}
+}
+
+// insertBeforeLast returns a new slice with `inserts` placed just before the
+// final element of `msgs`. The final element is conventionally the latest
+// user message, so this is how we add system-context messages (capabilities,
+// memory, style directives) without disturbing turn order.
+//
+// Always allocates a fresh backing array, so callers don't have to reason
+// about aliasing or capacity surprises that the previous append-trick had.
+func insertBeforeLast(msgs []core.Message, inserts ...core.Message) []core.Message {
+	if len(msgs) == 0 {
+		return append([]core.Message{}, inserts...)
+	}
+	if len(inserts) == 0 {
+		out := make([]core.Message, len(msgs))
+		copy(out, msgs)
+		return out
+	}
+	n := len(msgs)
+	out := make([]core.Message, 0, n+len(inserts))
+	out = append(out, msgs[:n-1]...)
+	out = append(out, inserts...)
+	out = append(out, msgs[n-1])
+	return out
 }
 
 // buildSkillSummary returns a short comma-separated list of enabled skill names
