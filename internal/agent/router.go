@@ -71,6 +71,11 @@ var greetings = map[string]bool{
 // hardActionVerbs strongly imply concrete multi-step work touching real
 // systems (filesystem, network, packages, services) or producing concrete
 // artifacts (code, files, websites). These bias toward LONG_TASK classification.
+//
+// Soft verbs ("find", "give", "suggest", "brainstorm") are intentionally
+// excluded — alone they signal ideation/explanation, not work, and should
+// stay in CHAT/ANSWER. The classifier prompt in classifyWithLLM mirrors
+// this distinction for ambiguous inputs.
 var hardActionVerbs = []string{
 	"deploy", "install", "uninstall", "refactor", "migrate", "configure",
 	"set up", "scaffold", "bootstrap", "provision", "rollback", "publish",
@@ -78,21 +83,6 @@ var hardActionVerbs = []string{
 	"build", "create", "make", "write", "implement", "develop",
 	"fix", "debug", "generate",
 }
-
-// softActionVerbs are commonly ideation/explanation phrasing ("give me ideas",
-// "find me some news", "write a summary"). Alone they should NOT trigger plan
-// mode — they're conversational asks. They route to ANSWER/CHAT unless paired
-// with a hard verb or a concrete artifact.
-var softActionVerbs = []string{
-	"find", "give", "show", "tell", "explain", "describe", "list",
-	"suggest", "recommend", "compare", "review", "analyze", "research",
-	"think", "brainstorm", "draft", "summarize",
-}
-
-// actionVerbs is the legacy combined list, kept for callers that just want
-// "does this look like a request to do something" without distinguishing
-// hard vs soft.
-var actionVerbs = append(append([]string{}, hardActionVerbs...), softActionVerbs...)
 
 // memoryStoreTriggers indicate the user wants to store something in memory.
 var memoryStoreTriggers = []string{
