@@ -124,8 +124,10 @@ func (s *timeSkill) Execute(_ context.Context, _ string, _ core.LLMProvider) (st
 
 type webSearchSkill struct{}
 
-func (s *webSearchSkill) Name() string        { return "search" }
-func (s *webSearchSkill) Description() string { return "Search the web via DuckDuckGo (no API key needed)" }
+func (s *webSearchSkill) Name() string { return "search" }
+func (s *webSearchSkill) Description() string {
+	return "Search the web via DuckDuckGo (no API key needed)"
+}
 
 func (s *webSearchSkill) Execute(ctx context.Context, input string, llm core.LLMProvider) (string, error) {
 	if strings.TrimSpace(input) == "" {
@@ -134,7 +136,9 @@ func (s *webSearchSkill) Execute(ctx context.Context, input string, llm core.LLM
 
 	results, err := duckduckgoSearch(ctx, input)
 	if err != nil {
-		return fmt.Sprintf("Search failed: %v", err), nil
+		// Return a real error so callers know to surface this verbatim
+		// instead of letting the LLM invent a "permission denied" story.
+		return "", fmt.Errorf("web search failed: %w", err)
 	}
 	if len(results) == 0 {
 		return fmt.Sprintf("No results found for: %s", input), nil
@@ -192,6 +196,10 @@ func duckduckgoSearch(ctx context.Context, query string) ([]searchResult, error)
 		return nil, fmt.Errorf("search request failed: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("search returned HTTP %d", resp.StatusCode)
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

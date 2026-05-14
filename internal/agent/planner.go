@@ -14,11 +14,13 @@ import (
 
 // statusIcons maps plan step statuses to display indicators.
 var statusIcons = map[string]string{
-	"pending": "[ ]",
-	"running": "[~]",
-	"done":    "[x]",
-	"failed":  "[!]",
-	"skipped": "[-]",
+	"pending":    "[ ]",
+	"running":    "[~]",
+	"done":       "[x]",
+	"failed":     "[!]",
+	"skipped":    "[-]",
+	"blocked":    "[?]",
+	"need_input": "[?]",
 }
 
 // GeneratePlan asks the LLM to decompose a task into concrete, actionable steps.
@@ -86,8 +88,12 @@ func FormatPlan(plan *core.Plan) string {
 		}
 		b.WriteString(fmt.Sprintf("  %d. %s %s\n", step.ID, icon, step.Description))
 
-		// Show output for completed or failed steps
-		if step.Output != "" && (step.Status == "done" || step.Status == "failed") {
+		// Show output for completed, failed, blocked, or need_input steps.
+		// blocked/need_input carry the most user-relevant signal (what's
+		// missing) — without them in this list the formatter swallows the
+		// "needs the URL" message and shows only a [?] icon.
+		if step.Output != "" && (step.Status == "done" || step.Status == "failed" ||
+			step.Status == "blocked" || step.Status == "need_input") {
 			// Indent step output for readability
 			lines := strings.Split(step.Output, "\n")
 			for _, line := range lines {
@@ -141,13 +147,23 @@ func ExecutePlanSteps(ctx context.Context, plan *core.Plan, llm core.LLMProvider
 		step.Status = "running"
 		log.Debug("executing step", "step_id", step.ID, "description", truncate(step.Description, 60))
 
-		// Build context from previous step outputs
+		// Build per-step context. The original user task always leads — the
+		// previous bug was that step 1 had no "Previous context" entry, so the
+		// LLM hallucinated "no link was provided" even when the link was right
+		// there in the user's message. Threading plan.Task ensures every step
+		// can see the original input.
 		var contextStr string
+		var b strings.Builder
+		b.WriteString("Original user request:\n")
+		b.WriteString(plan.Task)
+		b.WriteString("\n\n")
 		if len(previousOutputs) > 0 {
-			contextStr = "Previous context:\n" + strings.Join(previousOutputs, "\n---\n")
+			b.WriteString("Previous step outputs:\n")
+			b.WriteString(strings.Join(previousOutputs, "\n---\n"))
 		} else {
-			contextStr = "This is the first step."
+			b.WriteString("This is the first step. Use the original user request above as your input.")
 		}
+		contextStr = b.String()
 
 		// Try tool-assisted execution: ask LLM what tool to call
 		stepOutput, err := executeStepWithTools(ctx, step, contextStr, toolbox, toolDescriptions, llm, brain)
@@ -161,6 +177,26 @@ func ExecutePlanSteps(ctx context.Context, plan *core.Plan, llm core.LLMProvider
 			continue
 		}
 
+		// Honour structured "I can't do this" signals from the LLM. Without
+		// these, a step that the LLM admitted it couldn't run was logged as
+		// done — the source of the "5/5 steps succeeded" gaslighting.
+		switch detectStepBlocker(stepOutput) {
+		case "need_input":
+			step.Status = "need_input"
+			step.Output = stepOutput
+			results.WriteString(fmt.Sprintf("Step %d [?] %s\n  Needs input: %s\n\n", step.ID, step.Description, stepOutput))
+			previousOutputs = append(previousOutputs, fmt.Sprintf("Step %d NEEDS_INPUT: %s", step.ID, stepOutput))
+			log.Info("step needs input", "step_id", step.ID)
+			continue
+		case "blocked":
+			step.Status = "blocked"
+			step.Output = stepOutput
+			results.WriteString(fmt.Sprintf("Step %d [?] %s\n  Blocked: %s\n\n", step.ID, step.Description, stepOutput))
+			previousOutputs = append(previousOutputs, fmt.Sprintf("Step %d BLOCKED: %s", step.ID, stepOutput))
+			log.Info("step blocked", "step_id", step.ID)
+			continue
+		}
+
 		step.Status = "done"
 		step.Output = stepOutput
 		previousOutputs = append(previousOutputs, fmt.Sprintf("Step %d: %s", step.ID, stepOutput))
@@ -168,14 +204,16 @@ func ExecutePlanSteps(ctx context.Context, plan *core.Plan, llm core.LLMProvider
 		log.Debug("step completed", "step_id", step.ID)
 	}
 
-	// Tally results
-	done, failed := 0, 0
+	// Tally results — only "done" counts as success.
+	done, failed, blocked := 0, 0, 0
 	for _, s := range plan.Steps {
 		switch s.Status {
 		case "done":
 			done++
 		case "failed":
 			failed++
+		case "blocked", "need_input":
+			blocked++
 		}
 	}
 
@@ -183,11 +221,64 @@ func ExecutePlanSteps(ctx context.Context, plan *core.Plan, llm core.LLMProvider
 	if failed > 0 {
 		summary += fmt.Sprintf(" (%d hit reefs)", failed)
 	}
+	if blocked > 0 {
+		summary += fmt.Sprintf(" (%d need input)", blocked)
+	}
 	summary += " ---"
 	results.WriteString(summary)
 
-	log.Info("plan execution complete", "task", plan.Task, "done", done, "failed", failed)
+	log.Info("plan execution complete", "task", plan.Task, "done", done, "failed", failed, "blocked", blocked)
 	return results.String(), nil
+}
+
+// detectStepBlocker scans an LLM step output for explicit "I cannot proceed"
+// markers. The planner prompt instructs the model to emit these tokens when it
+// genuinely can't run the step (missing input, missing tool, etc). Returns
+// "need_input", "blocked", or "" (proceed normally).
+//
+// `NEED_INPUT:` / `BLOCKED:` are the durable contract — substring-matched
+// anywhere in the output. The prose heuristics are a safety net for older
+// models that don't honour the tokens; they are deliberately anchored to the
+// start of the trimmed output (or any line in the first ~5 lines) so a
+// legitimate paragraph that quotes a refusal mid-prose ("Draft email: please
+// send the user a confirmation") doesn't trip them. A whole-step refusal
+// almost always opens with the refusal phrase — that's the shape we want.
+func detectStepBlocker(output string) string {
+	upper := strings.ToUpper(output)
+	if strings.Contains(upper, "NEED_INPUT:") {
+		return "need_input"
+	}
+	if strings.Contains(upper, "BLOCKED:") {
+		return "blocked"
+	}
+	needInputPrefixes := []string{
+		"cannot execute this step yet",
+		"can't execute this step yet",
+		"can't execute this yet",
+		"cannot execute this yet",
+		"no source material was provided",
+		"no url was provided",
+		"i still need",
+		"please send the video",
+		"please send the url",
+		"please send the link",
+		"send the video link",
+		"send the url",
+	}
+	// Check the first 5 lines: a refusal typically opens the step.
+	lines := strings.Split(output, "\n")
+	if len(lines) > 5 {
+		lines = lines[:5]
+	}
+	for _, line := range lines {
+		l := strings.ToLower(strings.TrimSpace(line))
+		for _, p := range needInputPrefixes {
+			if strings.HasPrefix(l, p) {
+				return "need_input"
+			}
+		}
+	}
+	return ""
 }
 
 // executeStepWithTools handles a single plan step by asking the LLM if a tool
@@ -212,7 +303,10 @@ func executeStepWithTools(ctx context.Context, step *core.PlanStep, contextStr s
 			"If you need to use a tool, respond with EXACTLY this format:\n"+
 			"TOOL_CALL: tool_name\n"+
 			"ARGS: {\"key\": \"value\"}\n\n"+
-			"If no tool is needed, provide your analysis directly.",
+			"If no tool is needed, provide your analysis directly.\n\n"+
+			"If you genuinely cannot proceed because input or tools are missing, "+
+			"respond with one line starting with NEED_INPUT: <what you need> "+
+			"or BLOCKED: <why>. Do not fabricate progress.",
 		step.Description, contextStr, toolDescriptions,
 	)
 
@@ -450,4 +544,3 @@ func parsePlanResponse(task, response string) *core.Plan {
 
 	return plan
 }
-

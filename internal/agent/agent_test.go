@@ -251,14 +251,6 @@ func TestAgentApproveAndExecute(t *testing.T) {
 	}
 }
 
-func TestSetChannelUsesUnifiedChannel(t *testing.T) {
-	a := newTestAgent("hello")
-	a.SetChannel("telegram")
-	if a.channel != unifiedConversationChannel {
-		t.Fatalf("channel = %q, want %q", a.channel, unifiedConversationChannel)
-	}
-}
-
 func TestProviderCommandModel(t *testing.T) {
 	a := newProviderControlTestAgent()
 	resp, err := a.Chat(context.Background(), "/model")

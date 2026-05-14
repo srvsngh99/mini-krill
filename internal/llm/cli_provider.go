@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -95,7 +96,7 @@ func (p *CLIProvider) Available(ctx context.Context) bool {
 func (p *CLIProvider) runCodex(ctx context.Context, model, prompt string) ([]byte, error) {
 	args := []string{
 		"exec",
-		"--full-auto",
+		"--sandbox", "workspace-write",
 		"--skip-git-repo-check",
 		"--ephemeral",
 		"--color", "never",
@@ -126,6 +127,11 @@ func runCLI(ctx context.Context, name string, args []string, stdin string) ([]by
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
+
+	// Suppress macOS dyld MallocStackLogging warnings at the source. The flag
+	// is leaked into every Go-spawned subprocess on dev machines and pollutes
+	// dive.log with thousands of "can't turn off malloc stack logging" lines.
+	cmd.Env = append(os.Environ(), "MallocStackLogging=0")
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
