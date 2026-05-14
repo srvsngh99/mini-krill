@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -127,6 +128,69 @@ func (s *ConversationStore) LoadRecent(channel string, n int) ([]core.Message, e
 }
 
 func (s *ConversationStore) Close() error { return nil }
+
+// Search returns turns matching a substring or time predicate. query is
+// case-insensitive substring match against the content. since filters to
+// turns at or after the timestamp; until filters to turns strictly before
+// the timestamp (both zero = no filter). limit caps the returned slice; the
+// most recent matches win when more results exist.
+//
+// This is what powers /recall and "what did I say yesterday" — it scans the
+// entire JSONL, not just the sliding LoadRecent window. The upper-bound
+// `until` is what makes "yesterday" actually mean yesterday and not
+// yesterday-or-later (the previous client-side `trimAfter` was a no-op
+// because core.Message has no timestamp).
+func (s *ConversationStore) Search(channel, query string, since, until time.Time, limit int) ([]core.Message, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	f, err := os.Open(s.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("open conversations store: %w", err)
+	}
+	defer f.Close()
+
+	q := strings.ToLower(strings.TrimSpace(query))
+	hasQuery := q != ""
+	hasSince := !since.IsZero()
+	hasUntil := !until.IsZero()
+
+	var matches []core.Message
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		var turn conversationTurn
+		if err := json.Unmarshal(scanner.Bytes(), &turn); err != nil {
+			continue
+		}
+		if channel != "" && turn.Channel != channel {
+			continue
+		}
+		if hasSince && turn.Timestamp.Before(since) {
+			continue
+		}
+		if hasUntil && !turn.Timestamp.Before(until) {
+			continue
+		}
+		if hasQuery && !strings.Contains(strings.ToLower(turn.Content), q) {
+			continue
+		}
+		matches = append(matches, core.Message{Role: turn.Role, Content: turn.Content})
+		if len(matches) > limit {
+			matches = matches[len(matches)-limit:]
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read conversations store: %w", err)
+	}
+	return matches, nil
+}
 
 // rotateLocked keeps the last maxKeepTurns entries and archives the rest.
 // Must be called with s.mu held.
