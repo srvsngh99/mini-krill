@@ -60,9 +60,24 @@ func (a *KrillAgent) AgentName() string {
 		return a.cfg.AgentName
 	}
 	if a.cfg.Personality != "" {
-		return strings.Title(a.cfg.Personality)
+		return capitalizeFirst(a.cfg.Personality)
 	}
 	return "Assistant"
+}
+
+// capitalizeFirst uppercases the first ASCII letter of s; everything else is
+// passed through. Used to render personality slugs like "buddy" → "Buddy"
+// without pulling in golang.org/x/text/cases for a one-character upcase.
+// strings.Title is deprecated and overkill for this single use.
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	if r[0] >= 'a' && r[0] <= 'z' {
+		r[0] -= 'a' - 'A'
+	}
+	return string(r)
 }
 
 // RenameAgent sets the agent's display name and persists it. Returns the

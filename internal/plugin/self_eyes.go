@@ -266,10 +266,10 @@ func (s *selfReadLogsSkill) Execute(_ context.Context, input string, _ core.LLMP
 		file, n := "krill.log", 50
 		switch len(parts) {
 		case 2:
-			fmt.Sscanf(parts[1], "%d", &n)
+			_, _ = fmt.Sscanf(parts[1], "%d", &n)
 		case 3:
 			file = parts[1]
-			fmt.Sscanf(parts[2], "%d", &n)
+			_, _ = fmt.Sscanf(parts[2], "%d", &n)
 		}
 		return logTail(file, n)
 	case "grep":

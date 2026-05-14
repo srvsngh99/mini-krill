@@ -199,6 +199,12 @@ func LoadSoul(soulFilePath string) (*core.Soul, *core.Personality, error) {
 // LoadPersonalityByName loads a personality profile from the personalities directory.
 // Falls back to soul file, then built-in defaults.
 // Profiles are stored as ~/.mini-krill/personalities/{name}.yaml
+//
+// agentName is the user-chosen display name. It's used to template the
+// generic fallback soul when the requested personality file does not exist
+// AND the personality is not "krill" — so a fresh user who picked a custom
+// name but no personality file still gets a coherent identity (their name +
+// the neutral system prompt) instead of being forced into the krill voice.
 func LoadPersonalityByName(name, dataDir, soulFilePath string) (*core.Soul, *core.Personality, error) {
 	if name == "" || name == "krill" {
 		return LoadSoul(soulFilePath) // default personality
@@ -209,8 +215,16 @@ func LoadPersonalityByName(name, dataDir, soulFilePath string) (*core.Soul, *cor
 	data, err := os.ReadFile(profilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			log.Warn("personality not found, using default", "name", name, "path", profilePath)
-			return LoadSoul(soulFilePath)
+			// Use the neutral generic soul, name-templated, instead of dragging
+			// the krill voice in via LoadSoul. The user picked a name we don't
+			// have a personality file for — give them a clean assistant voice
+			// rather than pretending to be a crustacean.
+			log.Warn("personality not found, using generic identity", "name", name, "path", profilePath)
+			return genericSoul(name), &core.Personality{
+				Name:     name,
+				Style:    "Direct, helpful, concise.",
+				Greeting: fmt.Sprintf("Hi, I'm %s. What are we working on?", name),
+			}, nil
 		}
 		return nil, nil, fmt.Errorf("read personality %s: %w", name, err)
 	}

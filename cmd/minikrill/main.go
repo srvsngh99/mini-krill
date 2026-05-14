@@ -238,6 +238,21 @@ func ask(scanner *bufio.Scanner, question string) string {
 	return strings.TrimSpace(scanner.Text())
 }
 
+// capitalizeFirstASCII uppercases the first ASCII letter of s. Used in the
+// init wizard to render personality slugs ("buddy" → "Buddy") without the
+// deprecated strings.Title or pulling in golang.org/x/text/cases for a
+// single-character upcase.
+func capitalizeFirstASCII(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	if r[0] >= 'a' && r[0] <= 'z' {
+		r[0] -= 'a' - 'A'
+	}
+	return string(r)
+}
+
 // friendlyError strips raw API error dumps into a short, helpful message.
 func friendlyError(err error) string {
 	msg := err.Error()

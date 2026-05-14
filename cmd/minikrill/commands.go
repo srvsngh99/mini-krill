@@ -253,7 +253,7 @@ var initCmd = &cobra.Command{
 			cfg.Agent.Personality = "buddy"
 		}
 
-		defaultName := strings.Title(cfg.Agent.Personality)
+		defaultName := capitalizeFirstASCII(cfg.Agent.Personality)
 		fmt.Println()
 		nameAns := ask(scanner, cCyan+"  Name your agent ["+defaultName+"]: "+cReset)
 		nameAns = strings.TrimSpace(nameAns)

@@ -151,7 +151,7 @@ func (a *KrillAgent) formatRecall(matches []core.Message) string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("Found %d match(es):\n\n", len(matches)))
 	for _, m := range matches {
-		role := strings.Title(m.Role)
+		role := capitalizeFirst(m.Role)
 		b.WriteString(fmt.Sprintf("**%s**: %s\n\n", role, truncate(m.Content, 300)))
 	}
 	return strings.TrimRight(b.String(), "\n")
