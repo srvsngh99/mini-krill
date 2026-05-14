@@ -44,25 +44,27 @@ var rejectionRegex = regexp.MustCompile(`^(?:n|no|nah|nope|cancel|cancelled|stop
 // It is the executive function of the krill brain - classifying intent,
 // planning tasks, gating approval, and orchestrating execution.
 type KrillAgent struct {
-	llm              core.LLMProvider
-	brain            core.Brain
-	skills           core.SkillRegistry
-	mcp              core.MCPRegistry
-	cfg              config.AgentConfig
-	router           *IntentRouter
-	channel          string // durable conversation channel; default is unified across interfaces
-	platform         string // current chat platform (telegram, discord, cli, tui)
-	chatID           string // current chat ID for background task notifications
-	history          []core.Message
-	pendingPlan      *core.Plan
-	subMgr           *SubKrillManager
-	taskStore        *TaskStore
-	taskRunner       *TaskRunner
-	turnFetches      *turnFetchLog  // per-turn provenance ledger; reset on each ChatFromPlatform call
-	affinity         *AffinityStore // task-type plan-affinity learner
-	pendingClstr     TaskCluster    // cluster while a plan is awaiting approval
-	cachedEmojiStyle string         // cached read of cfg.Brain.EmojiStyle; refreshed on /emoji
-	mu               sync.Mutex
+	llm               core.LLMProvider
+	brain             core.Brain
+	skills            core.SkillRegistry
+	mcp               core.MCPRegistry
+	cfg               config.AgentConfig
+	router            *IntentRouter
+	channel           string // durable conversation channel; default is unified across interfaces
+	platform          string // current chat platform (telegram, discord, cli, tui)
+	chatID            string // current chat ID for background task notifications
+	history           []core.Message
+	pendingPlan       *core.Plan
+	subMgr            *SubKrillManager
+	taskStore         *TaskStore
+	taskRunner        *TaskRunner
+	turnFetches       *turnFetchLog  // per-turn provenance ledger; reset on each ChatFromPlatform call
+	affinity          *AffinityStore // task-type plan-affinity learner
+	pendingClstr      TaskCluster    // cluster while a plan is awaiting approval
+	cachedEmojiStyle  string         // cached read of cfg.Brain.EmojiStyle; refreshed on /emoji
+	cachedOverlayDirs []string       // cached overlay directives; invalidated on /persona writes
+	cachedOverlayInit bool           // true once cachedOverlayDirs has been loaded at least once
+	mu                sync.Mutex
 }
 
 // New creates a fresh KrillAgent wired to all subsystems.
@@ -941,7 +943,7 @@ func (a *KrillAgent) handleChat(ctx context.Context) (string, error) {
 	}
 
 	// User-applied persona overlay (highest priority) and emoji style.
-	if overlay := buildOverlayDirective(); overlay != "" {
+	if overlay := a.buildOverlayDirective(); overlay != "" {
 		enriched = insertBeforeLast(enriched, core.Message{Role: "system", Content: overlay})
 	}
 	if emojiDirective := buildEmojiDirective(a.emojiStyle()); emojiDirective != "" {
@@ -976,10 +978,31 @@ func (a *KrillAgent) handleChat(ctx context.Context) (string, error) {
 	return cleaned, nil
 }
 
+// overlayDirectives returns the active overlay directives, reading from disk
+// only on the first call (or after an invalidation). The persona file is hot-
+// path I/O during chat — without caching, every chat turn re-parses
+// `~/.mini-krill/personalities/_overlay.yaml`. Cache is invalidated by
+// invalidateOverlayCache(), called from any /persona mutation.
+func (a *KrillAgent) overlayDirectives() []string {
+	if a.cachedOverlayInit {
+		return a.cachedOverlayDirs
+	}
+	a.cachedOverlayDirs = OverlayDirectives()
+	a.cachedOverlayInit = true
+	return a.cachedOverlayDirs
+}
+
+// invalidateOverlayCache clears the cached directives so the next call to
+// overlayDirectives() re-reads from disk. Called from /persona add/undo/reset.
+func (a *KrillAgent) invalidateOverlayCache() {
+	a.cachedOverlayInit = false
+	a.cachedOverlayDirs = nil
+}
+
 // buildOverlayDirective composes a system message from the active persona
 // overlay. Returns "" when no directives are present.
-func buildOverlayDirective() string {
-	dirs := OverlayDirectives()
+func (a *KrillAgent) buildOverlayDirective() string {
+	dirs := a.overlayDirectives()
 	if len(dirs) == 0 {
 		return ""
 	}

@@ -131,12 +131,16 @@ func (s *ConversationStore) Close() error { return nil }
 
 // Search returns turns matching a substring or time predicate. query is
 // case-insensitive substring match against the content. since filters to
-// turns at or after the timestamp (zero time = no filter). limit caps the
-// returned slice; the most recent matches win when more results exist.
+// turns at or after the timestamp; until filters to turns strictly before
+// the timestamp (both zero = no filter). limit caps the returned slice; the
+// most recent matches win when more results exist.
 //
 // This is what powers /recall and "what did I say yesterday" — it scans the
-// entire JSONL, not just the sliding LoadRecent window.
-func (s *ConversationStore) Search(channel, query string, since time.Time, limit int) ([]core.Message, error) {
+// entire JSONL, not just the sliding LoadRecent window. The upper-bound
+// `until` is what makes "yesterday" actually mean yesterday and not
+// yesterday-or-later (the previous client-side `trimAfter` was a no-op
+// because core.Message has no timestamp).
+func (s *ConversationStore) Search(channel, query string, since, until time.Time, limit int) ([]core.Message, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -155,6 +159,7 @@ func (s *ConversationStore) Search(channel, query string, since time.Time, limit
 	q := strings.ToLower(strings.TrimSpace(query))
 	hasQuery := q != ""
 	hasSince := !since.IsZero()
+	hasUntil := !until.IsZero()
 
 	var matches []core.Message
 	scanner := bufio.NewScanner(f)
@@ -168,6 +173,9 @@ func (s *ConversationStore) Search(channel, query string, since time.Time, limit
 			continue
 		}
 		if hasSince && turn.Timestamp.Before(since) {
+			continue
+		}
+		if hasUntil && !turn.Timestamp.Before(until) {
 			continue
 		}
 		if hasQuery && !strings.Contains(strings.ToLower(turn.Content), q) {

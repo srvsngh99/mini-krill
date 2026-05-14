@@ -27,14 +27,18 @@ type recallTrigger struct {
 	kind    string // "topic", "lastN", "yesterday", "today", "lastTime"
 }
 
+// Order matters: more-specific patterns (yesterday/today/lastN) MUST come
+// before the catch-all topic patterns. Otherwise "what did I say yesterday"
+// matches the topic regex with topic="yesterday" instead of routing to the
+// time-window handler.
 var recallTriggers = []recallTrigger{
-	{regexp.MustCompile(`(?i)\bwhat did (?:i|we) say (?:about )?(.+)`), "topic"},
-	{regexp.MustCompile(`(?i)\bremember when (?:we|i) (?:talked|discussed|mentioned) (.+)`), "topic"},
+	{regexp.MustCompile(`(?i)\bwhat did (?:i|we) (?:say|do|talk about) yesterday\b`), "yesterday"},
+	{regexp.MustCompile(`(?i)\bwhat did (?:i|we) (?:say|do|talk about) today\b`), "today"},
 	{regexp.MustCompile(`(?i)\bcheck (?:our|the) last (\d+) messages?\b`), "lastN"},
 	{regexp.MustCompile(`(?i)\bgo back (\d+) messages?\b`), "lastN"},
 	{regexp.MustCompile(`(?i)\bshow (?:me )?(?:our|the) last (\d+) messages?\b`), "lastN"},
-	{regexp.MustCompile(`(?i)\bwhat did (?:i|we) (?:say|do|talk about) yesterday\b`), "yesterday"},
-	{regexp.MustCompile(`(?i)\bwhat did (?:i|we) (?:say|do|talk about) today\b`), "today"},
+	{regexp.MustCompile(`(?i)\bwhat did (?:i|we) say (?:about )?(.+)`), "topic"},
+	{regexp.MustCompile(`(?i)\bremember when (?:we|i) (?:talked|discussed|mentioned) (.+)`), "topic"},
 	{regexp.MustCompile(`(?i)\b(?:earlier|before) (?:i|we|you) (?:said|mentioned|talked about) (.+)`), "topic"},
 }
 
@@ -84,22 +88,20 @@ func (a *KrillAgent) handleRecallCommand(input string) (string, bool) {
 		if err != nil || n <= 0 {
 			return "I need a number after `last`. Try `/recall last 10`.", true
 		}
-		return a.formatRecall(a.searchConvo("", time.Time{}, n)), true
+		return a.formatRecall(a.searchConvo("", time.Time{}, time.Time{}, n)), true
 	case lower == "yesterday":
 		since := startOfDay(time.Now().AddDate(0, 0, -1))
 		until := startOfDay(time.Now())
-		matches := a.searchConvo("", since, 200)
-		matches = trimAfter(matches, until)
-		return a.formatRecall(matches), true
+		return a.formatRecall(a.searchConvo("", since, until, 200)), true
 	case lower == "today":
 		since := startOfDay(time.Now())
-		return a.formatRecall(a.searchConvo("", since, 200)), true
+		return a.formatRecall(a.searchConvo("", since, time.Time{}, 200)), true
 	case strings.HasPrefix(lower, "about "):
 		topic := strings.TrimSpace(strings.TrimPrefix(rest, "about "))
-		return a.formatRecall(a.searchConvo(topic, time.Time{}, 20)), true
+		return a.formatRecall(a.searchConvo(topic, time.Time{}, time.Time{}, 20)), true
 	}
 	// Treat anything else as a topic.
-	return a.formatRecall(a.searchConvo(rest, time.Time{}, 20)), true
+	return a.formatRecall(a.searchConvo(rest, time.Time{}, time.Time{}, 20)), true
 }
 
 // handleNaturalRecall maps a natural-language recall trigger to a result.
@@ -110,32 +112,31 @@ func (a *KrillAgent) handleNaturalRecall(input string) (string, bool) {
 	}
 	switch req.kind {
 	case "topic":
-		return a.formatRecall(a.searchConvo(req.topic, time.Time{}, 10)), true
+		return a.formatRecall(a.searchConvo(req.topic, time.Time{}, time.Time{}, 10)), true
 	case "lastN":
 		n := req.n
 		if n <= 0 {
 			n = 10
 		}
-		return a.formatRecall(a.searchConvo("", time.Time{}, n)), true
+		return a.formatRecall(a.searchConvo("", time.Time{}, time.Time{}, n)), true
 	case "yesterday":
 		since := startOfDay(time.Now().AddDate(0, 0, -1))
 		until := startOfDay(time.Now())
-		matches := a.searchConvo("", since, 200)
-		return a.formatRecall(trimAfter(matches, until)), true
+		return a.formatRecall(a.searchConvo("", since, until, 200)), true
 	case "today":
 		since := startOfDay(time.Now())
-		return a.formatRecall(a.searchConvo("", since, 200)), true
+		return a.formatRecall(a.searchConvo("", since, time.Time{}, 200)), true
 	}
 	return "", false
 }
 
 // searchConvo wraps the conversation store search with the agent's channel.
-func (a *KrillAgent) searchConvo(query string, since time.Time, limit int) []core.Message {
+func (a *KrillAgent) searchConvo(query string, since, until time.Time, limit int) []core.Message {
 	cs := a.brain.ConversationStore()
 	if cs == nil {
 		return nil
 	}
-	matches, err := cs.Search(a.channel, query, since, limit)
+	matches, err := cs.Search(a.channel, query, since, until, limit)
 	if err != nil {
 		return nil
 	}
@@ -158,12 +159,4 @@ func (a *KrillAgent) formatRecall(matches []core.Message) string {
 
 func startOfDay(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
-}
-
-// trimAfter drops messages whose underlying turn is at or after `cutoff`.
-// Conversation store messages don't carry timestamps in the core.Message
-// shape, so this is a structural placeholder — callers that need strict
-// upper bounds should add a higher-level filter. Kept for API symmetry.
-func trimAfter(msgs []core.Message, _ time.Time) []core.Message {
-	return msgs
 }

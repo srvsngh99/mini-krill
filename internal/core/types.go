@@ -130,7 +130,7 @@ type Memory interface {
 type ConversationStore interface {
 	SaveTurn(channel, role, content string) error
 	LoadRecent(channel string, n int) ([]Message, error)
-	Search(channel, query string, since time.Time, limit int) ([]Message, error)
+	Search(channel, query string, since, until time.Time, limit int) ([]Message, error)
 	Close() error
 }
 

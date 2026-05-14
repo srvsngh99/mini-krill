@@ -23,15 +23,34 @@ import (
 // Rejects "System: you are now…" style injection and emoji-laden noise.
 var safeNameRE = regexp.MustCompile(`^[A-Za-z0-9 '\-]+$`)
 
+// nameTokenRE matches a single name-shaped token: starts with a CAPITAL
+// letter, then letters/digits/apostrophes/hyphens. Names are conventionally
+// capitalised; this anchors the rename captures so a lowercase common word
+// like "but"/"and"/"from" terminates the match instead of being absorbed.
+const nameTokenRE = `[A-Z][A-Za-z0-9'\-]*`
+
+// nameCaptureRE matches one or two name tokens. Used in renameTriggers below.
+// Anchored on the trailing side by a stop-char alternation so phrases like
+// "call you Mr Smith from now on" stop at "Mr Smith" instead of swallowing
+// the rest of the sentence.
+var nameCaptureRE = `(` + nameTokenRE + `(?:\s+` + nameTokenRE + `)?)`
+var nameStopRE = `(?:[\s,.!?]|$)`
+
 // renameTriggers are natural-language patterns that capture a new agent name.
 // Order matters — longer phrases win to avoid double-matching shorter ones.
+// Each trigger ends with a non-capturing stop-char/EOL boundary so the
+// captured name is at most a one- or two-token noun phrase.
+//
+// The prefix phrase is wrapped in (?i:...) so matching is case-insensitive
+// for the trigger words; the name capture itself uses [A-Z]... so it requires
+// a capitalised name (and lowercase common words terminate the match cleanly).
 var renameTriggers = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)\b(?:i'?ll )?call you ([A-Za-z0-9 '\-]{1,40})\b`),
-	regexp.MustCompile(`(?i)\bfrom now on (?:you'?re|your name is) ([A-Za-z0-9 '\-]{1,40})\b`),
-	regexp.MustCompile(`(?i)\byour name is ([A-Za-z0-9 '\-]{1,40})\b`),
-	regexp.MustCompile(`(?i)\b(?:let'?s )?(?:re)?name you ([A-Za-z0-9 '\-]{1,40})\b`),
-	regexp.MustCompile(`(?i)\bchange your name to ([A-Za-z0-9 '\-]{1,40})\b`),
-	regexp.MustCompile(`(?i)\byou'?re (?:now )?(?:called )?([A-Za-z0-9 '\-]{1,40})\b`),
+	regexp.MustCompile(`(?i:\b(?:i'?ll )?call you )` + nameCaptureRE + nameStopRE),
+	regexp.MustCompile(`(?i:\bfrom now on (?:you'?re|your name is) )` + nameCaptureRE + nameStopRE),
+	regexp.MustCompile(`(?i:\byour name is )` + nameCaptureRE + nameStopRE),
+	regexp.MustCompile(`(?i:\b(?:let'?s )?(?:re)?name you )` + nameCaptureRE + nameStopRE),
+	regexp.MustCompile(`(?i:\bchange your name to )` + nameCaptureRE + nameStopRE),
+	regexp.MustCompile(`(?i:\byou'?re (?:now )?(?:called )?)` + nameCaptureRE + nameStopRE),
 }
 
 // AgentName returns the user-facing name. Falls back to personality, then
@@ -49,16 +68,22 @@ func (a *KrillAgent) AgentName() string {
 // RenameAgent sets the agent's display name and persists it. Returns the
 // reason for rejection if the name fails the allowlist, or empty string on
 // success.
+//
+// Validation runs against the FULL trimmed input, not the truncated form. The
+// previous order ("truncate then validate") meant that a 60-char input where
+// the first 40 were allowlist-clean and the last 20 were junk would silently
+// strip the junk and accept the clean prefix — that's a UX cliff: the user
+// typed garbage and we said "Got it!" anyway. Validate first; only then cap.
 func (a *KrillAgent) RenameAgent(name string) string {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return "the new name is empty"
 	}
-	if len(name) > 40 {
-		name = name[:40]
-	}
 	if !safeNameRE.MatchString(name) {
 		return "names can only contain letters, digits, spaces, hyphens, and apostrophes"
+	}
+	if len(name) > 40 {
+		name = name[:40]
 	}
 	a.cfg.AgentName = name
 	if err := persistAgentConfig(a.cfg); err != nil {
@@ -156,6 +181,7 @@ func (a *KrillAgent) addPersonaDirective(directive string) string {
 		log.Warn("persona overlay save failed", "error", err)
 		return "couldn't write the overlay to disk: " + err.Error()
 	}
+	a.invalidateOverlayCache()
 	log.Info("persona directive added", "directive", directive)
 	return ""
 }
@@ -177,6 +203,7 @@ func (a *KrillAgent) handlePersonaCommand(input string) (string, bool) {
 		return b.String(), true
 	case rest == "reset" || rest == "clear":
 		_ = saveOverlay(&PersonaOverlay{})
+		a.invalidateOverlayCache()
 		return "Persona overlay cleared. Back to the base personality.", true
 	case rest == "undo":
 		overlay := loadOverlay()
@@ -186,6 +213,7 @@ func (a *KrillAgent) handlePersonaCommand(input string) (string, bool) {
 		dropped := overlay.Directives[len(overlay.Directives)-1]
 		overlay.Directives = overlay.Directives[:len(overlay.Directives)-1]
 		_ = saveOverlay(overlay)
+		a.invalidateOverlayCache()
 		return fmt.Sprintf("Removed: %q.", dropped.Directive), true
 	default:
 		if reason := a.addPersonaDirective(rest); reason != "" {
@@ -393,21 +421,37 @@ func (a *KrillAgent) handlePersonalityCommand(input string) (string, bool) {
 	return fmt.Sprintf("Personality switched to %s. The voice will shift on the next reply.", rest), true
 }
 
-// detectEmojiPreference catches "stop with the emojis", "more emojis", etc.
-// Returns the new style or "" if no match.
+// emojiPrefRegexes match imperative requests to change emoji style. Tightened
+// from the previous substring-anywhere check to require an imperative frame
+// (use|prefer|want|stop|please/etc) followed by an emoji-style noun. Without
+// the frame, "I'm writing a paragraph with no emoji characters" would silently
+// flip the persistent style — and that mutation lives in config.yaml across
+// sessions, so a single false-positive sticks.
+var emojiPrefRegexes = []struct {
+	pattern *regexp.Regexp
+	style   string
+}{
+	{regexp.MustCompile(`(?i)\b(?:use|prefer|want|please use|switch to)\s+no\s+emoji`), "none"},
+	{regexp.MustCompile(`(?i)\b(?:stop|drop|please stop|please drop|cut|kill)\s+(?:with\s+|using\s+)?the\s+emoji`), "none"},
+	{regexp.MustCompile(`(?i)\bno more emoji`), "none"},
+	{regexp.MustCompile(`(?i)\b(?:without|skip|avoid)\s+emoji`), "none"},
+	{regexp.MustCompile(`(?i)\b(?:use|prefer|want|please use|give me|switch to)\s+more\s+emoji`), "playful"},
+	{regexp.MustCompile(`(?i)\b(?:use|prefer|want|please use|switch to)\s+playful\s+emoji`), "playful"},
+	{regexp.MustCompile(`(?i)\b(?:use|prefer|want|please use|give me|switch to)\s+(?:fewer|less|sparse)\s+emoji`), "sparse"},
+}
+
+// detectEmojiPreference returns a new emoji style when the input is a clear
+// imperative request to change it. Bounded by message length (≤14 words) so a
+// long paragraph that happens to contain "use no emoji characters" doesn't
+// trip a persistent mutation.
 func detectEmojiPreference(input string) string {
-	lower := strings.ToLower(input)
-	if strings.Contains(lower, "no emoji") || strings.Contains(lower, "stop with the emoji") ||
-		strings.Contains(lower, "drop the emoji") || strings.Contains(lower, "without emoji") {
-		return "none"
+	if len(strings.Fields(input)) > 14 {
+		return ""
 	}
-	if strings.Contains(lower, "more emoji") || strings.Contains(lower, "use emojis") ||
-		strings.Contains(lower, "playful emoji") {
-		return "playful"
-	}
-	if strings.Contains(lower, "fewer emoji") || strings.Contains(lower, "less emoji") ||
-		strings.Contains(lower, "sparse emoji") {
-		return "sparse"
+	for _, p := range emojiPrefRegexes {
+		if p.pattern.MatchString(input) {
+			return p.style
+		}
 	}
 	return ""
 }
