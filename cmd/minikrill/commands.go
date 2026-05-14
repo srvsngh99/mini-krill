@@ -414,8 +414,14 @@ func diveDaemon() error {
 	}
 
 	child := exec.Command(exe, childArgs...)
-	child.Stdout = out
-	child.Stderr = out
+	// Suppress macOS MallocStackLogging dyld warnings at the source so they
+	// never reach dive.log. Belt-and-suspenders alongside the per-subprocess
+	// env in internal/llm/cli_provider.go.
+	child.Env = append(os.Environ(), "MallocStackLogging=0")
+	// Filter writer drops residual dyld noise lines if any leak through anyway.
+	filtered := newNoiseFilter(out)
+	child.Stdout = filtered
+	child.Stderr = filtered
 	detachCommand(child)
 
 	if err := child.Start(); err != nil {
