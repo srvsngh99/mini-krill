@@ -227,6 +227,12 @@ func (a *KrillAgent) ChatFromPlatform(ctx context.Context, platform, chatID, inp
 		a.maybeStoreUserPreference(ctx, input)
 	}
 
+	// Snapshot the assistant turn the user is reacting to BEFORE any handler
+	// runs and appends its own assistant response. This is what
+	// recordFeedback's correction-classifier needs — without it, the scan
+	// would land on the response we are about to generate.
+	prevAssistant := lastAssistantBefore(a.history, len(a.history)-1)
+
 	// --- Phase 3: Classify intent via multi-intent router ---
 	route := a.router.Classify(ctx, input)
 	log.Debug("intent classified", "input_preview", truncate(input, 50), "intent", route.Intent)
@@ -261,7 +267,7 @@ func (a *KrillAgent) ChatFromPlatform(ctx context.Context, platform, chatID, inp
 
 	// --- Phase 5: Learn from interaction (adaptive personality) ---
 	if err == nil && a.brain.Memory() != nil {
-		go a.recordFeedback(context.Background(), input, response)
+		go a.recordFeedback(context.Background(), input, response, prevAssistant)
 	}
 
 	return response, err
@@ -1153,10 +1159,15 @@ func memoryKey(s string) string {
 // looks like a real correction rather than a redirection ("nope, do X instead"
 // is redirection — the negative is a discourse marker, not dissatisfaction).
 //
+// prevAssistant is the assistant turn the user is reacting to — captured by
+// the caller BEFORE the current handler appended its own response. Without
+// that snapshot, the scan would walk the latest assistant entry, which is
+// the response we just generated for this very correction.
+//
 // Rules: previous assistant turn must be a substantive response (>30 chars and
 // not a greeting), the message must be ≤8 words, and it must not contain a
 // forward verb that signals a fresh request.
-func (a *KrillAgent) looksLikeCorrection(lower string) bool {
+func looksLikeCorrection(lower, prevAssistant string) bool {
 	corrections := []string{"no", "nah", "nope", "not what i", "that's not right", "don't"}
 	hit := false
 	for _, c := range corrections {
@@ -1169,18 +1180,10 @@ func (a *KrillAgent) looksLikeCorrection(lower string) bool {
 		return false
 	}
 
-	// Need a previous assistant message that's actually a response.
-	var lastAssistant string
-	for i := len(a.history) - 1; i >= 0; i-- {
-		if a.history[i].Role == "assistant" {
-			lastAssistant = a.history[i].Content
-			break
-		}
-	}
-	if len(lastAssistant) < 30 {
+	if len(prevAssistant) < 30 {
 		return false
 	}
-	llower := strings.ToLower(strings.TrimSpace(lastAssistant))
+	llower := strings.ToLower(strings.TrimSpace(prevAssistant))
 	for _, greet := range []string{"hi", "hello", "hey", "greetings", "what's up", "buddy"} {
 		if strings.HasPrefix(llower, greet) {
 			return false
@@ -1200,9 +1203,28 @@ func (a *KrillAgent) looksLikeCorrection(lower string) bool {
 	return len(strings.Fields(lower)) <= 8
 }
 
+// lastAssistantBefore returns the most recent assistant message in history at
+// or before index `before`. Returns "" if none. Used to snapshot the prior
+// assistant turn before a handler appends a fresh response.
+func lastAssistantBefore(history []core.Message, before int) string {
+	if before >= len(history) {
+		before = len(history) - 1
+	}
+	for i := before; i >= 0; i-- {
+		if history[i].Role == "assistant" {
+			return history[i].Content
+		}
+	}
+	return ""
+}
+
 // recordFeedback silently stores interaction signals for adaptive personality evolution.
 // Runs in background goroutine - never blocks the response.
-func (a *KrillAgent) recordFeedback(_ context.Context, input, response string) {
+//
+// prevAssistant is the assistant turn the user is reacting to, snapshotted by
+// ChatFromPlatform before the current handler ran. Required for the
+// correction-vs-redirection classifier below.
+func (a *KrillAgent) recordFeedback(_ context.Context, input, response, prevAssistant string) {
 	lower := strings.ToLower(input)
 
 	// Detect sentiment signals
@@ -1235,7 +1257,7 @@ func (a *KrillAgent) recordFeedback(_ context.Context, input, response string) {
 	// count a correction when (a) the previous assistant turn was a real
 	// response (not a greeting), (b) the user message is short, and (c) the
 	// user message contains no follow-up "do this instead" verb.
-	if signal == "" && a.looksLikeCorrection(lower) {
+	if signal == "" && looksLikeCorrection(lower, prevAssistant) {
 		signal = "correction"
 	}
 

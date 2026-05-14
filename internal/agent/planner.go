@@ -88,8 +88,12 @@ func FormatPlan(plan *core.Plan) string {
 		}
 		b.WriteString(fmt.Sprintf("  %d. %s %s\n", step.ID, icon, step.Description))
 
-		// Show output for completed or failed steps
-		if step.Output != "" && (step.Status == "done" || step.Status == "failed") {
+		// Show output for completed, failed, blocked, or need_input steps.
+		// blocked/need_input carry the most user-relevant signal (what's
+		// missing) — without them in this list the formatter swallows the
+		// "needs the URL" message and shows only a [?] icon.
+		if step.Output != "" && (step.Status == "done" || step.Status == "failed" ||
+			step.Status == "blocked" || step.Status == "need_input") {
 			// Indent step output for readability
 			lines := strings.Split(step.Output, "\n")
 			for _, line := range lines {
@@ -232,10 +236,13 @@ func ExecutePlanSteps(ctx context.Context, plan *core.Plan, llm core.LLMProvider
 // genuinely can't run the step (missing input, missing tool, etc). Returns
 // "need_input", "blocked", or "" (proceed normally).
 //
-// Heuristics on the prose are also applied as a safety net — older models
-// don't always honour the explicit token but tend to write recognisable
-// "cannot execute this step yet" prose. Better to over-detect blockers than
-// to mark hallucinated success as a real outcome.
+// `NEED_INPUT:` / `BLOCKED:` are the durable contract — substring-matched
+// anywhere in the output. The prose heuristics are a safety net for older
+// models that don't honour the tokens; they are deliberately anchored to the
+// start of the trimmed output (or any line in the first ~5 lines) so a
+// legitimate paragraph that quotes a refusal mid-prose ("Draft email: please
+// send the user a confirmation") doesn't trip them. A whole-step refusal
+// almost always opens with the refusal phrase — that's the shape we want.
 func detectStepBlocker(output string) string {
 	upper := strings.ToUpper(output)
 	if strings.Contains(upper, "NEED_INPUT:") {
@@ -244,23 +251,31 @@ func detectStepBlocker(output string) string {
 	if strings.Contains(upper, "BLOCKED:") {
 		return "blocked"
 	}
-	lower := strings.ToLower(output)
-	needInputPhrases := []string{
+	needInputPrefixes := []string{
 		"cannot execute this step yet",
 		"can't execute this step yet",
 		"can't execute this yet",
 		"cannot execute this yet",
 		"no source material was provided",
 		"no url was provided",
-		"please send the",
 		"i still need",
-		"still no",
+		"please send the video",
+		"please send the url",
+		"please send the link",
 		"send the video link",
 		"send the url",
 	}
-	for _, p := range needInputPhrases {
-		if strings.Contains(lower, p) {
-			return "need_input"
+	// Check the first 5 lines: a refusal typically opens the step.
+	lines := strings.Split(output, "\n")
+	if len(lines) > 5 {
+		lines = lines[:5]
+	}
+	for _, line := range lines {
+		l := strings.ToLower(strings.TrimSpace(line))
+		for _, p := range needInputPrefixes {
+			if strings.HasPrefix(l, p) {
+				return "need_input"
+			}
 		}
 	}
 	return ""

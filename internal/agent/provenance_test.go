@@ -1,6 +1,9 @@
 package agent
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestEnforceProvenance_KeepsHonestTag(t *testing.T) {
 	log := newTurnFetchLog()
@@ -20,10 +23,10 @@ func TestEnforceProvenance_StripsFabricatedTag(t *testing.T) {
 	if removed != 1 {
 		t.Fatalf("removed = %d, want 1", removed)
 	}
-	if !contains(got, "⚠") {
+	if !strings.Contains(got, "⚠") {
 		t.Fatalf("expected warning prefix, got: %q", got)
 	}
-	if contains(got, "[web:") {
+	if strings.Contains(got, "[web:") {
 		t.Fatalf("fabricated tag should be stripped, got: %q", got)
 	}
 }
@@ -35,10 +38,10 @@ func TestEnforceProvenance_MixedTags(t *testing.T) {
 	if removed != 1 {
 		t.Fatalf("removed = %d, want 1", removed)
 	}
-	if !contains(got, "[web:real.com/x]") {
+	if !strings.Contains(got, "[web:real.com/x]") {
 		t.Fatalf("honest tag should remain, got: %q", got)
 	}
-	if contains(got, "fake.com") {
+	if strings.Contains(got, "fake.com") {
 		t.Fatalf("fabricated tag should be gone, got: %q", got)
 	}
 }
@@ -63,17 +66,4 @@ func TestNormalizeURL(t *testing.T) {
 			t.Errorf("normalizeURL(%q) = %q, want %q", in, got, want)
 		}
 	}
-}
-
-func contains(haystack, needle string) bool {
-	return len(haystack) >= len(needle) && (haystack == needle || (len(needle) > 0 && stringIndex(haystack, needle) >= 0))
-}
-
-func stringIndex(s, substr string) int {
-	for i := 0; i+len(substr) <= len(s); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
 }

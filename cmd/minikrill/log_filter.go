@@ -48,6 +48,24 @@ func (f *noiseFilter) Write(p []byte) (int, error) {
 	return original, nil
 }
 
+// Flush emits any bytes still buffered after the last newline. The daemon
+// process tends to end every line with `\n`, so this is mostly a contract
+// nicety — but if a child exits mid-line (panic, segfault) without a
+// trailing newline, those bytes would otherwise vanish silently.
+func (f *noiseFilter) Flush() error {
+	if f.buf.Len() == 0 {
+		return nil
+	}
+	leftover := f.buf.Bytes()
+	if isNoise(leftover) {
+		f.buf.Reset()
+		return nil
+	}
+	_, err := f.w.Write(leftover)
+	f.buf.Reset()
+	return err
+}
+
 func isNoise(line []byte) bool {
 	for _, pat := range dyldNoisePatterns {
 		if pat.Match(line) {
