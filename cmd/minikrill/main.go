@@ -164,6 +164,8 @@ func initStack(quiet bool) (*krillStack, error) {
 		LLM:       providerMgr,
 		DataDir:   config.DataDir(),
 	})
+	// Read-only "eyes on self" skills: read source + tail logs.
+	skillReg.RegisterSelfEyes()
 
 	// Register feature skills (YouTube, reminders, web, research, notify)
 	reminderStore, err := reminder.NewStore(filepath.Join(config.DataDir(), "reminders.jsonl"))

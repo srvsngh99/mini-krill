@@ -17,7 +17,7 @@ var Version = "0.1.0"
 
 // Message represents a single chat message in a conversation.
 type Message struct {
-	Role    string `json:"role"`    // system, user, assistant
+	Role    string `json:"role"` // system, user, assistant
 	Content string `json:"content"`
 }
 
@@ -32,10 +32,10 @@ type ChatOptions struct {
 // ChatOption is a functional option for ChatOptions.
 type ChatOption func(*ChatOptions)
 
-func WithTemperature(t float64) ChatOption  { return func(o *ChatOptions) { o.Temperature = t } }
-func WithMaxTokens(n int) ChatOption        { return func(o *ChatOptions) { o.MaxTokens = n } }
-func WithModel(m string) ChatOption         { return func(o *ChatOptions) { o.Model = m } }
-func WithSystemPrompt(s string) ChatOption  { return func(o *ChatOptions) { o.SystemPrompt = s } }
+func WithTemperature(t float64) ChatOption { return func(o *ChatOptions) { o.Temperature = t } }
+func WithMaxTokens(n int) ChatOption       { return func(o *ChatOptions) { o.MaxTokens = n } }
+func WithModel(m string) ChatOption        { return func(o *ChatOptions) { o.Model = m } }
+func WithSystemPrompt(s string) ChatOption { return func(o *ChatOptions) { o.SystemPrompt = s } }
 
 // ApplyOptions merges functional options into a ChatOptions with defaults.
 func ApplyOptions(opts []ChatOption) ChatOptions {
@@ -79,8 +79,8 @@ type MemoryEntry struct {
 	Key         string    `json:"key"`
 	Value       string    `json:"value"`
 	Tags        []string  `json:"tags,omitempty"`
-	Scope       string    `json:"scope,omitempty"`        // "user", "project", "group", "task-outcome", "system"
-	Source      string    `json:"source,omitempty"`        // "user-explicit", "auto-learned", "task-outcome", "reflection", "feedback"
+	Scope       string    `json:"scope,omitempty"`  // "user", "project", "group", "task-outcome", "system"
+	Source      string    `json:"source,omitempty"` // "user-explicit", "auto-learned", "task-outcome", "reflection", "feedback"
 	AccessCount int       `json:"access_count,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	AccessedAt  time.Time `json:"accessed_at"`
@@ -130,6 +130,7 @@ type Memory interface {
 type ConversationStore interface {
 	SaveTurn(channel, role, content string) error
 	LoadRecent(channel string, n int) ([]Message, error)
+	Search(channel, query string, since time.Time, limit int) ([]Message, error)
 	Close() error
 }
 

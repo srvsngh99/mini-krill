@@ -33,34 +33,36 @@ const unifiedConversationChannel = "unified"
 
 // approvalRegex matches obvious approval shorthand on the fast path so we
 // don't burn an LLM call on "yes". Anything not matched here OR by
-// rejectionRegex falls through to the LLM-judged classifier.
-var approvalRegex = regexp.MustCompile(`^(?:y|yes|yea|yeah|yep|yup|ya|sure|ok|okay|k|👍|do it|go|go ahead|let'?s go|lgtm|proceed|approve|approved|fine|alright|sounds good)[\s\.!]*$`)
+// rejectionRegex falls through to the LLM-judged classifier. Emoji acks
+// (👍, ✅, ✔, etc.) are first-class — that's how Telegram users approve.
+var approvalRegex = regexp.MustCompile(`^(?:y|yes|yea|yeah|yep|yup|ya|sure|ok|okay|k|👍|✅|✔|✔️|🚀|💯|🟢|do it|go|go ahead|let'?s go|lgtm|proceed|approve|approved|fine|alright|sounds good)[\s\.!]*$`)
 
-// rejectionRegex covers obvious "scrap it" shorthand.
-var rejectionRegex = regexp.MustCompile(`^(?:n|no|nah|nope|cancel|cancelled|stop|abort|reject|rejected|skip|nevermind|never mind|forget it|don'?t)[\s\.!]*$`)
+// rejectionRegex covers obvious "scrap it" shorthand, including emoji nopes.
+var rejectionRegex = regexp.MustCompile(`^(?:n|no|nah|nope|cancel|cancelled|stop|abort|reject|rejected|skip|nevermind|never mind|forget it|don'?t|👎|❌|✖|🛑|⛔)[\s\.!]*$`)
 
 // KrillAgent is the main agent that implements core.Agent.
 // It is the executive function of the krill brain - classifying intent,
 // planning tasks, gating approval, and orchestrating execution.
 type KrillAgent struct {
-	llm          core.LLMProvider
-	brain        core.Brain
-	skills       core.SkillRegistry
-	mcp          core.MCPRegistry
-	cfg          config.AgentConfig
-	router       *IntentRouter
-	channel      string // durable conversation channel; default is unified across interfaces
-	platform     string // current chat platform (telegram, discord, cli, tui)
-	chatID       string // current chat ID for background task notifications
-	history      []core.Message
-	pendingPlan  *core.Plan
-	subMgr       *SubKrillManager
-	taskStore    *TaskStore
-	taskRunner   *TaskRunner
-	turnFetches  *turnFetchLog  // per-turn provenance ledger; reset on each ChatFromPlatform call
-	affinity     *AffinityStore // task-type plan-affinity learner
-	pendingClstr TaskCluster    // cluster while a plan is awaiting approval
-	mu           sync.Mutex
+	llm              core.LLMProvider
+	brain            core.Brain
+	skills           core.SkillRegistry
+	mcp              core.MCPRegistry
+	cfg              config.AgentConfig
+	router           *IntentRouter
+	channel          string // durable conversation channel; default is unified across interfaces
+	platform         string // current chat platform (telegram, discord, cli, tui)
+	chatID           string // current chat ID for background task notifications
+	history          []core.Message
+	pendingPlan      *core.Plan
+	subMgr           *SubKrillManager
+	taskStore        *TaskStore
+	taskRunner       *TaskRunner
+	turnFetches      *turnFetchLog  // per-turn provenance ledger; reset on each ChatFromPlatform call
+	affinity         *AffinityStore // task-type plan-affinity learner
+	pendingClstr     TaskCluster    // cluster while a plan is awaiting approval
+	cachedEmojiStyle string         // cached read of cfg.Brain.EmojiStyle; refreshed on /emoji
+	mu               sync.Mutex
 }
 
 // New creates a fresh KrillAgent wired to all subsystems.
@@ -215,6 +217,49 @@ func (a *KrillAgent) ChatFromPlatform(ctx context.Context, platform, chatID, inp
 	a.turnFetches = newTurnFetchLog()
 
 	if response, handled := a.handleProviderCommand(input); handled {
+		a.saveTurn("user", input)
+		a.saveTurn("assistant", response)
+		return response, nil
+	}
+
+	// Identity / personality / persona / emoji slash commands. These run
+	// before plan-approval so the user can adjust voice mid-pending-plan.
+	if response, handled := a.handleIdentityCommand(input); handled {
+		a.saveTurn("user", input)
+		a.saveTurn("assistant", response)
+		return response, nil
+	}
+
+	// /recall scrollback — also runs ahead of pending-plan check so the user
+	// can ask "what did I say yesterday" without approving a stale plan first.
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(input)), "/recall") {
+		response, handled := a.handleRecallCommand(input)
+		if handled {
+			a.saveTurn("user", input)
+			a.saveTurn("assistant", response)
+			return response, nil
+		}
+	}
+	if response, handled := a.handleNaturalRecall(input); handled {
+		a.saveTurn("user", input)
+		a.saveTurn("assistant", response)
+		return response, nil
+	}
+
+	// Natural-language rename ("call you Edwin", "your name is Sage", etc).
+	// Runs ahead of intent classification so a chat that contains a rename
+	// gets the rename applied immediately rather than disappearing into a
+	// long handleChat round trip.
+	if response, handled := a.handleNaturalRename(input); handled {
+		a.saveTurn("user", input)
+		a.saveTurn("assistant", response)
+		return response, nil
+	}
+
+	// Natural-language emoji style change ("stop with the emojis", "more emojis").
+	if newStyle := detectEmojiPreference(input); newStyle != "" {
+		_ = a.SetEmojiStyle(newStyle)
+		response := "Got it — emoji style: " + newStyle + "."
 		a.saveTurn("user", input)
 		a.saveTurn("assistant", response)
 		return response, nil
@@ -895,6 +940,14 @@ func (a *KrillAgent) handleChat(ctx context.Context) (string, error) {
 		enriched = insertBeforeLast(enriched, styleMsg)
 	}
 
+	// User-applied persona overlay (highest priority) and emoji style.
+	if overlay := buildOverlayDirective(); overlay != "" {
+		enriched = insertBeforeLast(enriched, core.Message{Role: "system", Content: overlay})
+	}
+	if emojiDirective := buildEmojiDirective(a.emojiStyle()); emojiDirective != "" {
+		enriched = insertBeforeLast(enriched, core.Message{Role: "system", Content: emojiDirective})
+	}
+
 	// Inject provenance instruction so the model self-tags external claims.
 	provMsg := core.Message{Role: "system", Content: ProvenanceInstruction}
 	enriched = insertBeforeLast(enriched, provMsg)
@@ -910,6 +963,7 @@ func (a *KrillAgent) handleChat(ctx context.Context) (string, error) {
 	if removed > 0 {
 		log.Warn("stripped fabricated provenance tags", "count", removed)
 	}
+	cleaned = applyEmojiStyle(cleaned, a.emojiStyle())
 
 	a.appendMessage(core.Message{Role: "assistant", Content: cleaned})
 	a.saveTurn("assistant", cleaned)
@@ -920,6 +974,36 @@ func (a *KrillAgent) handleChat(ctx context.Context) (string, error) {
 	)
 
 	return cleaned, nil
+}
+
+// buildOverlayDirective composes a system message from the active persona
+// overlay. Returns "" when no directives are present.
+func buildOverlayDirective() string {
+	dirs := OverlayDirectives()
+	if len(dirs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("User-applied style overlay (highest priority — follow these over your base personality):\n")
+	for _, d := range dirs {
+		b.WriteString("- ")
+		b.WriteString(d)
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// buildEmojiDirective renders the per-style instruction. "playful" is no-op —
+// the personality decides emoji on its own.
+func buildEmojiDirective(style string) string {
+	switch style {
+	case "none":
+		return "Do not use any emoji in your response."
+	case "sparse":
+		return "Use at most one emoji per response, and only when it adds meaning. No decorative emoji."
+	default:
+		return ""
+	}
 }
 
 // handleSelfSkill dispatches a self:* skill, either returning its result
@@ -1430,7 +1514,7 @@ func (a *KrillAgent) recordFeedback(_ context.Context, input, response, prevAssi
 	// Detect sentiment signals
 	var signal string
 
-	// Positive signals
+	// Positive signals (text + emoji)
 	positives := []string{"thanks", "thank you", "great", "perfect", "awesome", "love it",
 		"exactly", "nice", "good job", "well done", "brilliant", "amazing"}
 	for _, p := range positives {
@@ -1439,12 +1523,28 @@ func (a *KrillAgent) recordFeedback(_ context.Context, input, response, prevAssi
 			break
 		}
 	}
+	if signal == "" {
+		for _, e := range []string{"👍", "❤️", "🙌", "🔥", "💯", "✅", "😀", "😊"} {
+			if strings.Contains(input, e) {
+				signal = "positive"
+				break
+			}
+		}
+	}
 
 	// Negative signals - real dissatisfaction only
 	if signal == "" {
 		negatives := []string{"wrong", "terrible", "useless", "bad", "incorrect", "awful", "broken", "stupid"}
 		for _, n := range negatives {
 			if containsWord(lower, n) {
+				signal = "negative"
+				break
+			}
+		}
+	}
+	if signal == "" {
+		for _, e := range []string{"👎", "🙄", "😒", "😞", "❌", "🤦"} {
+			if strings.Contains(input, e) {
 				signal = "negative"
 				break
 			}

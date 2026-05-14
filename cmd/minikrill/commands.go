@@ -232,6 +232,54 @@ var initCmd = &cobra.Command{
 			fmt.Println(cDim + "  Discord bot saved! Run " + cReset + "minikrill dive" + cDim + " to start it." + cReset)
 		}
 
+		// Identity step: pick a personality and name the agent.
+		fmt.Println()
+		fmt.Println(cBCyan + "  Pick your agent's voice:" + cReset)
+		fmt.Println()
+		personalityIdx, _ := promptSelect([]selectItem{
+			{label: "Buddy", desc: "friendly, casual, low-formality (recommended for new users)"},
+			{label: "Jarvis", desc: "refined, dry wit, addresses you as sir/ma'am"},
+			{label: "Friday", desc: "fast, modern, business-like"},
+			{label: "Samantha", desc: "warm, curious, conversational"},
+			{label: "Tars", desc: "laconic, honest, adjustable humour"},
+			{label: "Krill", desc: "the original — tiny crustacean, oceanic metaphors"},
+			{label: "Skip", desc: "use the default (Buddy); change later with `minikrill personality switch <name>`"},
+		})
+		personalities := []string{"buddy", "jarvis", "friday", "samantha", "tars", "krill", ""}
+		if personalityIdx >= 0 && personalityIdx < len(personalities) && personalities[personalityIdx] != "" {
+			cfg.Agent.Personality = personalities[personalityIdx]
+		}
+		if cfg.Agent.Personality == "" {
+			cfg.Agent.Personality = "buddy"
+		}
+
+		defaultName := strings.Title(cfg.Agent.Personality)
+		fmt.Println()
+		nameAns := ask(scanner, cCyan+"  Name your agent ["+defaultName+"]: "+cReset)
+		nameAns = strings.TrimSpace(nameAns)
+		if nameAns == "" {
+			nameAns = defaultName
+		}
+		cfg.Agent.AgentName = nameAns
+
+		// Emoji style
+		fmt.Println()
+		fmt.Println(cBCyan + "  Emoji style:" + cReset)
+		fmt.Println()
+		emojiIdx, _ := promptSelect([]selectItem{
+			{label: "Sparse", desc: "at most one per response (recommended)"},
+			{label: "None", desc: "no emoji at all"},
+			{label: "Playful", desc: "let the personality decide"},
+		})
+		switch emojiIdx {
+		case 1:
+			cfg.Brain.EmojiStyle = "none"
+		case 2:
+			cfg.Brain.EmojiStyle = "playful"
+		default:
+			cfg.Brain.EmojiStyle = "sparse"
+		}
+
 		if err := config.EnsureDataDir(); err != nil {
 			return fmt.Errorf("create data dir: %w", err)
 		}

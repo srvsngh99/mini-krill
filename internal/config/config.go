@@ -31,6 +31,7 @@ type Config struct {
 // AgentConfig controls the main krill agent behaviour.
 type AgentConfig struct {
 	Name          string `yaml:"name"`
+	AgentName     string `yaml:"agent_name"`  // user-chosen name shown to user (default: personality name)
 	Personality   string `yaml:"personality"` // active personality profile (default: "krill")
 	MaxSubKrills  int    `yaml:"max_sub_krills"`
 	PlanApproval  string `yaml:"-"` // legacy: "auto"|"always"|"never"; superseded by AutonomyFloor
@@ -42,6 +43,7 @@ type AgentConfig struct {
 // as either a bool (legacy) or string (new), and autonomy_floor as the new field.
 type agentConfigRaw struct {
 	Name          string      `yaml:"name"`
+	AgentName     string      `yaml:"agent_name"`
 	Personality   string      `yaml:"personality"`
 	MaxSubKrills  int         `yaml:"max_sub_krills"`
 	PlanApproval  interface{} `yaml:"plan_approval"`
@@ -59,6 +61,7 @@ func (a *AgentConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		return err
 	}
 	a.Name = raw.Name
+	a.AgentName = raw.AgentName
 	a.Personality = raw.Personality
 	a.MaxSubKrills = raw.MaxSubKrills
 	a.RecoveryTurns = raw.RecoveryTurns
@@ -85,12 +88,14 @@ func (a *AgentConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 func (a AgentConfig) MarshalYAML() (interface{}, error) {
 	return &struct {
 		Name          string `yaml:"name"`
+		AgentName     string `yaml:"agent_name,omitempty"`
 		Personality   string `yaml:"personality,omitempty"`
 		MaxSubKrills  int    `yaml:"max_sub_krills"`
 		AutonomyFloor string `yaml:"autonomy_floor"`
 		RecoveryTurns int    `yaml:"recovery_turns,omitempty"`
 	}{
 		Name:          a.Name,
+		AgentName:     a.AgentName,
 		Personality:   a.Personality,
 		MaxSubKrills:  a.MaxSubKrills,
 		AutonomyFloor: a.AutonomyFloor,
@@ -113,6 +118,7 @@ type BrainConfig struct {
 	DataDir       string `yaml:"data_dir"`
 	SoulFile      string `yaml:"soul_file"`
 	Personality   string `yaml:"personality"` // active personality profile name
+	EmojiStyle    string `yaml:"emoji_style"` // "none" | "sparse" (default) | "playful"
 	MaxMemories   int    `yaml:"max_memories"`
 	HeartbeatSec  int    `yaml:"heartbeat_interval_sec"`
 	RecoveryTurns int    `yaml:"recovery_turns"` // turns to load on cold start (default 10)
@@ -319,6 +325,18 @@ func fillDefaults(cfg *Config) {
 	}
 	if cfg.Brain.RecoveryTurns == 0 {
 		cfg.Brain.RecoveryTurns = 10
+	}
+	switch cfg.Brain.EmojiStyle {
+	case "none", "sparse", "playful":
+		// valid
+	default:
+		// Preserve krill's original behaviour for users on the krill personality;
+		// everyone else defaults to sparse.
+		if cfg.Agent.Personality == "krill" {
+			cfg.Brain.EmojiStyle = "playful"
+		} else {
+			cfg.Brain.EmojiStyle = "sparse"
+		}
 	}
 }
 
