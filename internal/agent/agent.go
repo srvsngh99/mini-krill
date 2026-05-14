@@ -57,6 +57,7 @@ type KrillAgent struct {
 	subMgr      *SubKrillManager
 	taskStore   *TaskStore
 	taskRunner  *TaskRunner
+	turnFetches *turnFetchLog // per-turn provenance ledger; reset on each ChatFromPlatform call
 	mu          sync.Mutex
 }
 
@@ -88,19 +89,6 @@ func New(cfg config.AgentConfig, llm core.LLMProvider, brain core.Brain, skills 
 		},
 		subMgr: NewSubKrillManager(cfg, llm),
 	}
-}
-
-// SetChannel is kept for platform integrations. Mini Krill intentionally ignores
-// the requested platform channel and stores all turns in one unified channel so
-// users can move between CLI, TUI, Telegram, and Discord without losing context.
-func (a *KrillAgent) SetChannel(channel string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if ch := strings.TrimSpace(channel); ch != "" && ch != unifiedConversationChannel {
-		log.Debug("SetChannel called with non-unified channel; using unified channel instead",
-			"requested", ch, "actual", unifiedConversationChannel)
-	}
-	a.channel = unifiedConversationChannel
 }
 
 // SetPlatform is retained for tests that don't go through ChatFromPlatform.
@@ -203,6 +191,9 @@ func (a *KrillAgent) ChatFromPlatform(ctx context.Context, platform, chatID, inp
 
 	a.platform = platform
 	a.chatID = chatID
+	// Fresh provenance ledger per turn — every reply is checked against URLs
+	// actually fetched during this single ChatFromPlatform invocation.
+	a.turnFetches = newTurnFetchLog()
 
 	if response, handled := a.handleProviderCommand(input); handled {
 		a.saveTurn("user", input)
@@ -698,21 +689,31 @@ func (a *KrillAgent) handleChat(ctx context.Context) (string, error) {
 		enriched = insertBeforeLast(enriched, styleMsg)
 	}
 
+	// Inject provenance instruction so the model self-tags external claims.
+	provMsg := core.Message{Role: "system", Content: ProvenanceInstruction}
+	enriched = insertBeforeLast(enriched, provMsg)
+
 	resp, err := a.llm.Chat(ctx, enriched)
 	if err != nil {
 		log.Error("LLM chat failed", "error", err)
 		return "This krill's neural link is fuzzy right now. Could you try again?", nil
 	}
 
-	a.appendMessage(core.Message{Role: "assistant", Content: resp.Content})
-	a.saveTurn("assistant", resp.Content)
+	// Strip any [web:...] tags that don't match a real fetch this turn.
+	cleaned, removed := EnforceProvenance(resp.Content, a.turnFetches)
+	if removed > 0 {
+		log.Warn("stripped fabricated provenance tags", "count", removed)
+	}
+
+	a.appendMessage(core.Message{Role: "assistant", Content: cleaned})
+	a.saveTurn("assistant", cleaned)
 	log.Debug("chat response generated",
 		"tokens_in", resp.PromptTokens,
 		"tokens_out", resp.CompletionTokens,
 		"model", resp.Model,
 	)
 
-	return resp.Content, nil
+	return cleaned, nil
 }
 
 // handleSelfSkill dispatches a self:* skill, either returning its result
@@ -849,8 +850,14 @@ func (a *KrillAgent) handleToolTask(ctx context.Context, input, toolName string)
 	log.Info("direct tool invocation", "tool", toolName)
 	result, err := skill.Execute(ctx, input, a.llm)
 	if err != nil {
+		// Surface the real error to the user. Falling back to chat would let
+		// the LLM hallucinate a "permission denied" or "blocked" excuse —
+		// which is exactly what bug #6 traced from the 2026-05-09/10 sessions.
 		log.Error("tool execution failed", "tool", toolName, "error", err)
-		return a.handleChat(ctx)
+		msg := fmt.Sprintf("Tried %s but it failed: %v", toolName, err)
+		a.appendMessage(core.Message{Role: "assistant", Content: msg})
+		a.saveTurn("assistant", msg)
+		return msg, nil
 	}
 
 	if result == "" {
@@ -864,6 +871,14 @@ func (a *KrillAgent) handleToolTask(ctx context.Context, input, toolName string)
 		return result, nil
 	}
 
+	// Provenance: record every URL the tool surfaced as "actually fetched
+	// this turn" so the post-processor can validate [web:...] tags later.
+	if toolName == "search" || toolName == "web" || toolName == "youtube" || toolName == "research" {
+		for _, u := range extractURLs(result) {
+			a.turnFetches.Record(u)
+		}
+	}
+
 	// For content skills (search, web, youtube, research), wrap through LLM
 	enriched := a.brain.EnrichMessages(a.history)
 	toolCtx := core.Message{
@@ -871,6 +886,7 @@ func (a *KrillAgent) handleToolTask(ctx context.Context, input, toolName string)
 		Content: fmt.Sprintf("Here are the results from the %s tool. Use them to answer the user's question:\n\n%s", toolName, result),
 	}
 	enriched = insertBeforeLast(enriched, toolCtx)
+	enriched = insertBeforeLast(enriched, core.Message{Role: "system", Content: ProvenanceInstruction})
 	resp, err := a.llm.Chat(ctx, enriched)
 	if err != nil {
 		// Fallback: return raw tool output
@@ -878,9 +894,29 @@ func (a *KrillAgent) handleToolTask(ctx context.Context, input, toolName string)
 		a.saveTurn("assistant", result)
 		return result, nil
 	}
-	a.appendMessage(core.Message{Role: "assistant", Content: resp.Content})
-	a.saveTurn("assistant", resp.Content)
-	return resp.Content, nil
+	cleaned, removed := EnforceProvenance(resp.Content, a.turnFetches)
+	if removed > 0 {
+		log.Warn("stripped fabricated provenance tags", "count", removed, "tool", toolName)
+	}
+	a.appendMessage(core.Message{Role: "assistant", Content: cleaned})
+	a.saveTurn("assistant", cleaned)
+	return cleaned, nil
+}
+
+// extractURLs pulls bare URLs from arbitrary text using the same pattern as
+// the router. Used by the provenance bookkeeper to record which URLs a tool
+// surfaced this turn.
+func extractURLs(s string) []string {
+	matches := urlPattern.FindAllString(s, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	// Strip trailing punctuation that often glues onto URLs in prose.
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		out = append(out, strings.TrimRight(m, ").,;:\"'"))
+	}
+	return out
 }
 
 // handleDiagnose answers error/debugging questions directly with a diagnostic focus.
@@ -1113,6 +1149,57 @@ func memoryKey(s string) string {
 	return key
 }
 
+// looksLikeCorrection returns true when a short, negative-leading user message
+// looks like a real correction rather than a redirection ("nope, do X instead"
+// is redirection — the negative is a discourse marker, not dissatisfaction).
+//
+// Rules: previous assistant turn must be a substantive response (>30 chars and
+// not a greeting), the message must be ≤8 words, and it must not contain a
+// forward verb that signals a fresh request.
+func (a *KrillAgent) looksLikeCorrection(lower string) bool {
+	corrections := []string{"no", "nah", "nope", "not what i", "that's not right", "don't"}
+	hit := false
+	for _, c := range corrections {
+		if containsWord(lower, c) {
+			hit = true
+			break
+		}
+	}
+	if !hit {
+		return false
+	}
+
+	// Need a previous assistant message that's actually a response.
+	var lastAssistant string
+	for i := len(a.history) - 1; i >= 0; i-- {
+		if a.history[i].Role == "assistant" {
+			lastAssistant = a.history[i].Content
+			break
+		}
+	}
+	if len(lastAssistant) < 30 {
+		return false
+	}
+	llower := strings.ToLower(strings.TrimSpace(lastAssistant))
+	for _, greet := range []string{"hi", "hello", "hey", "greetings", "what's up", "buddy"} {
+		if strings.HasPrefix(llower, greet) {
+			return false
+		}
+	}
+
+	// Forward verbs signal "do X instead" — redirection, not correction.
+	forwardVerbs := []string{"find", "search", "show", "get", "give", "tell", "explain",
+		"build", "make", "do", "fix", "check", "look", "send", "write"}
+	for _, v := range forwardVerbs {
+		if containsWord(lower, v) {
+			return false
+		}
+	}
+
+	// Short and negative-leading is a real correction.
+	return len(strings.Fields(lower)) <= 8
+}
+
 // recordFeedback silently stores interaction signals for adaptive personality evolution.
 // Runs in background goroutine - never blocks the response.
 func (a *KrillAgent) recordFeedback(_ context.Context, input, response string) {
@@ -1142,15 +1229,14 @@ func (a *KrillAgent) recordFeedback(_ context.Context, input, response string) {
 		}
 	}
 
-	// Correction signals - user is correcting, not angry
-	if signal == "" {
-		corrections := []string{"no", "nah", "nope", "not what i", "that's not right", "don't"}
-		for _, c := range corrections {
-			if containsWord(lower, c) {
-				signal = "correction"
-				break
-			}
-		}
+	// Correction signals - user is correcting, not redirecting.
+	// "Nope just find me AI digest" *starts* with a negative but immediately
+	// pivots to a forward ask — that's redirection, not correction. We only
+	// count a correction when (a) the previous assistant turn was a real
+	// response (not a greeting), (b) the user message is short, and (c) the
+	// user message contains no follow-up "do this instead" verb.
+	if signal == "" && a.looksLikeCorrection(lower) {
+		signal = "correction"
 	}
 
 	// Engagement signals
@@ -1246,7 +1332,6 @@ func (a *KrillAgent) maybeAutoEvolveStyle(ctx context.Context, latestKey, latest
 		SetBoolPref(ctx, mem, PrefStyleTerse, true)
 	}
 }
-
 
 // saveTurn persists a single turn to the durable conversation store.
 // Runs inline (not goroutine) to ensure ordering.

@@ -139,12 +139,22 @@ var searchTriggers = []string{
 	"current price of", "price of", "stock price",
 }
 
-// freshnessKeywords pair a topic with a time-cue. When both are present we
-// route to the search tool automatically — the user wants up-to-date info,
-// not whatever the model remembers.
+// freshnessKeywords pair a topic with a time-cue. When both are present (along
+// with an externalInfoNouns hit) we route to the search tool automatically —
+// the user wants up-to-date info, not whatever the model remembers.
 var freshnessKeywords = []string{
 	"today", "this week", "this month", "right now", "latest", "current",
 	"recent", "just announced", "breaking", "as of now", "live",
+}
+
+// externalInfoNouns are nouns that, paired with a freshness keyword, strongly
+// suggest the user wants fresh external information (search territory). Without
+// one of these the freshness word might be incidental ("the current state of
+// my plan", "right now I'm thinking…").
+var externalInfoNouns = []string{
+	"news", "update", "updates", "release", "version", "price", "stock",
+	"announcement", "event", "headlines", "digest", "article", "blog",
+	"trend", "trends", "happening",
 }
 
 // sysInfoTriggers route directly to the sysinfo skill.
@@ -230,10 +240,12 @@ func (r *IntentRouter) Classify(ctx context.Context, input string) RouteResult {
 	if matchesAny(lower, searchTriggers) {
 		return RouteResult{Intent: IntentToolTask, ToolName: "search"}
 	}
-	// Freshness auto-route: a time cue ("today", "latest") plus a topic noun
-	// nearly always means "go search the web". Catches things like
-	// "find me some AI digest from today" that don't match an explicit search trigger.
-	if matchesAny(lower, freshnessKeywords) && len(strings.Fields(lower)) >= 3 {
+	// Freshness auto-route: a time cue ("today", "latest") AND a noun-phrase
+	// suggesting external info nearly always means "go search the web".
+	// Catches "find me some AI digest from today" without misfiring on
+	// "what's the current state of my plan" or "right now I'm thinking…".
+	if matchesAny(lower, freshnessKeywords) && matchesAny(lower, externalInfoNouns) &&
+		len(strings.Fields(lower)) >= 3 {
 		return RouteResult{Intent: IntentToolTask, ToolName: "search"}
 	}
 	// URL detection: YouTube vs generic web
