@@ -15,7 +15,6 @@ package agent
 import (
 	"crypto/sha1"
 	"encoding/hex"
-	"regexp"
 	"strings"
 )
 
@@ -94,9 +93,6 @@ func fileExtensionMatch(exts []string) func(string) bool {
 		return false
 	}
 }
-
-// fieldsRegex collapses runs of whitespace for cheap word-boundary matching.
-var fieldsRegex = regexp.MustCompile(`\s+`)
 
 // ClusterFor returns the TaskCluster for an arbitrary user input.
 //
