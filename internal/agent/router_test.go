@@ -325,6 +325,29 @@ func TestShouldRequireApprovalNever(t *testing.T) {
 	}
 }
 
+// TestShouldRequireApproval_ActStillGatesDestructive locks in the safety
+// property added in v0.1.1: no autonomy floor (including the new "act"
+// default) authorises destructive plans silently. This was previously only
+// covered transitively under "auto" — now it has its own assertion.
+func TestShouldRequireApproval_ActStillGatesDestructive(t *testing.T) {
+	a := New(
+		config.AgentConfig{Name: "test", AutonomyFloor: "act"},
+		&MockProvider{chatResponse: "CHAT"},
+		&mockBrain{},
+		&mockSkillRegistry{},
+		&mockMCPReg{},
+	)
+	plan := &core.Plan{
+		Task: "clean up",
+		Steps: []core.PlanStep{
+			{ID: 1, Description: "delete file unused.go"},
+		},
+	}
+	if !a.shouldRequireApproval(context.Background(), plan) {
+		t.Error("act floor must still gate destructive plans")
+	}
+}
+
 func TestShouldRequireApprovalAutoSmallSafe(t *testing.T) {
 	a := New(
 		config.AgentConfig{Name: "test", PlanApproval: "auto"},

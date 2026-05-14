@@ -67,7 +67,13 @@ var objectClassRules = []struct {
 	{func(s string) bool { return youtubePattern.MatchString(s) }, "youtube"},
 	{func(s string) bool { return strings.Contains(s, "github.com") }, "github"},
 	{func(s string) bool { return strings.Contains(s, "stackoverflow.com") }, "stackoverflow"},
-	{func(s string) bool { return strings.HasSuffix(strings.Fields(s)[len(strings.Fields(s))-1], ".pdf") }, "pdf"},
+	{func(s string) bool {
+		fields := strings.Fields(s)
+		if len(fields) == 0 {
+			return false
+		}
+		return strings.HasSuffix(fields[len(fields)-1], ".pdf")
+	}, "pdf"},
 	{func(s string) bool { return urlPattern.MatchString(s) }, "web"},
 	{fileExtensionMatch([]string{".go", ".py", ".js", ".ts", ".rs", ".java", ".c", ".cpp", ".rb"}), "code-file"},
 	{fileExtensionMatch([]string{".yaml", ".yml", ".toml", ".json", ".env", ".ini"}), "config-file"},

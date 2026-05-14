@@ -59,7 +59,6 @@ type KrillAgent struct {
 	taskRunner   *TaskRunner
 	turnFetches  *turnFetchLog  // per-turn provenance ledger; reset on each ChatFromPlatform call
 	affinity     *AffinityStore // task-type plan-affinity learner
-	lastCluster  TaskCluster    // cluster of the last planned task — used to credit outcomes
 	pendingClstr TaskCluster    // cluster while a plan is awaiting approval
 	mu           sync.Mutex
 }
@@ -435,13 +434,14 @@ func (a *KrillAgent) handlePendingPlan(ctx context.Context, input string) (strin
 		a.pendingPlan.Approved = true
 		plan := a.pendingPlan
 		a.pendingPlan = nil
-		a.creditOutcome(ctx, cluster, OutcomeApproved)
+		flipped := a.creditOutcome(ctx, cluster, OutcomeApproved)
 		result, err := a.ExecutePlan(ctx, plan)
 		if err != nil {
 			return fmt.Sprintf("This krill hit a reef executing the plan: %v", err), true
 		}
-		// If this was the threshold flip, narrate it once.
-		result = a.maybeAppendAffinityNarration(ctx, result, cluster)
+		if flipped {
+			result = appendAffinityNarration(result, cluster)
+		}
 		a.appendMessage(core.Message{Role: "assistant", Content: result})
 		a.saveTurn("assistant", result)
 		return result, true
@@ -504,30 +504,30 @@ func (a *KrillAgent) looksLikeStopAsking(input string) bool {
 	return false
 }
 
-// creditOutcome records an outcome against a cluster, async-safe.
-func (a *KrillAgent) creditOutcome(ctx context.Context, cluster TaskCluster, outcome AffinityOutcome) {
+// creditOutcome records an outcome against a cluster and returns true when
+// this update flipped the cluster into auto-run territory for the first time
+// (so the caller can narrate the transition exactly once). The transition is
+// tracked by the sticky WasAutoRun field on the persisted record, which means
+// a cluster that takes 7 approvals to cross 0.7 (after a stray REJECTED, say)
+// still narrates correctly — not just clusters that hit the threshold at
+// SampleCount == minSamples.
+func (a *KrillAgent) creditOutcome(ctx context.Context, cluster TaskCluster, outcome AffinityOutcome) bool {
 	if a.affinity == nil || cluster.ID == "" {
-		return
+		return false
 	}
-	if _, err := a.affinity.Update(ctx, cluster, outcome); err != nil {
+	_, flipped, err := a.affinity.Update(ctx, cluster, outcome)
+	if err != nil {
 		log.Debug("affinity update failed", "cluster", cluster.String(), "outcome", outcome, "error", err)
+		return false
 	}
+	return flipped
 }
 
-// maybeAppendAffinityNarration appends a one-liner to the response when this
-// outcome flipped the cluster from "needs approval" to "auto-run". Issue #30:
-// autonomy without narrated learning is a black box. The flip is detected by
-// re-checking the decision after the update — if the cluster has just crossed
-// into PlanThenAct territory we mention it, otherwise we stay quiet.
-func (a *KrillAgent) maybeAppendAffinityNarration(ctx context.Context, response string, cluster TaskCluster) string {
-	if a.affinity == nil || cluster.ID == "" {
-		return response
-	}
-	rec := a.affinity.Get(ctx, cluster)
-	if rec.SampleCount == minSamples && rec.PlanScore > 0.7 {
-		return response + fmt.Sprintf("\n\n_(I'm now treating `%s` as auto-run — you've approved enough of these.)_", cluster.String())
-	}
-	return response
+// appendAffinityNarration formats the one-line transition note. Caller decides
+// whether to invoke (based on the bool returned by creditOutcome). Issue #30:
+// autonomy without narrated learning is a black box.
+func appendAffinityNarration(response string, cluster TaskCluster) string {
+	return response + fmt.Sprintf("\n\n_(I'm now treating `%s` as auto-run — you've approved enough of these.)_", cluster.String())
 }
 
 // firstStepIsAskingTheUser returns true when the planner's first step is some
@@ -619,9 +619,25 @@ User reply: ` + input
 	}
 }
 
-// handleTask generates a plan and presents it for approval.
+// handleTask generates a plan and presents it for approval — except when the
+// affinity store says the cluster doesn't need a plan at all, in which case we
+// skip plan generation entirely and answer directly. This wires the JustAct
+// PlanDecision tier honestly; without it, JustAct only meant "no gate", which
+// still wasted a planning round-trip and produced a plan nobody saw.
 func (a *KrillAgent) handleTask(ctx context.Context, input string) (string, error) {
 	cluster := ClusterFor(input)
+
+	// Affinity-first short-circuit: if the cluster has been calibrated and
+	// landed in the JustAct band (score ≤ 0.3), skip planning entirely. The
+	// destructive-plan check happens later inside shouldRequireApproval, so
+	// we'd never be here for a destructive request anyway — JustAct never
+	// fires until the cluster has cleanly run reversibly several times.
+	if a.affinity != nil && (a.cfg.AutonomyFloor == "act" || a.cfg.AutonomyFloor == "evolve") {
+		if decision, _ := a.affinity.Decide(ctx, cluster); decision == DecisionJustAct {
+			log.Info("affinity says skip plan, answering directly", "cluster", cluster.String())
+			return a.handleAnswer(ctx)
+		}
+	}
 
 	plan, err := a.Plan(ctx, input)
 	if err != nil {
@@ -632,11 +648,13 @@ func (a *KrillAgent) handleTask(ctx context.Context, input string) (string, erro
 	// Issue #17: if the planner's first step is "Ask the user for X", skip
 	// the plan and just ask the question directly. Five-step "I will ask the
 	// user, then I will brainstorm…" plans for clarification questions are
-	// the most common way the krill wastes a turn.
+	// the most common way the krill wastes a turn. We deliberately do NOT
+	// credit an outcome here: the input was incomplete, not the cluster's
+	// fault — punishing `summarize/youtube` for one missing-link request
+	// would sabotage learning on what is otherwise a great auto-run candidate.
 	if firstStepIsAskingTheUser(plan) {
 		question := extractAskQuestion(plan.Steps[0].Description)
 		log.Info("planner's first step asks the user; skipping plan and asking directly", "question", truncate(question, 60))
-		a.creditOutcome(ctx, cluster, OutcomeIgnored) // this cluster shouldn't have planned
 		ack := question
 		a.appendMessage(core.Message{Role: "assistant", Content: ack})
 		a.saveTurn("assistant", ack)
@@ -654,13 +672,7 @@ func (a *KrillAgent) handleTask(ctx context.Context, input string) (string, erro
 		return formatted, nil
 	}
 
-	// Auto-execute: intent is clear, plan is small and non-destructive.
-	// Credit THANKED if the user later says nothing — heuristic, but it lets
-	// auto-act'd clusters drift toward "no plan needed" over time. Today we
-	// only credit APPROVED outcomes immediately; THANKED/FIXED would need a
-	// post-turn callback we don't have yet.
 	log.Info("auto-executing plan", "task", input, "steps", len(plan.Steps), "cluster", cluster.String())
-	a.lastCluster = cluster
 
 	// On timeout-sensitive platforms, run in background if task has multiple steps
 	if a.shouldRunInBackground(plan) {
@@ -775,10 +787,12 @@ func (a *KrillAgent) handleTaskCommand(input string) (string, bool) {
 //     - suggest → always show plan, wait for explicit approval
 //     - act / evolve → consult affinity store + legacy fallback
 //
-// Under act/evolve the affinity store gets first say:
-//   - PlanThenAct (score > 0.7) → no gate, run + show plan as FYI
-//   - PlanInParallel (0.3 < score ≤ 0.7) → no gate, kick execution while showing plan
-//   - JustAct (score ≤ 0.3) → caller should have skipped plan generation entirely
+// Under act/evolve, JustAct is handled upstream in handleTask (the plan is
+// never generated). By the time we get here, the plan exists, so the only
+// meaningful affinity tiers are:
+//   - PlanThenAct  (score > 0.7) → no gate, auto-execute the generated plan
+//   - PlanInParallel (0.3 < score ≤ 0.7) → no gate, auto-execute and show the plan as FYI
+//     (the parallel/streaming UX is future work; today both tiers behave the same — no gate)
 //   - UseLegacy (samples < 3) → fall through to the legacy heuristics below
 //
 // Legacy heuristics (only when affinity hasn't calibrated yet):

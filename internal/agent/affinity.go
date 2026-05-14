@@ -3,9 +3,9 @@
 // ignored / thanked / fixed).
 //
 // The score is stored in the existing core.Memory under reserved keys
-// `affinity:cluster:<id>`. After ~5 samples per cluster the agent can decide
-// autonomously whether to plan-then-act, plan-in-parallel, or just act, with
-// no user intervention.
+// `affinity:cluster:<id>`. After ~3 samples per cluster (minSamples) the agent
+// can decide autonomously whether to plan-then-act, plan-in-parallel, or just
+// act, with no user intervention.
 package agent
 
 import (
@@ -58,6 +58,20 @@ type ClusterAffinity struct {
 	SampleCount  int       `json:"sample_count"`
 	LastUpdate   time.Time `json:"last_update"`
 	LastOutcomes []string  `json:"last_outcomes"` // ring buffer, max 10
+	// WasAutoRun is sticky once true. Set when the cluster first crosses into
+	// "auto-run" territory (calibrated AND PlanScore > 0.7). Update returns
+	// true when this update flipped it false→true so callers can narrate the
+	// transition exactly once. Without this, narration would either fire
+	// every time or only at SampleCount==minSamples — neither catches the
+	// real "we just stopped asking for approval" moment.
+	WasAutoRun bool `json:"was_auto_run,omitempty"`
+}
+
+// isAutoRun returns whether the cluster currently qualifies for auto-run
+// (score above the PlanThenAct threshold, calibrated). Pure function on the
+// record fields so callers and tests can call it without state.
+func (c ClusterAffinity) isAutoRun() bool {
+	return c.SampleCount >= minSamples && c.PlanScore > 0.7
 }
 
 // AffinityStore wraps a core.Memory with affinity-typed accessors.
@@ -124,7 +138,9 @@ func (s *AffinityStore) Put(ctx context.Context, rec ClusterAffinity) error {
 }
 
 // Update applies an outcome to a cluster's score using a simple
-// pull-toward-extreme rule, persists, and returns the post-update record.
+// pull-toward-extreme rule, persists, and returns the post-update record plus
+// a flag indicating whether this update flipped the cluster into auto-run
+// territory for the first time (so callers can narrate the transition once).
 //
 //	APPROVED  → score += 0.10 * (1 - score)
 //	MODIFIED  → score += 0.05 * (1 - score)
@@ -134,8 +150,9 @@ func (s *AffinityStore) Put(ctx context.Context, rec ClusterAffinity) error {
 //	FIXED     → score += 0.15 * (1 - score) (user corrected after auto-act = plan would help)
 //
 // Result is clamped to [0.05, 0.95] so a cluster can always recover.
-func (s *AffinityStore) Update(ctx context.Context, c TaskCluster, outcome AffinityOutcome) (ClusterAffinity, error) {
+func (s *AffinityStore) Update(ctx context.Context, c TaskCluster, outcome AffinityOutcome) (ClusterAffinity, bool, error) {
 	rec := s.Get(ctx, c)
+	wasAutoRunBefore := rec.WasAutoRun
 	score := rec.PlanScore
 	switch outcome {
 	case OutcomeApproved:
@@ -151,7 +168,7 @@ func (s *AffinityStore) Update(ctx context.Context, c TaskCluster, outcome Affin
 	case OutcomeFixed:
 		score += 0.15 * (1 - score)
 	default:
-		return rec, fmt.Errorf("unknown affinity outcome: %s", outcome)
+		return rec, false, fmt.Errorf("unknown affinity outcome: %s", outcome)
 	}
 	if score < 0.05 {
 		score = 0.05
@@ -161,10 +178,17 @@ func (s *AffinityStore) Update(ctx context.Context, c TaskCluster, outcome Affin
 	rec.PlanScore = score
 	rec.SampleCount++
 	rec.LastOutcomes = appendRing(rec.LastOutcomes, string(outcome), 10)
-	if err := s.Put(ctx, rec); err != nil {
-		return rec, err
+	// Sticky transition: set WasAutoRun the first time the cluster qualifies.
+	// Once set, stays set even if the score later dips below — the narration
+	// is about "we just stopped asking", not "we are still not asking".
+	if !rec.WasAutoRun && rec.isAutoRun() {
+		rec.WasAutoRun = true
 	}
-	return rec, nil
+	if err := s.Put(ctx, rec); err != nil {
+		return rec, false, err
+	}
+	flippedToAutoRun := !wasAutoRunBefore && rec.WasAutoRun
+	return rec, flippedToAutoRun, nil
 }
 
 // Decide returns the decision for a fresh request based on the cluster's

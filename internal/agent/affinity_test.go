@@ -43,7 +43,7 @@ func (m *fakeMem) Count() int { return len(m.store) }
 func TestAffinity_PullsTowardOneOnApproved(t *testing.T) {
 	store := NewAffinityStore(newFakeMem())
 	c := ClusterFor("summarize this https://youtube.com/watch?v=abc")
-	rec, err := store.Update(context.Background(), c, OutcomeApproved)
+	rec, _, err := store.Update(context.Background(), c, OutcomeApproved)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestAffinity_PullsTowardOneOnApproved(t *testing.T) {
 func TestAffinity_PullsTowardZeroOnRejected(t *testing.T) {
 	store := NewAffinityStore(newFakeMem())
 	c := ClusterFor("debug error: panic")
-	rec, _ := store.Update(context.Background(), c, OutcomeRejected)
+	rec, _, _ := store.Update(context.Background(), c, OutcomeRejected)
 	if rec.PlanScore >= 0.5 {
 		t.Fatalf("rejected should pull score below 0.5, got %v", rec.PlanScore)
 	}
@@ -74,7 +74,7 @@ func TestAffinity_DecideAfterSamples(t *testing.T) {
 	store := NewAffinityStore(newFakeMem())
 	c := ClusterFor("summarize https://youtube.com/watch?v=abc")
 	for i := 0; i < 5; i++ {
-		_, _ = store.Update(context.Background(), c, OutcomeApproved)
+		_, _, _ = store.Update(context.Background(), c, OutcomeApproved)
 	}
 	d, rec := store.Decide(context.Background(), c)
 	if d != DecisionPlanThenAct {
@@ -86,7 +86,7 @@ func TestAffinity_RingBufferCap(t *testing.T) {
 	store := NewAffinityStore(newFakeMem())
 	c := ClusterFor("anything")
 	for i := 0; i < 15; i++ {
-		_, _ = store.Update(context.Background(), c, OutcomeApproved)
+		_, _, _ = store.Update(context.Background(), c, OutcomeApproved)
 	}
 	rec := store.Get(context.Background(), c)
 	if len(rec.LastOutcomes) != 10 {
@@ -98,17 +98,56 @@ func TestAffinity_ClampsTo05To95(t *testing.T) {
 	store := NewAffinityStore(newFakeMem())
 	c := ClusterFor("anything")
 	for i := 0; i < 100; i++ {
-		_, _ = store.Update(context.Background(), c, OutcomeApproved)
+		_, _, _ = store.Update(context.Background(), c, OutcomeApproved)
 	}
 	rec := store.Get(context.Background(), c)
 	if rec.PlanScore > 0.95 {
 		t.Fatalf("score should clamp at 0.95, got %v", rec.PlanScore)
 	}
 	for i := 0; i < 100; i++ {
-		_, _ = store.Update(context.Background(), c, OutcomeRejected)
+		_, _, _ = store.Update(context.Background(), c, OutcomeRejected)
 	}
 	rec = store.Get(context.Background(), c)
 	if rec.PlanScore < 0.05 {
 		t.Fatalf("score should clamp at 0.05, got %v", rec.PlanScore)
+	}
+}
+
+// TestAffinity_FlippedOnAutoRunCrossing covers the narration-correctness
+// regression from review: previously narration only fired when SampleCount
+// hit minSamples exactly, so a cluster that took 5 approvals to cross the 0.7
+// threshold would slip silently into auto-run. Now the sticky WasAutoRun bit
+// + the bool returned by Update give the caller exactly one chance to narrate.
+func TestAffinity_FlippedOnAutoRunCrossing(t *testing.T) {
+	store := NewAffinityStore(newFakeMem())
+	c := ClusterFor("debug some error")
+
+	// One MODIFIED then several APPROVED — the cluster will cross 0.7 later
+	// than minSamples, exercising the path the old narration logic missed.
+	flippedAtIdx := -1
+	for i := 0; i < 10; i++ {
+		out := OutcomeApproved
+		if i == 0 {
+			out = OutcomeModified
+		}
+		_, flipped, _ := store.Update(context.Background(), c, out)
+		if flipped {
+			if flippedAtIdx != -1 {
+				t.Fatalf("Update returned flipped=true twice (once at %d and again at %d)", flippedAtIdx, i)
+			}
+			flippedAtIdx = i
+		}
+	}
+	if flippedAtIdx == -1 {
+		t.Fatal("expected exactly one flipped=true within 10 approvals; got none")
+	}
+	rec := store.Get(context.Background(), c)
+	if !rec.WasAutoRun {
+		t.Fatal("WasAutoRun should be sticky true after crossing the threshold")
+	}
+	// One more approval should NOT re-flip.
+	_, flipped, _ := store.Update(context.Background(), c, OutcomeApproved)
+	if flipped {
+		t.Fatal("flipped should not be true on a subsequent update — the bit is sticky")
 	}
 }
