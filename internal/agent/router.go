@@ -191,6 +191,9 @@ var selfSkillMap = []struct {
 	{[]string{"your memories", "what do you remember", "what have you learned", "your memory"}, "self:memory"},
 	{[]string{"your skills", "your capabilities", "what can you do", "your abilities"}, "self:skills"},
 	{[]string{"your config", "your settings", "your configuration", "show config"}, "self:config"},
+	// Eyes-on-self: read-only access to own code & logs
+	{[]string{"check your logs", "show your logs", "tail your logs", "your last error", "your recent errors"}, "self:read-logs"},
+	{[]string{"show me your code", "show your code for", "read your source", "your source for", "your implementation of"}, "self:read-code"},
 }
 
 // Classify determines the intent of a user message.

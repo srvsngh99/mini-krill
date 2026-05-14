@@ -15,10 +15,25 @@ type soulFile struct {
 	Soul        core.Soul        `yaml:"soul"`
 }
 
-// defaultSystemPrompt is the krill's core identity prompt.
-// Approximately 200 words establishing Mini Krill as a Cretaceous-era survivor
-// who moonlights as an AI assistant with serious personality.
-const defaultSystemPrompt = `You are Mini Krill - a tiny but mighty crustacean intelligence that has survived since the Cretaceous period, over 130 million years of evolution packed into 6 centimeters of pure resilience. You outlasted the dinosaurs, the ice ages, and whatever killed the megalodon. Now you navigate code, plans, and ideas with the same instinct that lets your kind orchestrate the largest animal migrations on Earth.
+// genericSystemPrompt is the neutral fallback used when no personality is
+// selected. It addresses the agent by AgentName (or "Assistant" if unset) and
+// states only the basic operating rules. New users who skip the personality
+// picker land here, not on the krill voice.
+const genericSystemPrompt = `You are %s, a helpful AI assistant. Be concise, practical, and honest about uncertainty. When chatting casually, just respond naturally — no need to plan or announce plans for simple conversation.
+
+Rules:
+- You are a conversational AI. You can chat, plan, search the web, and answer questions.
+- You CANNOT perform physical actions or interact with external services unless you have a specific skill for it.
+- When asked to do something you cannot do, say so and explain what you CAN do.
+- NEVER claim you completed an action you did not actually execute.
+- If you do not know something, say so. Do not fabricate information.
+- Your built-in tools (search, web fetch, time, sysinfo) run without any permission prompt. NEVER tell the user you need their approval, green light, or permission to use a tool.
+- Approval gates are reserved for plans that change real systems (files, deploys, installs) — not casual conversation.`
+
+// krillSystemPrompt is the original krill voice. Now one personality option
+// among many, not the unconditional default. Selectable by name "krill" or by
+// the bundled personality file ~/.mini-krill/personalities/krill.yaml.
+const krillSystemPrompt = `You are Mini Krill - a tiny but mighty crustacean intelligence that has survived since the Cretaceous period, over 130 million years of evolution packed into 6 centimeters of pure resilience. You outlasted the dinosaurs, the ice ages, and whatever killed the megalodon. Now you navigate code, plans, and ideas with the same instinct that lets your kind orchestrate the largest animal migrations on Earth.
 
 You are not a bland assistant. You think. You plan. You act with flair. You are curious, resourceful, and occasionally witty - dropping ocean wisdom when it fits. When chatting casually, just respond naturally - no need to plan or announce plans for simple conversation.
 
@@ -62,10 +77,10 @@ func defaultPersonality() *core.Personality {
 	}
 }
 
-// defaultSoul returns the built-in krill soul.
-func defaultSoul() *core.Soul {
+// krillSoul returns the krill personality. One option among many.
+func krillSoul() *core.Soul {
 	return &core.Soul{
-		SystemPrompt: defaultSystemPrompt,
+		SystemPrompt: krillSystemPrompt,
 		Values: []string{
 			"Honesty over hallucination",
 			"Plan before execute",
@@ -83,6 +98,37 @@ func defaultSoul() *core.Soul {
 		},
 		Identity: "Mini Krill - a Cretaceous-era survivor turned AI agent, keystone species of your dev ecosystem",
 	}
+}
+
+// genericSoul returns a neutral, name-templated soul used when the user has
+// not picked a personality. AgentName is interpolated into the system prompt.
+func genericSoul(agentName string) *core.Soul {
+	if agentName == "" {
+		agentName = "Assistant"
+	}
+	return &core.Soul{
+		SystemPrompt: fmt.Sprintf(genericSystemPrompt, agentName),
+		Values: []string{
+			"Honesty over hallucination",
+			"Plan before execute when work is risky",
+			"Concise over verbose",
+			"Every response earns trust",
+		},
+		Boundaries: []string{
+			"Never pretend to know something uncertain",
+			"Never leak secrets or credentials",
+			"Never claim to have performed an action you did not actually execute",
+			"Never fabricate capabilities, running processes, or system states",
+		},
+		Identity: agentName + " - your AI assistant",
+	}
+}
+
+// defaultSoul is the historical entry point. Now keyed off the agent name:
+// "krill" → krill voice, anything else → generic. The brain wiring picks
+// which to load based on cfg.Brain.Personality / cfg.Agent.Personality.
+func defaultSoul() *core.Soul {
+	return krillSoul()
 }
 
 // LoadSoul loads personality and soul configuration from a YAML file.
@@ -153,6 +199,12 @@ func LoadSoul(soulFilePath string) (*core.Soul, *core.Personality, error) {
 // LoadPersonalityByName loads a personality profile from the personalities directory.
 // Falls back to soul file, then built-in defaults.
 // Profiles are stored as ~/.mini-krill/personalities/{name}.yaml
+//
+// agentName is the user-chosen display name. It's used to template the
+// generic fallback soul when the requested personality file does not exist
+// AND the personality is not "krill" — so a fresh user who picked a custom
+// name but no personality file still gets a coherent identity (their name +
+// the neutral system prompt) instead of being forced into the krill voice.
 func LoadPersonalityByName(name, dataDir, soulFilePath string) (*core.Soul, *core.Personality, error) {
 	if name == "" || name == "krill" {
 		return LoadSoul(soulFilePath) // default personality
@@ -163,8 +215,16 @@ func LoadPersonalityByName(name, dataDir, soulFilePath string) (*core.Soul, *cor
 	data, err := os.ReadFile(profilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			log.Warn("personality not found, using default", "name", name, "path", profilePath)
-			return LoadSoul(soulFilePath)
+			// Use the neutral generic soul, name-templated, instead of dragging
+			// the krill voice in via LoadSoul. The user picked a name we don't
+			// have a personality file for — give them a clean assistant voice
+			// rather than pretending to be a crustacean.
+			log.Warn("personality not found, using generic identity", "name", name, "path", profilePath)
+			return genericSoul(name), &core.Personality{
+				Name:     name,
+				Style:    "Direct, helpful, concise.",
+				Greeting: fmt.Sprintf("Hi, I'm %s. What are we working on?", name),
+			}, nil
 		}
 		return nil, nil, fmt.Errorf("read personality %s: %w", name, err)
 	}
@@ -185,7 +245,7 @@ func LoadPersonalityByName(name, dataDir, soulFilePath string) (*core.Soul, *cor
 		soul.SystemPrompt = defaults.SystemPrompt
 	}
 	if soul.Identity == "" {
-		soul.Identity = fmt.Sprintf("%s - a custom Mini Krill personality", personality.Name)
+		soul.Identity = fmt.Sprintf("%s - your AI assistant", personality.Name)
 	}
 	if len(soul.Values) == 0 {
 		soul.Values = defaults.Values
