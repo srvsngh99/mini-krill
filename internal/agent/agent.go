@@ -43,28 +43,43 @@ var rejectionRegex = regexp.MustCompile(`^(?:n|no|nah|nope|cancel|cancelled|stop
 // It is the executive function of the krill brain - classifying intent,
 // planning tasks, gating approval, and orchestrating execution.
 type KrillAgent struct {
-	llm         core.LLMProvider
-	brain       core.Brain
-	skills      core.SkillRegistry
-	mcp         core.MCPRegistry
-	cfg         config.AgentConfig
-	router      *IntentRouter
-	channel     string // durable conversation channel; default is unified across interfaces
-	platform    string // current chat platform (telegram, discord, cli, tui)
-	chatID      string // current chat ID for background task notifications
-	history     []core.Message
-	pendingPlan *core.Plan
-	subMgr      *SubKrillManager
-	taskStore   *TaskStore
-	taskRunner  *TaskRunner
-	turnFetches *turnFetchLog // per-turn provenance ledger; reset on each ChatFromPlatform call
-	mu          sync.Mutex
+	llm          core.LLMProvider
+	brain        core.Brain
+	skills       core.SkillRegistry
+	mcp          core.MCPRegistry
+	cfg          config.AgentConfig
+	router       *IntentRouter
+	channel      string // durable conversation channel; default is unified across interfaces
+	platform     string // current chat platform (telegram, discord, cli, tui)
+	chatID       string // current chat ID for background task notifications
+	history      []core.Message
+	pendingPlan  *core.Plan
+	subMgr       *SubKrillManager
+	taskStore    *TaskStore
+	taskRunner   *TaskRunner
+	turnFetches  *turnFetchLog  // per-turn provenance ledger; reset on each ChatFromPlatform call
+	affinity     *AffinityStore // task-type plan-affinity learner
+	pendingClstr TaskCluster    // cluster while a plan is awaiting approval
+	mu           sync.Mutex
 }
 
 // New creates a fresh KrillAgent wired to all subsystems.
 // Like a krill larva hatching in the deep ocean - small but ready to grow.
 func New(cfg config.AgentConfig, llm core.LLMProvider, brain core.Brain, skills core.SkillRegistry, mcp core.MCPRegistry) *KrillAgent {
-	log.Info("krill agent spawning", "name", cfg.Name, "plan_approval", cfg.PlanApproval)
+	// Backward-compat: callers that build AgentConfig by hand (tests,
+	// programmatic embedders) often only set PlanApproval. Promote that to
+	// AutonomyFloor so the new gate path behaves the same way.
+	if cfg.AutonomyFloor == "" {
+		switch cfg.PlanApproval {
+		case "always":
+			cfg.AutonomyFloor = "suggest"
+		case "never":
+			cfg.AutonomyFloor = "act"
+		default:
+			cfg.AutonomyFloor = "act"
+		}
+	}
+	log.Info("krill agent spawning", "name", cfg.Name, "autonomy_floor", cfg.AutonomyFloor)
 
 	sysPrompt := brain.SystemPrompt()
 
@@ -76,7 +91,7 @@ func New(cfg config.AgentConfig, llm core.LLMProvider, brain core.Brain, skills 
 		}
 	}
 
-	return &KrillAgent{
+	a := &KrillAgent{
 		llm:     llm,
 		brain:   brain,
 		skills:  skills,
@@ -89,6 +104,10 @@ func New(cfg config.AgentConfig, llm core.LLMProvider, brain core.Brain, skills 
 		},
 		subMgr: NewSubKrillManager(cfg, llm),
 	}
+	if brain != nil {
+		a.affinity = NewAffinityStore(brain.Memory())
+	}
+	return a
 }
 
 // SetPlatform is retained for tests that don't go through ChatFromPlatform.
@@ -390,17 +409,38 @@ const (
 // handlePendingPlan processes user input when a plan is awaiting approval.
 // Returns (response, true) when the input was consumed by the approval flow,
 // or ("", false) when the caller should route the input as a fresh message.
+//
+// On approve/modify/reject the cluster's affinity score is updated so future
+// requests of the same shape need less ceremony. Bug #5/#11: when the user
+// says "no need for approval on this kind of things" mid-pending-plan, we
+// (a) flip the typed pref, (b) credit APPROVED to the cluster so the next
+// request is auto-acted, and (c) treat the current plan as approved — all in
+// one shot, instead of forcing the user to repeat themselves.
 func (a *KrillAgent) handlePendingPlan(ctx context.Context, input string) (string, bool) {
+	cluster := a.pendingClstr
 	decision := a.classifyApprovalReply(ctx, input)
+
+	// Special-case: the user is asking us to stop asking. Treat as APPROVE
+	// for the current plan AND set the typed pref so future plans don't gate.
+	if a.looksLikeStopAsking(input) {
+		log.Info("user requested no-approval mode mid-plan; auto-approving and flipping pref")
+		SetBoolPref(ctx, a.brain.Memory(), PrefNoPlanApproval, true)
+		decision = decisionApprove
+	}
+
 	switch decision {
 	case decisionApprove:
 		log.Info("plan approved by user", "task", a.pendingPlan.Task)
 		a.pendingPlan.Approved = true
 		plan := a.pendingPlan
 		a.pendingPlan = nil
+		flipped := a.creditOutcome(ctx, cluster, OutcomeApproved)
 		result, err := a.ExecutePlan(ctx, plan)
 		if err != nil {
 			return fmt.Sprintf("This krill hit a reef executing the plan: %v", err), true
+		}
+		if flipped {
+			result = appendAffinityNarration(result, cluster)
 		}
 		a.appendMessage(core.Message{Role: "assistant", Content: result})
 		a.saveTurn("assistant", result)
@@ -409,6 +449,7 @@ func (a *KrillAgent) handlePendingPlan(ctx context.Context, input string) (strin
 	case decisionReject:
 		log.Info("plan rejected by user", "task", a.pendingPlan.Task)
 		a.pendingPlan = nil
+		a.creditOutcome(ctx, cluster, OutcomeRejected)
 		return "Plan scrapped. What else?", true
 
 	case decisionModify:
@@ -417,6 +458,7 @@ func (a *KrillAgent) handlePendingPlan(ctx context.Context, input string) (strin
 		log.Info("plan modification requested", "task", a.pendingPlan.Task)
 		oldTask := a.pendingPlan.Task
 		a.pendingPlan = nil
+		a.creditOutcome(ctx, cluster, OutcomeModified)
 		// Compose: original task + user's modifier. Cheap and good enough.
 		newTask := oldTask + " — adjustment: " + strings.TrimSpace(input)
 		response, err := a.handleTask(ctx, newTask)
@@ -426,11 +468,109 @@ func (a *KrillAgent) handlePendingPlan(ctx context.Context, input string) (strin
 		return response, true
 
 	default: // decisionUnrelated
-		// User moved on. Release control so the caller routes the input as a
-		// brand new message.
+		// User moved on. Treat as IGNORED so the cluster learns the plan was
+		// unwanted. Release control so the caller routes the input as a brand
+		// new message.
+		a.creditOutcome(ctx, cluster, OutcomeIgnored)
 		log.Debug("pending plan released — input unrelated", "input_preview", truncate(input, 50))
 		return "", false
 	}
+}
+
+// looksLikeStopAsking detects messages that are functionally "stop gating my
+// requests" even when they don't match the typed-pref triggers exactly. Bug #5
+// motivation: "No need for taking my approval on this kind of things" did set
+// the pref but did NOT approve the pending plan, so the user had to type "Yes"
+// after. Now this catches both at once.
+func (a *KrillAgent) looksLikeStopAsking(input string) bool {
+	lower := strings.ToLower(strings.TrimSpace(input))
+	patterns := []string{
+		"no need for taking my approval",
+		"no need to approve",
+		"no need for approval",
+		"stop asking me to approve",
+		"don't ask me to approve",
+		"dont ask me to approve",
+		"skip approval",
+		"auto approve",
+		"auto-approve",
+		"just do it from now on",
+	}
+	for _, p := range patterns {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// creditOutcome records an outcome against a cluster and returns true when
+// this update flipped the cluster into auto-run territory for the first time
+// (so the caller can narrate the transition exactly once). The transition is
+// tracked by the sticky WasAutoRun field on the persisted record, which means
+// a cluster that takes 7 approvals to cross 0.7 (after a stray REJECTED, say)
+// still narrates correctly — not just clusters that hit the threshold at
+// SampleCount == minSamples.
+func (a *KrillAgent) creditOutcome(ctx context.Context, cluster TaskCluster, outcome AffinityOutcome) bool {
+	if a.affinity == nil || cluster.ID == "" {
+		return false
+	}
+	_, flipped, err := a.affinity.Update(ctx, cluster, outcome)
+	if err != nil {
+		log.Debug("affinity update failed", "cluster", cluster.String(), "outcome", outcome, "error", err)
+		return false
+	}
+	return flipped
+}
+
+// appendAffinityNarration formats the one-line transition note. Caller decides
+// whether to invoke (based on the bool returned by creditOutcome). Issue #30:
+// autonomy without narrated learning is a black box.
+func appendAffinityNarration(response string, cluster TaskCluster) string {
+	return response + fmt.Sprintf("\n\n_(I'm now treating `%s` as auto-run — you've approved enough of these.)_", cluster.String())
+}
+
+// firstStepIsAskingTheUser returns true when the planner's first step is some
+// variant of "Ask the user for X" — a structural signal that the agent should
+// just ask the question instead of producing a 5-step plan around the asking.
+// Issue #17: this happens constantly with vague tasks ("summarize this video"
+// without a link) and erodes trust in plan output.
+func firstStepIsAskingTheUser(plan *core.Plan) bool {
+	if plan == nil || len(plan.Steps) == 0 {
+		return false
+	}
+	lower := strings.ToLower(plan.Steps[0].Description)
+	patterns := []string{
+		"ask the user", "ask user", "request from the user",
+		"prompt the user", "get from the user",
+	}
+	for _, p := range patterns {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// extractAskQuestion turns "Ask the user for the YouTube video link" into a
+// natural-sounding question. Falls back to a generic prompt if the description
+// is too generic to lift from.
+func extractAskQuestion(desc string) string {
+	lower := strings.ToLower(desc)
+	for _, prefix := range []string{
+		"ask the user for the ", "ask the user for ", "ask user for the ", "ask user for ",
+		"prompt the user for the ", "prompt the user for ", "request from the user the ",
+		"request from the user ", "get from the user the ", "get from the user ",
+	} {
+		if idx := strings.Index(lower, prefix); idx >= 0 {
+			tail := strings.TrimSpace(desc[idx+len(prefix):])
+			tail = strings.TrimRight(tail, ".?!")
+			if tail != "" {
+				return "Could you share the " + tail + "?"
+			}
+		}
+	}
+	return "Before I can plan this, I need a bit more from you. What should I work with?"
 }
 
 // classifyApprovalReply judges a user reply against a pending plan: regex fast
@@ -479,26 +619,60 @@ User reply: ` + input
 	}
 }
 
-// handleTask generates a plan and presents it for approval.
+// handleTask generates a plan and presents it for approval — except when the
+// affinity store says the cluster doesn't need a plan at all, in which case we
+// skip plan generation entirely and answer directly. This wires the JustAct
+// PlanDecision tier honestly; without it, JustAct only meant "no gate", which
+// still wasted a planning round-trip and produced a plan nobody saw.
 func (a *KrillAgent) handleTask(ctx context.Context, input string) (string, error) {
+	cluster := ClusterFor(input)
+
+	// Affinity-first short-circuit: if the cluster has been calibrated and
+	// landed in the JustAct band (score ≤ 0.3), skip planning entirely. The
+	// destructive-plan check happens later inside shouldRequireApproval, so
+	// we'd never be here for a destructive request anyway — JustAct never
+	// fires until the cluster has cleanly run reversibly several times.
+	if a.affinity != nil && (a.cfg.AutonomyFloor == "act" || a.cfg.AutonomyFloor == "evolve") {
+		if decision, _ := a.affinity.Decide(ctx, cluster); decision == DecisionJustAct {
+			log.Info("affinity says skip plan, answering directly", "cluster", cluster.String())
+			return a.handleAnswer(ctx)
+		}
+	}
+
 	plan, err := a.Plan(ctx, input)
 	if err != nil {
 		log.Error("plan generation failed", "error", err)
 		return fmt.Sprintf("This krill's sonar is glitching - could not plan that task: %v", err), nil
 	}
 
+	// Issue #17: if the planner's first step is "Ask the user for X", skip
+	// the plan and just ask the question directly. Five-step "I will ask the
+	// user, then I will brainstorm…" plans for clarification questions are
+	// the most common way the krill wastes a turn. We deliberately do NOT
+	// credit an outcome here: the input was incomplete, not the cluster's
+	// fault — punishing `summarize/youtube` for one missing-link request
+	// would sabotage learning on what is otherwise a great auto-run candidate.
+	if firstStepIsAskingTheUser(plan) {
+		question := extractAskQuestion(plan.Steps[0].Description)
+		log.Info("planner's first step asks the user; skipping plan and asking directly", "question", truncate(question, 60))
+		ack := question
+		a.appendMessage(core.Message{Role: "assistant", Content: ack})
+		a.saveTurn("assistant", ack)
+		return ack, nil
+	}
+
 	if a.shouldRequireApproval(ctx, plan) {
 		// Store as pending and present for approval
 		a.pendingPlan = plan
+		a.pendingClstr = cluster
 		formatted := FormatPlan(plan)
-		log.Info("plan generated, awaiting approval", "task", input, "steps", len(plan.Steps))
+		log.Info("plan generated, awaiting approval", "task", input, "steps", len(plan.Steps), "cluster", cluster.String())
 		a.appendMessage(core.Message{Role: "assistant", Content: formatted})
 		a.saveTurn("assistant", formatted)
 		return formatted, nil
 	}
 
-	// Auto-execute: intent is clear, plan is small and non-destructive
-	log.Info("auto-executing plan", "task", input, "steps", len(plan.Steps))
+	log.Info("auto-executing plan", "task", input, "steps", len(plan.Steps), "cluster", cluster.String())
 
 	// On timeout-sensitive platforms, run in background if task has multiple steps
 	if a.shouldRunInBackground(plan) {
@@ -604,41 +778,67 @@ func (a *KrillAgent) handleTaskCommand(input string) (string, bool) {
 }
 
 // shouldRequireApproval decides if a plan needs user approval before execution.
-// Uses a three-way config: "always", "never", or "auto" (smart default).
 //
-// Explicit config wins (the operator made a deliberate choice). The user's
-// runtime pref:no_plan_approval flag is honoured under "auto" so the agent
-// stops re-asking once the user has said "stop asking" — but destructive
-// plans still gate under "auto" regardless of the pref. That keeps casual
-// "auto approve" phrases from authorising rm -rf.
+// Decision precedence:
+//  1. Destructive plans (planIsDestructive) ALWAYS gate, regardless of floor.
+//     Casual "auto approve" never authorises rm -rf.
+//  2. autonomy_floor:
+//     - observe → always gate (debug mode)
+//     - suggest → always show plan, wait for explicit approval
+//     - act / evolve → consult affinity store + legacy fallback
+//
+// Under act/evolve, JustAct is handled upstream in handleTask (the plan is
+// never generated). By the time we get here, the plan exists, so the only
+// meaningful affinity tiers are:
+//   - PlanThenAct  (score > 0.7) → no gate, auto-execute the generated plan
+//   - PlanInParallel (0.3 < score ≤ 0.7) → no gate, auto-execute and show the plan as FYI
+//     (the parallel/streaming UX is future work; today both tiers behave the same — no gate)
+//   - UseLegacy (samples < 3) → fall through to the legacy heuristics below
+//
+// Legacy heuristics (only when affinity hasn't calibrated yet):
+//   - User has set pref:no_plan_approval → no gate
+//   - >=5 steps → gate
+//   - vague task description → gate
+//   - else → no gate
 func (a *KrillAgent) shouldRequireApproval(ctx context.Context, plan *core.Plan) bool {
-	switch a.cfg.PlanApproval {
-	case "always":
+	if planIsDestructive(plan) {
 		return true
-	case "never":
-		return false
-	default: // "auto"
-		if planIsDestructive(plan) {
-			return true
-		}
-		// User has said "stop asking" → trust them on non-destructive work.
-		if GetBoolPref(ctx, a.brain.Memory(), PrefNoPlanApproval, false) {
-			return false
-		}
-		// Large plans need approval
-		if len(plan.Steps) >= 5 {
-			return true
-		}
-		// Vague task descriptions need approval
-		lower := strings.ToLower(plan.Task)
-		vaguePatterns := []string{"everything", "all of", "entire", "whole project", "set up"}
-		for _, vague := range vaguePatterns {
-			if strings.Contains(lower, vague) {
-				return true
+	}
+
+	switch a.cfg.AutonomyFloor {
+	case "observe":
+		return true
+	case "suggest":
+		return true
+	case "act", "evolve":
+		// Consult affinity store first.
+		if a.affinity != nil {
+			cluster := ClusterFor(plan.Task)
+			decision, _ := a.affinity.Decide(ctx, cluster)
+			switch decision {
+			case DecisionPlanThenAct, DecisionPlanInParallel, DecisionJustAct:
+				return false
+			case DecisionUseLegacy:
+				// fall through to legacy heuristics
 			}
 		}
+	}
+
+	// Legacy fallback used when affinity isn't yet calibrated.
+	if GetBoolPref(ctx, a.brain.Memory(), PrefNoPlanApproval, false) {
 		return false
 	}
+	if len(plan.Steps) >= 5 {
+		return true
+	}
+	lower := strings.ToLower(plan.Task)
+	vaguePatterns := []string{"everything", "all of", "entire", "whole project", "set up"}
+	for _, vague := range vaguePatterns {
+		if strings.Contains(lower, vague) {
+			return true
+		}
+	}
+	return false
 }
 
 // planIsDestructive returns true for plans whose steps touch destructive verbs

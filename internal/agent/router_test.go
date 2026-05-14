@@ -307,19 +307,44 @@ func TestShouldRequireApprovalNever(t *testing.T) {
 		&mockMCPReg{},
 	)
 
+	// Under autonomy_floor=act (migrated from PlanApproval=never), reversible
+	// plans run without approval. Destructive plans still gate — that's a
+	// deliberate safety change since v0.1.1: no autonomy floor authorises
+	// rm -rf or "deploy to prod" silently. To test the no-gate path, use a
+	// reversible plan instead.
 	plan := &core.Plan{
-		Task: "dangerous task",
+		Task: "tidy up",
 		Steps: []core.PlanStep{
-			{ID: 1, Description: "delete everything"},
-			{ID: 2, Description: "deploy to prod"},
-			{ID: 3, Description: "remove all data"},
-			{ID: 4, Description: "push to main"},
-			{ID: 5, Description: "reset database"},
+			{ID: 1, Description: "list files"},
+			{ID: 2, Description: "summarise findings"},
 		},
 	}
 
 	if a.shouldRequireApproval(context.Background(), plan) {
-		t.Error("PlanApproval=never should never require approval")
+		t.Error("PlanApproval=never should not require approval for reversible plans")
+	}
+}
+
+// TestShouldRequireApproval_ActStillGatesDestructive locks in the safety
+// property added in v0.1.1: no autonomy floor (including the new "act"
+// default) authorises destructive plans silently. This was previously only
+// covered transitively under "auto" — now it has its own assertion.
+func TestShouldRequireApproval_ActStillGatesDestructive(t *testing.T) {
+	a := New(
+		config.AgentConfig{Name: "test", AutonomyFloor: "act"},
+		&MockProvider{chatResponse: "CHAT"},
+		&mockBrain{},
+		&mockSkillRegistry{},
+		&mockMCPReg{},
+	)
+	plan := &core.Plan{
+		Task: "clean up",
+		Steps: []core.PlanStep{
+			{ID: 1, Description: "delete file unused.go"},
+		},
+	}
+	if !a.shouldRequireApproval(context.Background(), plan) {
+		t.Error("act floor must still gate destructive plans")
 	}
 }
 

@@ -30,25 +30,29 @@ type Config struct {
 
 // AgentConfig controls the main krill agent behaviour.
 type AgentConfig struct {
-	Name          string       `yaml:"name"`
-	Personality   string       `yaml:"personality"` // active personality profile (default: "krill")
-	MaxSubKrills  int          `yaml:"max_sub_krills"`
-	PlanApproval  string       `yaml:"-"` // "auto" (default), "always", or "never"; set via UnmarshalYAML
-	RecoveryTurns int          `yaml:"recovery_turns"` // turns to load on cold start (default 10, from brain config)
+	Name          string `yaml:"name"`
+	Personality   string `yaml:"personality"` // active personality profile (default: "krill")
+	MaxSubKrills  int    `yaml:"max_sub_krills"`
+	PlanApproval  string `yaml:"-"` // legacy: "auto"|"always"|"never"; superseded by AutonomyFloor
+	AutonomyFloor string `yaml:"-"` // "observe"|"suggest"|"act"|"evolve"; default "act"
+	RecoveryTurns int    `yaml:"recovery_turns"`
 }
 
 // agentConfigRaw is used during YAML unmarshalling to accept plan_approval
-// as either a bool (legacy) or string (new).
+// as either a bool (legacy) or string (new), and autonomy_floor as the new field.
 type agentConfigRaw struct {
 	Name          string      `yaml:"name"`
 	Personality   string      `yaml:"personality"`
 	MaxSubKrills  int         `yaml:"max_sub_krills"`
 	PlanApproval  interface{} `yaml:"plan_approval"`
+	AutonomyFloor string      `yaml:"autonomy_floor"`
 	RecoveryTurns int         `yaml:"recovery_turns"`
 }
 
 // UnmarshalYAML handles backward-compatible parsing of plan_approval,
-// which was a bool in earlier versions and is now a 3-way string.
+// which was a bool in earlier versions, became a 3-way string, and is now
+// folded into AutonomyFloor. plan_approval is preserved during migration so
+// users see one deprecation log line and then we move on.
 func (a *AgentConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	var raw agentConfigRaw
 	if err := unmarshal(&raw); err != nil {
@@ -58,6 +62,7 @@ func (a *AgentConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	a.Personality = raw.Personality
 	a.MaxSubKrills = raw.MaxSubKrills
 	a.RecoveryTurns = raw.RecoveryTurns
+	a.AutonomyFloor = raw.AutonomyFloor
 
 	switch v := raw.PlanApproval.(type) {
 	case bool:
@@ -74,19 +79,21 @@ func (a *AgentConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	return nil
 }
 
-// MarshalYAML ensures PlanApproval is written as a string when saving config.
+// MarshalYAML writes AutonomyFloor as the canonical autonomy knob. PlanApproval
+// is no longer persisted — the migration in fillDefaults flips legacy values
+// into AutonomyFloor on first load.
 func (a AgentConfig) MarshalYAML() (interface{}, error) {
 	return &struct {
 		Name          string `yaml:"name"`
 		Personality   string `yaml:"personality,omitempty"`
 		MaxSubKrills  int    `yaml:"max_sub_krills"`
-		PlanApproval  string `yaml:"plan_approval"`
+		AutonomyFloor string `yaml:"autonomy_floor"`
 		RecoveryTurns int    `yaml:"recovery_turns,omitempty"`
 	}{
 		Name:          a.Name,
 		Personality:   a.Personality,
 		MaxSubKrills:  a.MaxSubKrills,
-		PlanApproval:  a.PlanApproval,
+		AutonomyFloor: a.AutonomyFloor,
 		RecoveryTurns: a.RecoveryTurns,
 	}, nil
 }
@@ -188,9 +195,10 @@ func DefaultConfig() *Config {
 	dataDir := DataDir()
 	return &Config{
 		Agent: AgentConfig{
-			Name:         "krill",
-			MaxSubKrills: 3,
-			PlanApproval: "auto",
+			Name:          "krill",
+			MaxSubKrills:  3,
+			PlanApproval:  "auto",
+			AutonomyFloor: "act",
 		},
 		LLM: LLMConfig{
 			Provider:    "ollama",
@@ -285,6 +293,26 @@ func fillDefaults(cfg *Config) {
 		cfg.Agent.PlanApproval = "never"
 	default:
 		cfg.Agent.PlanApproval = "auto"
+	}
+	// AutonomyFloor migration: if absent, derive from PlanApproval (one-time)
+	// and let it become the canonical knob from here on.
+	if cfg.Agent.AutonomyFloor == "" {
+		switch cfg.Agent.PlanApproval {
+		case "always":
+			cfg.Agent.AutonomyFloor = "suggest"
+		case "never":
+			cfg.Agent.AutonomyFloor = "act"
+		case "auto":
+			cfg.Agent.AutonomyFloor = "act"
+		default:
+			cfg.Agent.AutonomyFloor = "act"
+		}
+	}
+	switch cfg.Agent.AutonomyFloor {
+	case "observe", "suggest", "act", "evolve":
+		// valid
+	default:
+		cfg.Agent.AutonomyFloor = "act"
 	}
 	if cfg.Telegram.BotMaxTurns == 0 {
 		cfg.Telegram.BotMaxTurns = 3
