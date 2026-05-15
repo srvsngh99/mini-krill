@@ -832,21 +832,15 @@ func (a *KrillAgent) handleTaskCommand(input string) (string, bool) {
 //  2. autonomy_floor:
 //     - observe → always gate (debug mode)
 //     - suggest → always show plan, wait for explicit approval
-//     - act / evolve → consult affinity store + legacy fallback
+//     - act / evolve (the default) → non-destructive plans NEVER gate
 //
-// Under act/evolve, JustAct is handled upstream in handleTask (the plan is
-// never generated). By the time we get here, the plan exists, so the only
-// meaningful affinity tiers are:
-//   - PlanThenAct  (score > 0.7) → no gate, auto-execute the generated plan
-//   - PlanInParallel (0.3 < score ≤ 0.7) → no gate, auto-execute and show the plan as FYI
-//     (the parallel/streaming UX is future work; today both tiers behave the same — no gate)
-//   - UseLegacy (samples < 3) → fall through to the legacy heuristics below
-//
-// Legacy heuristics (only when affinity hasn't calibrated yet):
-//   - User has set pref:no_plan_approval → no gate
-//   - >=5 steps → gate
-//   - vague task description → gate
-//   - else → no gate
+// Under the default act/evolve floor, manual approval is off: a
+// non-destructive plan runs without ever asking. Step count and task
+// vagueness do NOT reintroduce a gate — that contradicted the documented
+// "act = no approval gate" contract and was the top user complaint. Users
+// who want a gate set autonomy_floor:suggest. The legacy step-count / vague
+// heuristics survive only as a defensive fallback for an unrecognised floor
+// value, which New() should make unreachable.
 func (a *KrillAgent) shouldRequireApproval(ctx context.Context, plan *core.Plan) bool {
 	if planIsDestructive(plan) {
 		return true
@@ -858,20 +852,22 @@ func (a *KrillAgent) shouldRequireApproval(ctx context.Context, plan *core.Plan)
 	case "suggest":
 		return true
 	case "act", "evolve":
-		// Consult affinity store first.
-		if a.affinity != nil {
-			cluster := ClusterFor(plan.Task)
-			decision, _ := a.affinity.Decide(ctx, cluster)
-			switch decision {
-			case DecisionPlanThenAct, DecisionPlanInParallel, DecisionJustAct:
-				return false
-			case DecisionUseLegacy:
-				// fall through to legacy heuristics
-			}
-		}
+		// act/evolve contract (the default floor since v0.1.1): a
+		// non-destructive plan NEVER gates. Destructive plans already
+		// returned true above. Every affinity tier — PlanThenAct,
+		// PlanInParallel, JustAct, and an un-calibrated UseLegacy — means
+		// "don't ask". An un-calibrated cluster is not a licence to start
+		// nagging: the old step-count / vague-task heuristics here
+		// contradicted the documented "act = no approval gate for
+		// non-destructive work" promise and were the #1 source of the
+		// "why does it keep asking permission" complaint. Manual approval
+		// is off by default; users who want it set autonomy_floor:suggest.
+		return false
 	}
 
-	// Legacy fallback used when affinity isn't yet calibrated.
+	// Defensive fallback for an unrecognised floor value (New() normalises
+	// the floor, so this should be unreachable in practice). Conservative
+	// legacy heuristics: pref opt-out, large plans, vague tasks.
 	if GetBoolPref(ctx, a.brain.Memory(), PrefNoPlanApproval, false) {
 		return false
 	}
