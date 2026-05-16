@@ -3,6 +3,17 @@
 All notable changes to Mini Krill will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.1.2] - 2026-05-16
+
+No more nagging. The agent stops asking for manual permission on routine work.
+
+### Autonomy
+- Manual approval prompts are **off by default**. Under the default `act`/`evolve` autonomy floor, a non-destructive plan never gates — step count, task vagueness, and an un-calibrated affinity cluster are no longer reasons to ask "Approve this plan? (yes/no)". This was the top "why does it keep asking permission" complaint and contradicted the documented v0.1.1 `act` contract. Users who want a gate set `autonomy_floor: suggest`.
+- Unchanged safety: destructive plans (delete, `git push`, deploy, `rm`, drop, …) still always gate, regardless of floor. `autonomy_floor: suggest`/`observe` still gate on demand.
+
+### Fixed
+- Version constant and README badge corrected — the v0.1.1 release shipped its CHANGELOG and merged code but never bumped `core.Version` (still reported `0.1.0`) or the README badge. Both now report `0.1.2`.
+
 ## [0.1.1] - 2026-05-15
 
 Trust, autonomy, and identity. The agent now learns which task types you want planned, acts decisively on the rest, and is no longer hard-wired as a krill.
