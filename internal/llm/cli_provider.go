@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/srvsngh99/mini-krill/internal/config"
@@ -17,7 +18,10 @@ import (
 
 // idleTimeout is how long runCLI waits with zero output from the subprocess
 // before considering it stuck and killing it. The total runtime is unlimited
-// as long as the process keeps producing output.
+// as long as the process keeps producing output. This is deliberately a
+// fixed const rather than an LLMConfig field: it is a stuck-process backstop,
+// not a tuning knob, and a per-provider value invites users to set it low
+// enough to re-introduce the wall-clock-cap bug this change removes.
 const idleTimeout = 10 * time.Minute
 
 // CLIProvider delegates model calls to official subscription-aware CLIs.
@@ -157,17 +161,19 @@ func runCLI(ctx context.Context, name string, args []string, stdin string) ([]by
 		return nil, fmt.Errorf("%s failed to start: %w", name, err)
 	}
 
-	// Idle timer — reset every time bytes arrive on either pipe.
-	idle := time.NewTimer(idleTimeout)
-	defer idle.Stop()
-
 	var stdout, stderr bytes.Buffer
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// readAndBump drains a pipe into a buffer, resetting the idle timer on
-	// every chunk read. When the pipe closes (process exits or EOF), the
-	// goroutine returns.
+	// bump carries an "I saw output" signal from the reader goroutines to the
+	// single timer-owning monitor goroutine. Buffered+non-blocking send: the
+	// readers must never block on a slow/absent monitor, and one queued bump is
+	// enough — the monitor only needs to know *that* there was activity, not
+	// how much.
+	bump := make(chan struct{}, 1)
+
+	// readAndBump drains a pipe into a buffer, signalling activity on every
+	// chunk read. When the pipe closes (process exits or EOF), it returns.
 	readAndBump := func(pipe io.Reader, buf *bytes.Buffer) {
 		defer wg.Done()
 		tmp := make([]byte, 4096)
@@ -175,14 +181,10 @@ func runCLI(ctx context.Context, name string, args []string, stdin string) ([]by
 			n, err := pipe.Read(tmp)
 			if n > 0 {
 				buf.Write(tmp[:n])
-				// Reset the idle timer — process is alive.
-				if !idle.Stop() {
-					select {
-					case <-idle.C:
-					default:
-					}
+				select {
+				case bump <- struct{}{}:
+				default:
 				}
-				idle.Reset(idleTimeout)
 			}
 			if err != nil {
 				return
@@ -193,34 +195,55 @@ func runCLI(ctx context.Context, name string, args []string, stdin string) ([]by
 	go readAndBump(stdoutPipe, &stdout)
 	go readAndBump(stderrPipe, &stderr)
 
-	// Wait for either: both pipes close (normal exit), idle timeout, or
-	// parent context cancellation.
+	// done closes once both reader goroutines have returned, i.e. both pipes
+	// are fully drained and closed. Nothing reads the pipes after this.
 	done := make(chan struct{})
 	go func() {
 		wg.Wait()
 		close(done)
 	}()
 
-	var idled bool
-	select {
-	case <-done:
-		// Process finished normally — pipes closed.
-	case <-idle.C:
-		// No output for idleTimeout — kill the stuck process.
-		idled = true
-		cancel()
-	case <-ctx.Done():
-		// Parent cancelled (user quit, app shutdown).
-	}
+	// Single owner of the idle timer. Resets on every activity bump; on
+	// idleTimeout with no bump it cancels the context (killing the stuck
+	// process, which closes the pipes and unblocks the readers).
+	var idled atomic.Bool
+	go func() {
+		idle := time.NewTimer(idleTimeout)
+		defer idle.Stop()
+		for {
+			select {
+			case <-bump:
+				// Go 1.23+: Reset alone is correct; no manual drain needed,
+				// and a stale fire is never delivered after Reset.
+				idle.Reset(idleTimeout)
+			case <-idle.C:
+				idled.Store(true)
+				cancel()
+				return
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 
-	// Wait for the process to exit and the reader goroutines to drain.
+	// Block until the readers have fully drained the pipes (normal exit, idle
+	// kill, or parent cancellation all converge here once the process dies and
+	// its pipes close). Only then is it safe to call cmd.Wait(), which closes
+	// the pipe FDs — calling it while a reader's pipe.Read is in flight is a
+	// documented data race.
+	<-done
 	waitErr := cmd.Wait()
-	wg.Wait()
 
-	if idled {
+	switch {
+	case idled.Load():
 		return nil, fmt.Errorf("%s idle for %v with no output — process killed", name, idleTimeout)
-	}
-	if waitErr != nil {
+	case ctx.Err() != nil:
+		// Parent cancelled deliberately (user quit TUI, app shutdown).
+		// Surface the real cause rather than a generic "<killed>" string.
+		return nil, fmt.Errorf("%s cancelled: %w", name, ctx.Err())
+	case waitErr != nil:
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
 			msg = waitErr.Error()
