@@ -372,6 +372,10 @@ func TestShouldRequireApprovalAutoSmallSafe(t *testing.T) {
 	}
 }
 
+// Under the default act floor (migrated from "auto"), a large but
+// non-destructive plan must NOT gate. Step count is no longer a reason to
+// ask for manual permission — that was the #1 "why does it keep asking"
+// complaint and contradicted the documented act contract.
 func TestShouldRequireApprovalAutoLargePlan(t *testing.T) {
 	a := New(
 		config.AgentConfig{Name: "test", PlanApproval: "auto"},
@@ -381,7 +385,7 @@ func TestShouldRequireApprovalAutoLargePlan(t *testing.T) {
 		&mockMCPReg{},
 	)
 
-	// 6 steps
+	// 6 steps, all reversible
 	plan := &core.Plan{
 		Task: "refactor auth",
 		Steps: []core.PlanStep{
@@ -394,8 +398,8 @@ func TestShouldRequireApprovalAutoLargePlan(t *testing.T) {
 		},
 	}
 
-	if !a.shouldRequireApproval(context.Background(), plan) {
-		t.Error("auto mode: 6-step plan should require approval")
+	if a.shouldRequireApproval(context.Background(), plan) {
+		t.Error("act default: 6-step non-destructive plan must NOT require approval")
 	}
 }
 
@@ -446,6 +450,9 @@ func TestShouldRequireApprovalAutoNoFalsePositives(t *testing.T) {
 	}
 }
 
+// Under the default act floor, a vague task description no longer forces a
+// gate either — only destructiveness or an explicit suggest/observe floor
+// does. Manual approval is opt-in via autonomy_floor:suggest.
 func TestShouldRequireApprovalAutoVagueTask(t *testing.T) {
 	a := New(
 		config.AgentConfig{Name: "test", PlanApproval: "auto"},
@@ -455,7 +462,7 @@ func TestShouldRequireApprovalAutoVagueTask(t *testing.T) {
 		&mockMCPReg{},
 	)
 
-	// Vague task
+	// Vague but non-destructive task
 	plan := &core.Plan{
 		Task: "improve everything in the whole project",
 		Steps: []core.PlanStep{
@@ -464,8 +471,20 @@ func TestShouldRequireApprovalAutoVagueTask(t *testing.T) {
 		},
 	}
 
-	if !a.shouldRequireApproval(context.Background(), plan) {
-		t.Error("auto mode: vague task should require approval")
+	if a.shouldRequireApproval(context.Background(), plan) {
+		t.Error("act default: vague non-destructive task must NOT require approval")
+	}
+
+	// suggest floor still gates — manual approval is available on demand.
+	s := New(
+		config.AgentConfig{Name: "test", PlanApproval: "always"},
+		&MockProvider{chatResponse: "CHAT"},
+		&mockBrain{},
+		&mockSkillRegistry{},
+		&mockMCPReg{},
+	)
+	if !s.shouldRequireApproval(context.Background(), plan) {
+		t.Error("suggest floor: plan should still require approval")
 	}
 }
 
