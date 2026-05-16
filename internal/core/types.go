@@ -5,11 +5,27 @@ package core
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
 // Version is set at build time via -ldflags
 var Version = "0.1.2"
+
+// ReservedAffinityPrefix namespaces per-task-type plan-affinity records in the
+// memory store. Only the affinity store itself (Source == AffinitySource) may
+// write keys under this prefix; any other writer is refused with
+// ErrReservedKey so a stray `/remember affinity:cluster:... = junk` cannot
+// corrupt a learned record.
+const ReservedAffinityPrefix = "affinity:cluster:"
+
+// AffinitySource is the MemoryEntry.Source the affinity store stamps on its
+// own writes. It is the sole exemption from the ReservedAffinityPrefix guard.
+const AffinitySource = "affinity-store"
+
+// ErrReservedKey is returned by Memory.Store when a caller other than the
+// owning subsystem tries to write into a reserved key namespace.
+var ErrReservedKey = errors.New("memory: key uses a reserved namespace")
 
 // ---------------------------------------------------------------------------
 // LLM types

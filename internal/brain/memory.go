@@ -60,6 +60,13 @@ func (m *FileMemory) Store(_ context.Context, entry core.MemoryEntry) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Reserved-namespace guard: only the affinity store may write under the
+	// affinity:cluster: prefix. A user typing `/remember affinity:cluster:abc
+	// = junk` would otherwise overwrite a learned plan-affinity record.
+	if strings.HasPrefix(entry.Key, core.ReservedAffinityPrefix) && entry.Source != core.AffinitySource {
+		return fmt.Errorf("%w: %q", core.ErrReservedKey, entry.Key)
+	}
+
 	// Set timestamps if not already set
 	now := time.Now().UTC()
 	if entry.CreatedAt.IsZero() {
