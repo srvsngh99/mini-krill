@@ -62,7 +62,6 @@ type KrillAgent struct {
 	affinity          *AffinityStore // task-type plan-affinity learner
 	pendingClstr      TaskCluster    // cluster while a plan is awaiting approval
 	lastAutoRun       TaskCluster    // cluster of the most recent auto-executed (un-gated) turn, awaiting a post-turn THANKED/FIXED verdict from the user's next message
-	lastTurnAt        time.Time      // wall-clock of the previous turn; a large gap marks a session boundary for episodic consolidation
 	cachedEmojiStyle  string         // cached read of cfg.Brain.EmojiStyle; refreshed on /emoji
 	cachedOverlayDirs []string       // cached overlay directives; invalidated on /persona writes
 	cachedOverlayInit bool           // true once cachedOverlayDirs has been loaded at least once
@@ -230,17 +229,19 @@ func (a *KrillAgent) ChatFromPlatform(ctx context.Context, platform, chatID, inp
 	a.creditPostTurn(input)
 
 	// Session-boundary episodic consolidation (#29 / D6): a long gap since the
-	// previous turn means the prior session ended. Summarise it asynchronously
-	// now so the *next* greeting can reference it. The consolidator dedupes
-	// and no-ops on thin sessions, so an over-eager trigger is harmless.
-	now := time.Now()
-	if !a.lastTurnAt.IsZero() && now.Sub(a.lastTurnAt) > sessionGap {
-		if eb, ok := a.brain.(episodicBrain); ok {
+	// prior turn means the previous session ended. The gap is measured against
+	// the *persisted* last turn, not an in-memory field, so a session that
+	// ended by the process exiting still consolidates when a later process
+	// resumes — the headline cross-session case. The consolidator dedupes and
+	// no-ops on thin sessions, so an over-eager trigger is harmless.
+	if eb, ok := a.brain.(episodicBrain); ok {
+		if store := a.brain.ConversationStore(); store != nil {
 			ch := a.channel
-			go func() { _ = eb.ConsolidateEpisode(context.Background(), ch) }()
+			if last, err := store.LastActivity(ch); err == nil && !last.IsZero() && time.Since(last) > sessionGap {
+				go func() { _ = eb.ConsolidateEpisode(context.Background(), ch) }()
+			}
 		}
 	}
-	a.lastTurnAt = now
 
 	// Model the user as a stateful agent (#37): refresh focus / mood /
 	// last-seen from this message. Async — the file write never blocks the
@@ -613,6 +614,26 @@ const sessionGap = 30 * time.Minute
 type episodicBrain interface {
 	ConsolidateEpisode(ctx context.Context, channel string) error
 	LatestEpisode(ctx context.Context, maxAge time.Duration) (string, error)
+}
+
+// injectSessionContext appends the cross-session episode (#29 / D6) and the
+// user-as-agent state line (#37) as read-only, point-in-time system messages.
+// Shared by handleChat and handleAnswer so the two context assemblies cannot
+// drift — the duplicated-context-assembly risk #35 fixed elsewhere. The
+// episode is capped at 7 days so the agent references "last session" but
+// never a stale month-old summary.
+func (a *KrillAgent) injectSessionContext(ctx context.Context, enriched []core.Message) []core.Message {
+	if eb, ok := a.brain.(episodicBrain); ok {
+		if ep, _ := eb.LatestEpisode(ctx, 7*24*time.Hour); ep != "" {
+			enriched = insertBeforeLast(enriched, core.Message{Role: "system", Content: ep})
+		}
+	}
+	if mem := a.brain.Memory(); mem != nil {
+		if line := loadUserState(ctx, mem).contextLine(); line != "" {
+			enriched = insertBeforeLast(enriched, core.Message{Role: "system", Content: line})
+		}
+	}
+	return enriched
 }
 
 // creditPostTurn observes the user's first message after an auto-executed
@@ -1017,21 +1038,7 @@ func (a *KrillAgent) handleChat(ctx context.Context) (string, error) {
 		enriched = insertBeforeLast(enriched, memoryMsg)
 	}
 
-	// Cross-session continuity (#29 / D6): surface the most recent episode if
-	// it's fresh enough to still be relevant. Capped at 7 days so the agent
-	// references "last session" but never a stale month-old summary.
-	if eb, ok := a.brain.(episodicBrain); ok {
-		if ep, _ := eb.LatestEpisode(ctx, 7*24*time.Hour); ep != "" {
-			enriched = insertBeforeLast(enriched, core.Message{Role: "system", Content: ep})
-		}
-	}
-
-	// User-as-agent state (#37): focus / mood / recency, read-only context.
-	if mem := a.brain.Memory(); mem != nil {
-		if line := loadUserState(ctx, mem).contextLine(); line != "" {
-			enriched = insertBeforeLast(enriched, core.Message{Role: "system", Content: line})
-		}
-	}
+	enriched = a.injectSessionContext(ctx, enriched)
 
 	if styleDirective := buildStyleDirective(ctx, a.brain.Memory()); styleDirective != "" {
 		styleMsg := core.Message{Role: "system", Content: styleDirective}
@@ -1374,21 +1381,7 @@ func (a *KrillAgent) handleAnswer(ctx context.Context) (string, error) {
 		enriched = insertBeforeLast(enriched, memoryMsg)
 	}
 
-	// Cross-session continuity (#29 / D6): surface the most recent episode if
-	// it's fresh enough to still be relevant. Capped at 7 days so the agent
-	// references "last session" but never a stale month-old summary.
-	if eb, ok := a.brain.(episodicBrain); ok {
-		if ep, _ := eb.LatestEpisode(ctx, 7*24*time.Hour); ep != "" {
-			enriched = insertBeforeLast(enriched, core.Message{Role: "system", Content: ep})
-		}
-	}
-
-	// User-as-agent state (#37): focus / mood / recency, read-only context.
-	if mem := a.brain.Memory(); mem != nil {
-		if line := loadUserState(ctx, mem).contextLine(); line != "" {
-			enriched = insertBeforeLast(enriched, core.Message{Role: "system", Content: line})
-		}
-	}
+	enriched = a.injectSessionContext(ctx, enriched)
 
 	if styleDirective := buildStyleDirective(ctx, a.brain.Memory()); styleDirective != "" {
 		styleMsg := core.Message{Role: "system", Content: styleDirective}

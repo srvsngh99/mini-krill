@@ -2,6 +2,7 @@ package brain
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -78,18 +79,82 @@ func TestEpisodic_DisabledIsNoOp(t *testing.T) {
 	}
 }
 
-func TestEpisodic_LatestPicksNewest(t *testing.T) {
-	e, mem, _ := newEpisodicFixture(t)
+// TestEpisodic_LatestSurvivesManyEpisodes is the regression for the round-1
+// review: latestEntry used Search("episode_", 50), which returns the *oldest*
+// 50 (ReadDir is lexical, episode_<unixMilli> is monotonic), so once history
+// exceeded the scan limit Latest returned the newest-of-the-oldest-50 — stale
+// — and the dedupe guard broke with it. The rolling episode:latest pointer
+// makes "newest" an O(1) exact-key read, independent of history size, and
+// pruning bounds the namespace.
+func TestEpisodic_LatestSurvivesManyEpisodes(t *testing.T) {
+	e, mem, store := newEpisodicFixture(t)
 	ctx := context.Background()
-	old := core.MemoryEntry{Key: "episode_1", Value: "old session", Tags: []string{episodeTag}, Source: "reflection", CreatedAt: time.Now().Add(-3 * time.Hour)}
-	recent := core.MemoryEntry{Key: "episode_2", Value: "recent session", Tags: []string{episodeTag}, Source: "reflection", CreatedAt: time.Now().Add(-1 * time.Hour)}
-	_ = mem.Store(ctx, old)
-	_ = mem.Store(ctx, recent)
+
+	// Seed far more than the old scan limit, all old, lexically-ascending
+	// keys. The pre-fix code would only ever see these.
+	base := time.Now().Add(-30 * 24 * time.Hour)
+	for i := 0; i < 60; i++ {
+		_ = mem.Store(ctx, core.MemoryEntry{
+			Key:       fmt.Sprintf("episode_%013d", i),
+			Value:     "stale session",
+			Tags:      []string{episodeTag, "system"},
+			Source:    "reflection",
+			CreatedAt: base.Add(time.Duration(i) * time.Minute),
+		})
+	}
+
+	// A real, current session consolidates a fresh episode.
+	for _, p := range [][2]string{
+		{"user", "wire up the new exporter"},
+		{"assistant", "drafted it"},
+		{"user", "ship it"},
+		{"assistant", "shipped, green"},
+	} {
+		_ = store.SaveTurn("cli", p[0], p[1])
+	}
+	ep, err := e.Consolidate(ctx, "cli")
+	if err != nil || ep == nil {
+		t.Fatalf("Consolidate err=%v ep=%v", err, ep)
+	}
+
+	// Latest must return the just-made episode, not one of the 60 stale ones.
 	line, err := e.Latest(ctx, 7*24*time.Hour)
 	if err != nil || line == "" {
 		t.Fatalf("Latest err=%v line=%q", err, line)
 	}
-	if !strings.Contains(line, "recent session") {
-		t.Fatalf("Latest should pick the newest episode, got %q", line)
+	if strings.Contains(line, "stale session") {
+		t.Fatalf("Latest returned a stale episode despite >50 in history: %q", line)
+	}
+	if !strings.Contains(line, ep.Value) {
+		t.Fatalf("Latest should surface the newest episode %q, got %q", ep.Value, line)
+	}
+
+	// The episode_* namespace must be bounded (pointer key is excluded).
+	hist, _ := mem.Search(ctx, "episode_", 0)
+	n := 0
+	for _, en := range hist {
+		if strings.HasPrefix(en.Key, "episode_") {
+			n++
+		}
+	}
+	if n > maxEpisodeHistory {
+		t.Fatalf("history not pruned: %d > %d", n, maxEpisodeHistory)
+	}
+}
+
+func TestHumanizeAge(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{30 * time.Second, "moments"},
+		{45 * time.Minute, "45m"},
+		{3 * time.Hour, "3h"},
+		{50 * time.Hour, "2d"},
+	}
+	for _, c := range cases {
+		if got := humanizeAge(c.d); got != c.want {
+			t.Errorf("humanizeAge(%s) = %q, want %q", c.d, got, c.want)
+		}
 	}
 }

@@ -70,6 +70,32 @@ func TestLoadRecentEmpty(t *testing.T) {
 	}
 }
 
+func TestLastActivity(t *testing.T) {
+	store := newTestStore(t)
+
+	// Empty store / unknown channel → zero time, no error.
+	if ts, err := store.LastActivity("cli"); err != nil || !ts.IsZero() {
+		t.Fatalf("empty store: ts=%v err=%v, want zero/nil", ts, err)
+	}
+
+	before := time.Now()
+	_ = store.SaveTurn("cli", "user", "first")
+	_ = store.SaveTurn("tg", "user", "other channel")
+	_ = store.SaveTurn("cli", "assistant", "last on cli")
+	after := time.Now()
+
+	ts, err := store.LastActivity("cli")
+	if err != nil {
+		t.Fatalf("LastActivity: %v", err)
+	}
+	if ts.Before(before) || ts.After(after) {
+		t.Fatalf("LastActivity = %v, want within [%v,%v]", ts, before, after)
+	}
+	if ts2, _ := store.LastActivity("absent"); !ts2.IsZero() {
+		t.Fatalf("unknown channel must be zero time, got %v", ts2)
+	}
+}
+
 func TestChannelIsolation(t *testing.T) {
 	store := newTestStore(t)
 

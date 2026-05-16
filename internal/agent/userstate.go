@@ -92,6 +92,11 @@ func lightMood(input string) string {
 // in-memory update — persistence is the caller's choice (we go via a
 // goroutine in ChatFromPlatform so the file write never blocks the reply).
 func updateUserState(ctx context.Context, mem core.Memory, input string) {
+	// Load-modify-save across two independently-locked FileMemory ops from an
+	// async goroutine: two near-simultaneous turns can lose an update. This is
+	// a deliberate, accepted trade-off — the record is read-only context, not
+	// behavioural state, so a momentarily stale focus/mood is harmless and not
+	// worth a cross-store transaction.
 	us := loadUserState(ctx, mem)
 	c := ClusterFor(input)
 	if c.ID != "" {

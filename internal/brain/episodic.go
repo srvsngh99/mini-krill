@@ -3,6 +3,7 @@ package brain
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -32,6 +33,18 @@ const (
 	// The agent only calls Consolidate after a >30min activity gap, so this is
 	// a belt-and-braces guard against a greeting burst minting duplicates.
 	episodeDedupeWindow = 25 * time.Minute
+	// episodeLatestKey is a single rolling pointer the consolidator overwrites
+	// with the newest episode. latestEntry reads it by exact key, so "most
+	// recent episode" never depends on Search iteration order.
+	// FileMemory.Search("episode_", N) returns the *oldest* N matches —
+	// os.ReadDir is lexical and episode keys are monotonic episode_<unixMilli>
+	// — so a Search+max scan silently picked the newest-of-the-oldest-N and
+	// cross-session continuity died (and dedupe broke) past N episodes.
+	episodeLatestKey = "episode:latest"
+	// maxEpisodeHistory bounds the episode_* namespace. FileMemory accepts a
+	// maxMem but never enforces it, so without an explicit prune the namespace
+	// grows without limit.
+	maxEpisodeHistory = 50
 )
 
 // NewEpisodic wires the consolidator. Any nil dependency disables it (every
@@ -102,8 +115,43 @@ func (e *Episodic) Consolidate(ctx context.Context, channel string) (*core.Memor
 	if err := e.mem.Store(ctx, entry); err != nil {
 		return nil, fmt.Errorf("episodic: store: %w", err)
 	}
+	// Overwrite the rolling pointer so latestEntry/dedupe stay correct no
+	// matter how many episodes accumulate.
+	ptr := entry
+	ptr.Key = episodeLatestKey
+	if err := e.mem.Store(ctx, ptr); err != nil {
+		return nil, fmt.Errorf("episodic: store latest pointer: %w", err)
+	}
+	e.pruneHistory(ctx)
 	log.Info("episodic: session summarised", "channel", channel, "turns", len(turns))
 	return &entry, nil
+}
+
+// pruneHistory keeps only the newest maxEpisodeHistory episode_* entries so
+// the namespace can't grow without limit. The episode:latest pointer is a
+// distinct key and is never pruned. Best-effort: a failed prune must not fail
+// consolidation.
+func (e *Episodic) pruneHistory(ctx context.Context) {
+	entries, err := e.mem.Search(ctx, "episode_", 0) // limit 0 = unbounded
+	if err != nil {
+		log.Debug("episodic: prune skipped", "error", err)
+		return
+	}
+	hist := entries[:0] // in-place filter; episode:latest has no episode_ prefix
+	for _, en := range entries {
+		if strings.HasPrefix(en.Key, "episode_") && hasTag(en.Tags, episodeTag) {
+			hist = append(hist, en)
+		}
+	}
+	if len(hist) <= maxEpisodeHistory {
+		return
+	}
+	sort.Slice(hist, func(i, j int) bool { return hist[i].CreatedAt.After(hist[j].CreatedAt) })
+	for _, en := range hist[maxEpisodeHistory:] {
+		if err := e.mem.Forget(ctx, en.Key); err != nil {
+			log.Debug("episodic: prune entry failed", "key", en.Key, "error", err)
+		}
+	}
 }
 
 // Latest returns the most recent episode younger than maxAge as a ready-to-
@@ -119,26 +167,34 @@ func (e *Episodic) Latest(ctx context.Context, maxAge time.Duration) (string, er
 	if maxAge > 0 && time.Since(latest.CreatedAt) > maxAge {
 		return "", nil
 	}
-	age := time.Since(latest.CreatedAt).Round(time.Hour)
-	return fmt.Sprintf("Latest episode (read-only, point-in-time from ~%s ago — verify before relying on it): %s", age, latest.Value), nil
+	return fmt.Sprintf("Latest episode (read-only, point-in-time from ~%s ago — verify before relying on it): %s", humanizeAge(time.Since(latest.CreatedAt)), latest.Value), nil
 }
 
-// latestEntry returns the newest episode-tagged MemoryEntry, or nil.
+// latestEntry returns the newest episode via the rolling pointer, or nil.
+// Deliberately an O(1) exact-key read, not a Search scan: FileMemory.Search
+// returns the *oldest* matches (see episodeLatestKey), so a scan would strand
+// continuity and break dedupe once episodes outnumber the scan limit.
 func (e *Episodic) latestEntry(ctx context.Context) (*core.MemoryEntry, error) {
-	entries, err := e.mem.Search(ctx, "episode_", 50)
-	if err != nil {
+	en, err := e.mem.Recall(ctx, episodeLatestKey)
+	if err != nil || en == nil {
 		return nil, err
 	}
-	var best *core.MemoryEntry
-	for i := range entries {
-		if !hasTag(entries[i].Tags, episodeTag) {
-			continue
-		}
-		if best == nil || entries[i].CreatedAt.After(best.CreatedAt) {
-			best = &entries[i]
-		}
+	return en, nil
+}
+
+// humanizeAge renders a coarse, human age ("40m", "3h", "2d"). Round(time.Hour)
+// printed "~0s ago" for any episode under 30 minutes old.
+func humanizeAge(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return "moments"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
 	}
-	return best, nil
 }
 
 func hasTag(tags []string, want string) bool {

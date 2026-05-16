@@ -127,6 +127,44 @@ func (s *ConversationStore) LoadRecent(channel string, n int) ([]core.Message, e
 	return recent, nil
 }
 
+// LastActivity returns the timestamp of the most recent turn on channel, or
+// the zero time if the channel has no turns. Single pass, no message-slice
+// allocation; this is what lets episodic consolidation measure the
+// session-boundary gap across process restarts.
+func (s *ConversationStore) LastActivity(channel string) (time.Time, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	f, err := os.Open(s.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return time.Time{}, nil
+		}
+		return time.Time{}, fmt.Errorf("open conversations store: %w", err)
+	}
+	defer f.Close()
+
+	var last time.Time
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		var turn conversationTurn
+		if err := json.Unmarshal(scanner.Bytes(), &turn); err != nil {
+			continue
+		}
+		if turn.Channel != channel {
+			continue
+		}
+		if turn.Timestamp.After(last) {
+			last = turn.Timestamp
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return time.Time{}, fmt.Errorf("read conversations store: %w", err)
+	}
+	return last, nil
+}
+
 func (s *ConversationStore) Close() error { return nil }
 
 // Search returns turns matching a substring or time predicate. query is
