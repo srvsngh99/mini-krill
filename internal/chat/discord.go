@@ -141,6 +141,14 @@ func (d *DiscordBot) onMessageCreate(ctx context.Context) func(s *discordgo.Sess
 						break
 					}
 				}
+				// Parity with Telegram's isReplyToMe: a reply to the bot's
+				// own message counts as directly addressing it, even without
+				// an explicit @mention.
+				if !addressed && m.ReferencedMessage != nil &&
+					m.ReferencedMessage.Author != nil &&
+					m.ReferencedMessage.Author.ID == s.State.User.ID {
+					addressed = true
+				}
 				if addressed {
 					log.Info("bystander addressed the bot; declining (owner-gated)", "user_id", m.Author.ID, "username", m.Author.Username)
 					if _, err := s.ChannelMessageSend(m.ChannelID, discordBystanderDecline); err != nil {

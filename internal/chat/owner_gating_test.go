@@ -65,4 +65,14 @@ func TestScrubCrosspostLiterals(t *testing.T) {
 	if !strings.Contains(got, "line one") || !strings.Contains(got, "line three") {
 		t.Errorf("scrub removed too much: got=%q", got)
 	}
+
+	// Bracket-less close fragment (mirror of the unterminated-header case) →
+	// must not leak the token either.
+	got, did = scrubCrosspostLiterals("keep[/CROSSPOST")
+	if !did || strings.Contains(got, "CROSSPOST") {
+		t.Errorf("bracket-less close leaked: got=%q did=%v", got, did)
+	}
+	if !strings.Contains(got, "keep") {
+		t.Errorf("scrub removed too much: got=%q", got)
+	}
 }

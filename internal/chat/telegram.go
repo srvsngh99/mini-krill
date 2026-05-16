@@ -181,26 +181,36 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 	// never trigger tasks, memory writes, or destructive actions. This is the
 	// safety counterpart to "no approval prompts by default". When owner_id is
 	// unset, behaviour is unchanged (legacy) with a one-time hint.
-	if msg.From != nil && !t.isOwner(msg.From.ID) {
-		if t.cfg.OwnerID == 0 {
-			t.ownerWarn.Do(func() {
-				log.Warn("telegram.owner_id is unset — anyone in a shared chat can drive the bot; set telegram.owner_id to your Telegram user ID for single-owner safety")
-			})
-		} else {
-			mentioned := t.isMentioned(msg, botUsername)
-			isReplyToMe := msg.ReplyToMessage != nil &&
-				msg.ReplyToMessage.From != nil &&
-				msg.ReplyToMessage.From.UserName == botUsername
-			if mentioned || isReplyToMe {
-				log.Info("bystander addressed the bot; declining (owner-gated)",
-					"user_id", msg.From.ID, "username", msg.From.UserName)
-				t.sendMessage(chatID, bystanderDecline)
-			} else {
-				log.Debug("bystander message ignored (owner-gated)",
-					"user_id", msg.From.ID, "username", msg.From.UserName)
-			}
-			return
+	if t.cfg.OwnerID == 0 {
+		t.ownerWarn.Do(func() {
+			log.Warn("telegram.owner_id is unset — anyone in a shared chat can drive the bot; set telegram.owner_id to your Telegram user ID for single-owner safety")
+		})
+	} else if msg.From == nil || !t.isOwner(msg.From.ID) {
+		// Bystander. msg.From == nil (linked-channel auto-forwards,
+		// sender_chat/anonymous posts) is classified here explicitly so the
+		// gate is the single authoritative boundary — the safety property
+		// must not depend on an incidental downstream nil-deref + recover.
+		mentioned := t.isMentioned(msg, botUsername)
+		isReplyToMe := msg.ReplyToMessage != nil &&
+			msg.ReplyToMessage.From != nil &&
+			msg.ReplyToMessage.From.UserName == botUsername
+		var uid int64
+		var uname string
+		if msg.From != nil {
+			uid, uname = msg.From.ID, msg.From.UserName
 		}
+		if mentioned || isReplyToMe {
+			log.Info("bystander addressed the bot; declining (owner-gated)",
+				"user_id", uid, "username", uname)
+			// The decline deliberately bypasses bot-to-bot turn accounting:
+			// it's a single fixed reply that never reaches the agent, so it
+			// cannot drive a conversational loop.
+			t.sendMessage(chatID, bystanderDecline)
+		} else {
+			log.Debug("bystander message ignored (owner-gated)",
+				"user_id", uid, "username", uname)
+		}
+		return
 	}
 
 	// Handle commands (work in both DMs and groups).
@@ -1047,7 +1057,7 @@ func extractCrossPostDirectives(text string) (string, []crossPostTarget) {
 // directive leaks the raw token straight into the user's chat. Returns the
 // cleaned text and whether anything was stripped (for logging).
 func scrubCrosspostLiterals(text string) (string, bool) {
-	if !strings.Contains(text, "[CROSSPOST") && !strings.Contains(text, "[/CROSSPOST]") {
+	if !strings.Contains(text, "[CROSSPOST") && !strings.Contains(text, "[/CROSSPOST") {
 		return text, false
 	}
 	cleaned := text
@@ -1071,6 +1081,10 @@ func scrubCrosspostLiterals(text string) (string, bool) {
 		cleaned = cleaned[:s] + cleaned[s+e+1:]
 	}
 	cleaned = strings.ReplaceAll(cleaned, "[/CROSSPOST]", "")
+	// Also drop a bracket-less close fragment (e.g. "[/CROSSPOST" with no
+	// trailing ']'); after the full-tag replace above, any residue is the
+	// unterminated mirror of the header case handled in the loop.
+	cleaned = strings.ReplaceAll(cleaned, "[/CROSSPOST", "")
 	return strings.TrimSpace(cleaned), true
 }
 
