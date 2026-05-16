@@ -1,10 +1,12 @@
 package brain
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/srvsngh99/mini-krill/internal/config"
 	"github.com/srvsngh99/mini-krill/internal/core"
@@ -19,6 +21,7 @@ type KrillBrain struct {
 	soul        *core.Soul
 	personality *core.Personality
 	heartbeat   *KrillHeartbeat
+	llm         core.LLMProvider
 	cfg         config.BrainConfig
 }
 
@@ -63,6 +66,7 @@ func New(cfg config.BrainConfig, llm core.LLMProvider) (*KrillBrain, error) {
 		soul:        soul,
 		personality: personality,
 		heartbeat:   hb,
+		llm:         llm,
 		cfg:         cfg,
 	}
 
@@ -104,6 +108,25 @@ func (b *KrillBrain) GetPersonality() *core.Personality {
 // GetSoul returns the krill's soul configuration.
 func (b *KrillBrain) GetSoul() *core.Soul {
 	return b.soul
+}
+
+// episodic builds a consolidator over this brain's stores. Cheap to construct
+// per call (just wires three pointers) so there's no lifecycle to manage.
+func (b *KrillBrain) episodic() *Episodic {
+	return NewEpisodic(b.memory, b.ConversationStore(), b.llm)
+}
+
+// ConsolidateEpisode summarises the recent session on `channel` into a stored
+// episode. Satisfies the agent's optional episodicBrain interface (#29 / D6).
+func (b *KrillBrain) ConsolidateEpisode(ctx context.Context, channel string) error {
+	_, err := b.episodic().Consolidate(ctx, channel)
+	return err
+}
+
+// LatestEpisode returns the most recent episode younger than maxAge as an
+// inject-ready, point-in-time context line, or "" when none qualifies.
+func (b *KrillBrain) LatestEpisode(ctx context.Context, maxAge time.Duration) (string, error) {
+	return b.episodic().Latest(ctx, maxAge)
 }
 
 // SystemPrompt returns the soul's system prompt string.
