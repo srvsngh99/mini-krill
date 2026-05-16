@@ -20,8 +20,10 @@ import (
 )
 
 // AffinityKeyPrefix reserves a memory key namespace so listing/searching the
-// regular memory store skips affinity entries.
-const AffinityKeyPrefix = "affinity:cluster:"
+// regular memory store skips affinity entries. It aliases the shared core
+// constant so the brain-side reservation guard and this writer can never
+// drift apart.
+const AffinityKeyPrefix = core.ReservedAffinityPrefix
 
 // AffinityOutcome is the discrete event types the store understands.
 type AffinityOutcome string
@@ -131,7 +133,7 @@ func (s *AffinityStore) Put(ctx context.Context, rec ClusterAffinity) error {
 		Value:      string(data),
 		Tags:       []string{"affinity", "system"},
 		Scope:      "system",
-		Source:     "affinity-store",
+		Source:     core.AffinitySource,
 		CreatedAt:  rec.LastUpdate,
 		AccessedAt: rec.LastUpdate,
 	})
