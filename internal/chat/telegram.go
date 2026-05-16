@@ -52,6 +52,32 @@ func (t *TelegramBot) isOwner(id int64) bool {
 // side effects are possible from a bystander.
 const bystanderDecline = "Hey! 🦐 I only take instructions from my owner, so I can't run tasks or remember things for anyone else here — but say hi to them for me."
 
+// ownerGate is the outcome of the single-owner authorization decision.
+type ownerGate int
+
+const (
+	gateProceed ownerGate = iota // owner, or owner-gating off (legacy) — route to agent
+	gateIgnore                   // bystander not addressing the bot — drop silently
+	gateDecline                  // bystander addressing the bot — fixed decline, never routed
+)
+
+// decideOwnerGate is the single authoritative owner-authorization decision,
+// kept pure (no tgbotapi / I/O) so the boundary is unit-testable: a future
+// refactor of processUpdate has a test guarding "owner-gating on + not the
+// owner (incl. From==nil) never proceeds to the agent". ownerSet==false means
+// gating is off → always proceed (legacy behaviour). Deny-by-default: anything
+// that isn't a confirmed owner under an active gate is ignored or declined,
+// never proceeded.
+func decideOwnerGate(ownerSet, isOwner, addressed bool) ownerGate {
+	if !ownerSet || isOwner {
+		return gateProceed
+	}
+	if addressed {
+		return gateDecline
+	}
+	return gateIgnore
+}
+
 // NewTelegramBot creates a TelegramBot using the provided config and handler.
 // Returns an error if the token is missing or invalid.
 func NewTelegramBot(cfg config.TelegramConfig, handler core.ChatHandler) (*TelegramBot, error) {
@@ -181,35 +207,45 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 	// never trigger tasks, memory writes, or destructive actions. This is the
 	// safety counterpart to "no approval prompts by default". When owner_id is
 	// unset, behaviour is unchanged (legacy) with a one-time hint.
-	if t.cfg.OwnerID == 0 {
+	ownerSet := t.cfg.OwnerID != 0
+	if !ownerSet {
 		t.ownerWarn.Do(func() {
 			log.Warn("telegram.owner_id is unset — anyone in a shared chat can drive the bot; set telegram.owner_id to your Telegram user ID for single-owner safety")
 		})
-	} else if msg.From == nil || !t.isOwner(msg.From.ID) {
-		// Bystander. msg.From == nil (linked-channel auto-forwards,
-		// sender_chat/anonymous posts) is classified here explicitly so the
-		// gate is the single authoritative boundary — the safety property
-		// must not depend on an incidental downstream nil-deref + recover.
-		mentioned := t.isMentioned(msg, botUsername)
-		isReplyToMe := msg.ReplyToMessage != nil &&
+	}
+	// msg.From == nil (linked-channel auto-forwards, sender_chat/anonymous
+	// posts) is never the owner — decideOwnerGate then yields ignore/decline
+	// (never proceed) when owner-gating is on, so the safety property is the
+	// gate's, not an incidental downstream nil-deref + recover.
+	isOwner := msg.From != nil && t.isOwner(msg.From.ID)
+	addressed := t.isMentioned(msg, botUsername) ||
+		(msg.ReplyToMessage != nil &&
 			msg.ReplyToMessage.From != nil &&
-			msg.ReplyToMessage.From.UserName == botUsername
+			msg.ReplyToMessage.From.UserName == botUsername)
+	switch decideOwnerGate(ownerSet, isOwner, addressed) {
+	case gateProceed:
+		// Owner, or owner-gating off (legacy) — fall through to handling.
+	case gateDecline:
 		var uid int64
 		var uname string
 		if msg.From != nil {
 			uid, uname = msg.From.ID, msg.From.UserName
 		}
-		if mentioned || isReplyToMe {
-			log.Info("bystander addressed the bot; declining (owner-gated)",
-				"user_id", uid, "username", uname)
-			// The decline deliberately bypasses bot-to-bot turn accounting:
-			// it's a single fixed reply that never reaches the agent, so it
-			// cannot drive a conversational loop.
-			t.sendMessage(chatID, bystanderDecline)
-		} else {
-			log.Debug("bystander message ignored (owner-gated)",
-				"user_id", uid, "username", uname)
+		log.Info("bystander addressed the bot; declining (owner-gated)",
+			"user_id", uid, "username", uname)
+		// The decline deliberately bypasses bot-to-bot turn accounting: it's
+		// a single fixed reply that never reaches the agent, so it cannot
+		// drive a conversational loop.
+		t.sendMessage(chatID, bystanderDecline)
+		return
+	case gateIgnore:
+		var uid int64
+		var uname string
+		if msg.From != nil {
+			uid, uname = msg.From.ID, msg.From.UserName
 		}
+		log.Debug("bystander message ignored (owner-gated)",
+			"user_id", uid, "username", uname)
 		return
 	}
 
@@ -1074,7 +1110,10 @@ func scrubCrosspostLiterals(text string) (string, bool) {
 			if nl == -1 {
 				cleaned = cleaned[:s]
 			} else {
-				cleaned = cleaned[:s] + cleaned[s+nl:]
+				// Consume the broken line's own newline too, else the text
+				// before the marker keeps its newline and we emit a blank
+				// line ("line one\n\nline three").
+				cleaned = cleaned[:s] + cleaned[s+nl+1:]
 			}
 			continue
 		}
