@@ -40,7 +40,11 @@ var secretPathPatterns = []string{
 // raw substring over the whole path, so a benign file like
 // "notconfig.yaml.txt" was wrongly refused (it contains "config.yaml"). This
 // anchors each pattern to a real filename boundary instead:
-//   - extension patterns (".env", ".pem", ".key") match a true suffix;
+//   - extension patterns (".env", ".pem", ".key") match a true suffix
+//     OR an interior dot-segment, so the multi-environment dotenv
+//     convention (".env.local", ".env.production") and backup variants
+//     ("server.pem.bak") are still refused — but never a mid-word
+//     substring ("envparser.go" stays readable);
 //   - prefix patterns ("secrets.") match the start of the basename;
 //   - name patterns ("config.yaml", "credentials", "private_key",
 //     "service_account") match the whole basename, a "<name>.bak"-style
@@ -52,7 +56,11 @@ func secretMatch(abs string) (string, bool) {
 	for _, pat := range secretPathPatterns {
 		switch {
 		case strings.HasPrefix(pat, "."): // extension-like
-			if strings.HasSuffix(base, pat) {
+			// true extension suffix (".env", "prod.env", "server.pem")
+			// or the pattern as an interior dot-segment (".env.local",
+			// ".env.production", "server.pem.bak") — never a mid-word
+			// substring ("envparser.go" / "keyboard.go" stay readable).
+			if strings.HasSuffix(base, pat) || strings.Contains(base, pat+".") {
 				return pat, true
 			}
 		case strings.HasSuffix(pat, "."): // prefix-like ("secrets.")

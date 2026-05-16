@@ -523,7 +523,7 @@ func (t *TelegramBot) handleCommand(chatID int64, msg *tgbotapi.Message) {
 			"/status  - Check my vital signs",
 			"/model   - Show active provider and model",
 			"/models  - List all providers and models",
-			"/switch  - Switch provider (e.g. /switch local, /switch codex gpt-5.5)",
+			"/switch  - Switch provider (e.g. /switch local, /switch codex)",
 			"/fact    - Learn something about real krill",
 			"/plan    - Start a dive plan for a task",
 			"/tasks   - List active and recent tasks",
@@ -694,7 +694,7 @@ func (t *TelegramBot) handleSwitchCommand(chatID int64, msg *tgbotapi.Message) {
 	}
 	args := strings.TrimSpace(msg.CommandArguments())
 	if args == "" {
-		t.sendMessage(chatID, "Usage: /switch <provider> [model]\nExample: /switch local\nExample: /switch codex gpt-5.5\nExample: /switch claude sonnet")
+		t.sendMessage(chatID, "Usage: /switch <provider> [model]\nExample: /switch local\nExample: /switch codex\nExample: /switch claude sonnet")
 		return
 	}
 	parts := strings.Fields(args)

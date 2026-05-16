@@ -15,6 +15,10 @@ func TestSecretMatch(t *testing.T) {
 		j("/repo", "config.yaml.bak"),
 		j("/repo", ".env"),
 		j("/repo", "prod.env"),
+		j("/repo", ".env.local"),             // dotenv multi-env (regression)
+		j("/repo", ".env.production"),         // dotenv multi-env (regression)
+		j("/repo", "app", ".env.development"), // dotenv multi-env (regression)
+		j("/repo", "server.pem.bak"),          // backup of a .pem (regression)
 		j("/repo", "server.pem"),
 		j("/repo", "id_rsa.key"),
 		j("/repo", "secrets.json"),
