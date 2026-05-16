@@ -147,6 +147,10 @@ type ConversationStore interface {
 	SaveTurn(channel, role, content string) error
 	LoadRecent(channel string, n int) ([]Message, error)
 	Search(channel, query string, since, until time.Time, limit int) ([]Message, error)
+	// LastActivity reports the timestamp of the most recent stored turn for
+	// channel (zero time if none). Persisted, so a session-boundary gap can
+	// be measured across process restarts rather than from in-memory state.
+	LastActivity(channel string) (time.Time, error)
 	Close() error
 }
 
