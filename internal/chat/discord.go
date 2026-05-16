@@ -118,6 +118,13 @@ func (d *DiscordBot) onMessageCreate(ctx context.Context) func(s *discordgo.Sess
 			}
 		}()
 
+		// Defensive: system/webhook edge cases can carry a nil Author. Drop
+		// explicitly rather than relying on the panic recovery above — this
+		// is a security path (the owner gate below dereferences Author).
+		if m.Author == nil {
+			return
+		}
+
 		// Never reply to ourselves.
 		if m.Author.ID == s.State.User.ID {
 			return
