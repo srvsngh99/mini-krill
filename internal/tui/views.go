@@ -338,7 +338,7 @@ func (c *ChatView) sendChat(text string) tea.Cmd {
 				response: "No agent connected - I'm swimming solo right now. Try again after the LLM is configured!",
 			}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
 		resp, err := agent.Chat(ctx, text)
