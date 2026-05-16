@@ -153,8 +153,13 @@ func (m *ProviderManager) ListProviders() []ProviderInfo {
 			HasKey:   true,
 		},
 		{
-			Name:     "codex",
-			Models:   []string{"auto", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"},
+			Name: "codex",
+			// #23: only advertise "auto". The previous list (gpt-5.5/5.4/…)
+			// was fabricated — those Codex model IDs don't exist, so picking
+			// one produced a confusing failure ~90s later. "auto" delegates
+			// model choice to the Codex CLI, which is the honest contract
+			// (cli_provider omits --model when the model is "auto").
+			Models:   []string{"auto"},
 			IsActive: active.Provider == "codex",
 			NeedsKey: false,
 			HasKey:   codexHasKey,
@@ -279,19 +284,16 @@ func (m *ProviderManager) ResolveTarget(input string) (provider, model string, o
 		return prov, "", true
 	}
 
-	// Check if it's a model name - match to provider
+	// Check if it's a model name - match to provider.
+	// #23: no fabricated Codex model IDs (gpt-5.5 etc.) — Codex is reached
+	// via the "codex"/"chatgpt" provider aliases with model "auto".
 	modelMap := map[string]string{
-		"gpt-4o":        "openai",
-		"gpt-4o-mini":   "openai",
-		"gpt-4":         "openai",
-		"gpt-5.2":       "codex",
-		"gpt-5.3-codex": "codex",
-		"gpt-5.4":       "codex",
-		"gpt-5.4-mini":  "codex",
-		"gpt-5.5":       "codex",
-		"sonnet":        "claude",
-		"opus":          "claude",
-		"haiku":         "claude",
+		"gpt-4o":      "openai",
+		"gpt-4o-mini": "openai",
+		"gpt-4":       "openai",
+		"sonnet":      "claude",
+		"opus":        "claude",
+		"haiku":       "claude",
 	}
 
 	// Add Ollama models dynamically

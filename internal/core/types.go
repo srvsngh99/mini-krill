@@ -10,7 +10,7 @@ import (
 )
 
 // Version is set at build time via -ldflags
-var Version = "0.1.2"
+var Version = "0.1.3"
 
 // ReservedAffinityPrefix namespaces per-task-type plan-affinity records in the
 // memory store. Only the affinity store itself (Source == AffinitySource) may
