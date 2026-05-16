@@ -130,6 +130,13 @@ type TelegramConfig struct {
 	Token       string  `yaml:"token"`
 	AllowedIDs  []int64 `yaml:"allowed_ids"`
 	BotMaxTurns int     `yaml:"bot_max_turns"` // max bot-to-bot exchanges before waiting for human (0=unlimited, default 3)
+	// OwnerID is the single owner's Telegram user ID. When non-zero, only the
+	// owner can drive the bot: anyone else in a shared group/chat is a
+	// bystander whose messages never reach the agent (no tasks, memory
+	// writes, or destructive actions). 0 = unset = legacy behaviour (all
+	// allowed), with a one-time startup hint to set it for shared-group
+	// safety. Single-owner model.
+	OwnerID int64 `yaml:"owner_id"`
 }
 
 // DiscordConfig for the Discord bot integration.
@@ -138,6 +145,9 @@ type DiscordConfig struct {
 	Token     string `yaml:"token"`
 	GuildID   string `yaml:"guild_id"`
 	ChannelID string `yaml:"channel_id"`
+	// OwnerID is the single owner's Discord user ID (snowflake string). Same
+	// semantics as TelegramConfig.OwnerID; "" = unset = legacy behaviour.
+	OwnerID string `yaml:"owner_id"`
 }
 
 // OllamaConfig for local Ollama management.
