@@ -61,6 +61,7 @@ type KrillAgent struct {
 	turnFetches       *turnFetchLog  // per-turn provenance ledger; reset on each ChatFromPlatform call
 	affinity          *AffinityStore // task-type plan-affinity learner
 	pendingClstr      TaskCluster    // cluster while a plan is awaiting approval
+	lastAutoRun       TaskCluster    // cluster of the most recent auto-executed (un-gated) turn, awaiting a post-turn THANKED/FIXED verdict from the user's next message
 	cachedEmojiStyle  string         // cached read of cfg.Brain.EmojiStyle; refreshed on /emoji
 	cachedOverlayDirs []string       // cached overlay directives; invalidated on /persona writes
 	cachedOverlayInit bool           // true once cachedOverlayDirs has been loaded at least once
@@ -217,6 +218,15 @@ func (a *KrillAgent) ChatFromPlatform(ctx context.Context, platform, chatID, inp
 	// Fresh provenance ledger per turn — every reply is checked against URLs
 	// actually fetched during this single ChatFromPlatform invocation.
 	a.turnFetches = newTurnFetchLog()
+
+	// Closed-loop learning: if the previous turn auto-executed (no approval
+	// gate), this message is the user's implicit verdict on it. Silence /
+	// continuation / praise → THANKED (the plan was unneeded, drift toward
+	// just-act); a correction → FIXED (a plan would have helped, drift back
+	// toward planning). This restores symmetric affinity drift — before this,
+	// a cluster could graduate to auto-run but never fall back, so a cluster
+	// that started producing bad output stayed auto-run forever.
+	a.creditPostTurn(input)
 
 	if response, handled := a.handleProviderCommand(input); handled {
 		a.saveTurn("user", input)
@@ -570,6 +580,43 @@ func (a *KrillAgent) creditOutcome(ctx context.Context, cluster TaskCluster, out
 	return flipped
 }
 
+// creditPostTurn observes the user's first message after an auto-executed
+// (un-gated) turn and credits the cluster THANKED or FIXED. It is the missing
+// half of the affinity loop: the approval path already credits APPROVED /
+// MODIFIED / REJECTED, but an auto-run produces no explicit verdict, so
+// without this a calibrated cluster's score could only ever rise — a cluster
+// that started producing bad output would stay auto-run forever.
+//
+// Must be called at the very top of ChatFromPlatform, before history gets the
+// new user message appended, so lastAssistantBefore resolves to the auto-run
+// response rather than one we are about to generate. The credit runs in a
+// goroutine (like recordFeedback) so it never blocks the response.
+func (a *KrillAgent) creditPostTurn(input string) {
+	cluster := a.lastAutoRun
+	if cluster.ID == "" {
+		return
+	}
+	a.lastAutoRun = TaskCluster{} // consume — exactly one verdict per auto-run
+	prev := lastAssistantBefore(a.history, len(a.history)-1)
+	outcome := postTurnOutcome(input, prev)
+	log.Debug("post-turn affinity signal", "cluster", cluster.String(), "outcome", outcome)
+	go a.creditOutcome(context.Background(), cluster, outcome)
+}
+
+// postTurnOutcome classifies the user's first message after an auto-run.
+// Pure function so the classification is unit-testable without the async
+// credit path: a correction against the auto-run's response → FIXED
+// (planning would have helped), anything else — praise, a follow-up, a new
+// topic, even a slash command — → THANKED (no complaint = plan was unneeded).
+// THANKED is a weak nudge (-0.10*score); a real correction (+0.15) pulls back
+// harder, which is the safe asymmetry.
+func postTurnOutcome(input, prevAssistant string) AffinityOutcome {
+	if looksLikeCorrection(strings.ToLower(input), prevAssistant) {
+		return OutcomeFixed
+	}
+	return OutcomeThanked
+}
+
 // appendAffinityNarration formats the one-line transition note. Caller decides
 // whether to invoke (based on the bool returned by creditOutcome). Issue #30:
 // autonomy without narrated learning is a black box.
@@ -682,6 +729,7 @@ func (a *KrillAgent) handleTask(ctx context.Context, input string) (string, erro
 	if a.affinity != nil && (a.cfg.AutonomyFloor == "act" || a.cfg.AutonomyFloor == "evolve") {
 		if decision, _ := a.affinity.Decide(ctx, cluster); decision == DecisionJustAct {
 			log.Info("affinity says skip plan, answering directly", "cluster", cluster.String())
+			a.lastAutoRun = cluster // un-gated → next message is the verdict
 			return a.handleAnswer(ctx)
 		}
 	}
@@ -720,6 +768,7 @@ func (a *KrillAgent) handleTask(ctx context.Context, input string) (string, erro
 	}
 
 	log.Info("auto-executing plan", "task", input, "steps", len(plan.Steps), "cluster", cluster.String())
+	a.lastAutoRun = cluster // un-gated execution → the user's next message credits THANKED/FIXED
 
 	// On timeout-sensitive platforms, run in background if task has multiple steps
 	if a.shouldRunInBackground(plan) {
@@ -1471,7 +1520,16 @@ func memoryKey(s string) string {
 // not a greeting), the message must be ≤8 words, and it must not contain a
 // forward verb that signals a fresh request.
 func looksLikeCorrection(lower, prevAssistant string) bool {
-	corrections := []string{"no", "nah", "nope", "not what i", "that's not right", "don't"}
+	// Normalise the iOS/Android curly apostrophe so "doesn’t" matches the
+	// straight-quote contraction list below (containsWord treats ' as a word
+	// char, so the apostrophe form must be canonical first).
+	lower = strings.ReplaceAll(lower, "’", "'")
+	// #16: the negative side was asymmetric — it caught "don't" but not the
+	// other contracted negatives, so genuine corrections like "that doesn't
+	// work" / "no it didn't" were under-counted and never credited FIXED.
+	corrections := []string{"no", "nah", "nope", "not what i", "that's not right",
+		"don't", "doesn't", "didn't", "isn't", "aren't", "wasn't", "weren't",
+		"hasn't", "haven't", "won't", "wouldn't", "shouldn't", "can't", "couldn't"}
 	hit := false
 	for _, c := range corrections {
 		if containsWord(lower, c) {
