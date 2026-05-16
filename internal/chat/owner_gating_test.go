@@ -7,6 +7,39 @@ import (
 	"github.com/srvsngh99/mini-krill/internal/config"
 )
 
+// TestDecideOwnerGate is the boundary regression owed from PR #37 review
+// (follow-up 1): with owner-gating on, anything that is not a confirmed owner
+// — crucially the msg.From == nil case, which presents as isOwner=false —
+// must never resolve to gateProceed, so the agent is never reached.
+func TestDecideOwnerGate(t *testing.T) {
+	cases := []struct {
+		name                       string
+		ownerSet, isOwner, address bool
+		want                       ownerGate
+	}{
+		{"gating off → always proceed", false, false, true, gateProceed},
+		{"gating off, unaddressed → proceed", false, false, false, gateProceed},
+		{"owner proceeds", true, true, false, gateProceed},
+		{"owner proceeds even if addressed", true, true, true, gateProceed},
+		{"bystander addressing → decline", true, false, true, gateDecline},
+		{"bystander silent → ignore", true, false, false, gateIgnore},
+	}
+	for _, c := range cases {
+		if got := decideOwnerGate(c.ownerSet, c.isOwner, c.address); got != c.want {
+			t.Errorf("%s: decideOwnerGate(%v,%v,%v)=%d want %d",
+				c.name, c.ownerSet, c.isOwner, c.address, got, c.want)
+		}
+	}
+
+	// The owed invariant, stated directly: gating on + not the owner (the
+	// From==nil regime) never proceeds to the agent, addressed or not.
+	for _, addressed := range []bool{true, false} {
+		if got := decideOwnerGate(true, false, addressed); got == gateProceed {
+			t.Fatalf("owner-gating on + non-owner (From==nil) must never proceed (addressed=%v)", addressed)
+		}
+	}
+}
+
 func TestTelegramIsOwner(t *testing.T) {
 	// Unset → owner-gating off: nobody is "the owner", so the caller falls
 	// through to legacy behaviour.
@@ -64,6 +97,11 @@ func TestScrubCrosspostLiterals(t *testing.T) {
 	}
 	if !strings.Contains(got, "line one") || !strings.Contains(got, "line three") {
 		t.Errorf("scrub removed too much: got=%q", got)
+	}
+	// Follow-up 2: the broken line's own newline is consumed, so no blank
+	// line is left where the directive was.
+	if strings.Contains(got, "\n\n") {
+		t.Errorf("scrub left a blank line: got=%q", got)
 	}
 
 	// Bracket-less close fragment (mirror of the unterminated-header case) →
