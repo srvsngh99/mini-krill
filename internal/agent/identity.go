@@ -302,6 +302,16 @@ func persistAgentConfig(agent config.AgentConfig) error {
 	// whose Personality may be empty, which previously erased the
 	// init-chosen personality on disk. Preserve the loaded value for any
 	// identity field the incoming config leaves blank.
+	//
+	// Design: empty means "leave whatever is on disk", NOT "clear it".
+	// Clearing identity is not a supported operation anywhere in the code
+	// (RenameAgent rejects empty input; SetPersonality always sets a
+	// concrete name), so there is no caller that legitimately wants an
+	// empty value persisted. This is the same intent as the matching
+	// non-omitempty tags in config.MarshalYAML: both refuse to let an
+	// accidental blank silently destroy user-chosen identity. If a
+	// deliberate clear is ever needed, it must be a distinct explicit
+	// path, not an empty field threaded through this helper.
 	if agent.Personality == "" {
 		agent.Personality = cfg.Agent.Personality
 	}

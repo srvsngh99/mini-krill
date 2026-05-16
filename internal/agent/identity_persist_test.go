@@ -1,6 +1,9 @@
 package agent
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/srvsngh99/mini-krill/internal/config"
@@ -9,7 +12,7 @@ import (
 // Regression: a /name rename carries an in-memory AgentConfig whose
 // Personality is empty. persistAgentConfig must NOT let that erase the
 // init-chosen personality on disk (it previously did, after which Load
-// silently defaulted personality to "krill" — a silent identity downgrade).
+// silently defaulted personality to "krill" (a silent identity downgrade).
 func TestPersistAgentConfig_PreservesPersonalityOnRename(t *testing.T) {
 	t.Setenv("KRILL_DATA_DIR", t.TempDir())
 
@@ -38,23 +41,36 @@ func TestPersistAgentConfig_PreservesPersonalityOnRename(t *testing.T) {
 	}
 }
 
-// Regression: agent_name/personality must be written even when set, never
-// dropped by omitempty — a round-trip through Save/Load preserves them.
+// Regression: the agent_name/personality keys must be emitted even when the
+// values are empty. This is the assertion that actually pins the omitempty
+// removal: with `,omitempty` restored these keys vanish from the file for an
+// empty struct, so this test fails. (A non-empty round-trip would pass either
+// way and would not guard the regression.)
 func TestMarshalYAML_IdentityFieldsNotOmitted(t *testing.T) {
-	t.Setenv("KRILL_DATA_DIR", t.TempDir())
+	dir := t.TempDir()
+	t.Setenv("KRILL_DATA_DIR", dir)
 
 	c := config.DefaultConfig()
-	c.Agent.AgentName = "Jarvis"
-	c.Agent.Personality = "jarvis"
+	c.Agent.AgentName = "" // the exact condition omitempty would have dropped
+	c.Agent.Personality = ""
 	if err := config.Save(c); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	got, err := config.Load()
+
+	raw, err := os.ReadFile(filepath.Join(dir, "config.yaml"))
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("read config.yaml: %v", err)
 	}
-	if got.Agent.AgentName != "Jarvis" || got.Agent.Personality != "jarvis" {
-		t.Errorf("identity not round-tripped: agent_name=%q personality=%q",
-			got.Agent.AgentName, got.Agent.Personality)
+	text := string(raw)
+	// agent_name is unique to the agent block, so presence is sufficient.
+	if !strings.Contains(text, "agent_name:") {
+		t.Error("agent_name: key missing from config.yaml on empty value (omitempty regression)")
+	}
+	// personality: appears in BOTH the agent and brain blocks; the brain
+	// one is never omitempty, so it is always present. With the agent
+	// field's omitempty removed there must be two occurrences; with it
+	// restored and the value empty there is only the brain one.
+	if n := strings.Count(text, "personality:"); n < 2 {
+		t.Errorf("agent personality: key missing (found %d personality: lines, want >=2; omitempty regression)", n)
 	}
 }
