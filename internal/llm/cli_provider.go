@@ -151,6 +151,19 @@ func runCLIWithIdle(ctx context.Context, name string, args []string, stdin strin
 		cmd.Stdin = strings.NewReader(stdin)
 	}
 
+	// Run the child in its own process group and, on context cancel (idle
+	// kill or parent cancel), SIGKILL the whole group rather than just the
+	// direct child. exec.CommandContext's default Cancel kills cmd.Process
+	// only; a CLI that forks helper grandchildren would leave them holding
+	// the pipe write ends, so the reader goroutines never EOF and <-done
+	// (and thus the idle-kill) hangs until the orphan exits on its own.
+	setProcessGroup(cmd)
+	cmd.Cancel = func() error { return killProcessTree(cmd) }
+	// Belt-and-suspenders bound on cmd.Wait(): if a stray inherited FD is
+	// still open after the group kill, force the pipes closed rather than
+	// blocking Wait indefinitely.
+	cmd.WaitDelay = 10 * time.Second
+
 	// Suppress macOS dyld MallocStackLogging warnings at the source. The flag
 	// is leaked into every Go-spawned subprocess on dev machines and pollutes
 	// dive.log with thousands of "can't turn off malloc stack logging" lines.

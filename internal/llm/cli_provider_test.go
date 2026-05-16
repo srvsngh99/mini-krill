@@ -115,6 +115,30 @@ func TestRunCLIIdleKill(t *testing.T) {
 	}
 }
 
+// A silent subprocess that forks a grandchild must still be reclaimed
+// within the idle window. The compound command stops `sh` from
+// exec-replacing into `sleep`, so `sleep` is a forked grandchild that
+// inherits the pipe write ends. Killing only the direct child (the
+// pre-fix behaviour) would orphan `sleep`, keep the pipes open, and hang
+// <-done for the full 5s — the round-4 CI regression. The process-group
+// kill must take the whole tree down promptly.
+func TestRunCLIIdleKillReclaimsChildTree(t *testing.T) {
+	skipIfNoShell(t)
+	start := time.Now()
+	_, err := runCLIWithIdle(context.Background(), "sh",
+		[]string{"-c", "sleep 5; :"}, "", 150*time.Millisecond)
+	if err == nil {
+		t.Fatal("runCLIWithIdle: expected idle-kill error, got nil")
+	}
+	if !strings.Contains(err.Error(), "idle for") {
+		t.Fatalf("runCLIWithIdle error = %v, want idle-kill message", err)
+	}
+	// Must fire near the 150ms window, not the grandchild's 5s lifetime.
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("idle kill took %v — orphaned grandchild not reclaimed", elapsed)
+	}
+}
+
 // A subprocess that keeps streaming output, each chunk within the idle
 // window, must run to completion across many idle windows without being
 // killed — the exact multi-step-plan scenario the PR targets.
