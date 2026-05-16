@@ -134,6 +134,14 @@ func (p *CLIProvider) runClaude(ctx context.Context, model, prompt string) ([]by
 // produces zero bytes on both stdout and stderr for idleTimeout, it is
 // considered stuck and gets killed.
 func runCLI(ctx context.Context, name string, args []string, stdin string) ([]byte, error) {
+	return runCLIWithIdle(ctx, name, args, stdin, idleTimeout)
+}
+
+// runCLIWithIdle is the implementation of runCLI with an injectable idle
+// duration. Production code always passes the fixed idleTimeout const via
+// runCLI; the parameter exists only so tests can shrink it to drive the
+// idle-kill and slow-stream paths under the race detector.
+func runCLIWithIdle(ctx context.Context, name string, args []string, stdin string, idleAfter time.Duration) ([]byte, error) {
 	// Create a child context we can cancel when idle timeout fires.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -208,14 +216,14 @@ func runCLI(ctx context.Context, name string, args []string, stdin string) ([]by
 	// process, which closes the pipes and unblocks the readers).
 	var idled atomic.Bool
 	go func() {
-		idle := time.NewTimer(idleTimeout)
+		idle := time.NewTimer(idleAfter)
 		defer idle.Stop()
 		for {
 			select {
 			case <-bump:
 				// Go 1.23+: Reset alone is correct; no manual drain needed,
 				// and a stale fire is never delivered after Reset.
-				idle.Reset(idleTimeout)
+				idle.Reset(idleAfter)
 			case <-idle.C:
 				idled.Store(true)
 				cancel()
@@ -238,7 +246,7 @@ func runCLI(ctx context.Context, name string, args []string, stdin string) ([]by
 
 	switch {
 	case idled.Load():
-		return nil, fmt.Errorf("%s idle for %v with no output — process killed", name, idleTimeout)
+		return nil, fmt.Errorf("%s idle for %v with no output — process killed", name, idleAfter)
 	case ctx.Err() != nil:
 		// Parent cancelled deliberately (user quit TUI, app shutdown).
 		// Surface the real cause rather than a generic "<killed>" string.
