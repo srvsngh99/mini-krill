@@ -35,6 +35,42 @@ var secretPathPatterns = []string{
 	"private_key", "service_account",
 }
 
+// secretMatch reports whether abs is a secret-bearing path that must never be
+// read, returning the pattern that matched. PR #32 nit: the old check was a
+// raw substring over the whole path, so a benign file like
+// "notconfig.yaml.txt" was wrongly refused (it contains "config.yaml"). This
+// anchors each pattern to a real filename boundary instead:
+//   - extension patterns (".env", ".pem", ".key") match a true suffix;
+//   - prefix patterns ("secrets.") match the start of the basename;
+//   - name patterns ("config.yaml", "credentials", "private_key",
+//     "service_account") match the whole basename, a "<name>.bak"-style
+//     variant, or a full path component — never a mid-name substring.
+func secretMatch(abs string) (string, bool) {
+	lowerAbs := strings.ToLower(abs)
+	base := strings.ToLower(filepath.Base(abs))
+	sep := string(filepath.Separator)
+	for _, pat := range secretPathPatterns {
+		switch {
+		case strings.HasPrefix(pat, "."): // extension-like
+			if strings.HasSuffix(base, pat) {
+				return pat, true
+			}
+		case strings.HasSuffix(pat, "."): // prefix-like ("secrets.")
+			if strings.HasPrefix(base, pat) {
+				return pat, true
+			}
+		default: // whole-name / path-component token
+			if base == pat ||
+				strings.HasPrefix(base, pat+".") ||
+				strings.Contains(lowerAbs, sep+pat+sep) ||
+				strings.HasSuffix(lowerAbs, sep+pat) {
+				return pat, true
+			}
+		}
+	}
+	return "", false
+}
+
 // resolveRepoRoot finds the repo root using two strategies:
 //  1. MINIKRILL_REPO env var if set and points to a real dir
 //  2. Walk up from runtime.Caller's source file looking for go.mod
@@ -85,10 +121,8 @@ func safeRepoPath(rel string) (string, error) {
 	if !strings.HasPrefix(abs, rootAbs+string(filepath.Separator)) && abs != rootAbs {
 		return "", fmt.Errorf("path escapes the repo root")
 	}
-	for _, pat := range secretPathPatterns {
-		if strings.Contains(strings.ToLower(abs), pat) {
-			return "", fmt.Errorf("refusing to read paths matching %q (secret allowlist)", pat)
-		}
+	if pat, hit := secretMatch(abs); hit {
+		return "", fmt.Errorf("refusing to read paths matching %q (secret allowlist)", pat)
 	}
 	return abs, nil
 }

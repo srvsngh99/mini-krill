@@ -3,6 +3,31 @@
 All notable changes to Mini Krill will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.1.3] - 2026-05-16
+
+Closed-loop learning, cross-session memory, single-owner safety, and an honest provider catalog. The v0.1.3 cycle (PRs A, A2, B, C).
+
+### Closed-loop learning (PR A)
+- Post-turn THANKED/FIXED callback. The affinity learner was one-directional — an auto-run produced no verdict, so a calibrated cluster's score could only ever rise and a cluster that started producing bad output stayed auto-run forever. The user's next message after an un-gated turn is now the verdict: a correction credits FIXED (drift back toward planning), anything else credits THANKED. Restores symmetric drift; closes the freeze flagged in the PR #33 review.
+- #16: `looksLikeCorrection` caught `"don't"` but not `doesn't`/`didn't`/`isn't`/`wasn't`/`won't`/`can't`/… so real corrections went uncredited. Extended the contraction list (word-bounded) plus curly-apostrophe normalisation.
+- `affinity:cluster:` is now a reserved memory namespace: `FileMemory.Store` refuses writes there unless they come from the affinity store, so `/remember` can't corrupt a learned record.
+
+### Cross-session memory & user-state (PR A2)
+- Episodic memory (#29 / D6): on a >30 min activity gap the prior session is summarised into one episode; the most recent episode <7 days old is injected into chat context as an explicitly point-in-time, read-only line so the agent resumes instead of starting cold.
+- User-state (#37): focus area, last task cluster, light mood, last-seen — persisted and injected read-only as point-in-time context.
+
+### Single-owner safety (PR B)
+- New `telegram.owner_id` / `discord.owner_id`. When set, only the owner drives the bot; a bystander in a shared group/server is replied to with a fixed decline only if they directly address the bot, and their message never reaches the agent — no tasks, memory writes, or destructive actions from a stranger. The safety counterpart to "no approval prompts by default". Unset = legacy behaviour with a one-time hint.
+- #22: residual `[CROSSPOST:..]` literals from a malformed directive are scrubbed so the raw token never leaks into chat.
+
+### Provider honesty & hardening (PR C)
+- #23: removed the fabricated Codex model catalog (`gpt-5.5`, `gpt-5.4`, …). Those IDs don't exist and picking one failed ~90s later. Codex now advertises only `auto`, delegating model choice to the Codex CLI.
+- `secretPathPatterns` (self:read-code / read-logs) anchored to real filename boundaries instead of a raw substring, so a benign `notconfig.yaml.txt` is no longer refused while real secrets still are.
+
+### Notes
+- #7 (Codex stderr/timeout surfacing) was largely resolved by the PR #27 `runCLI` rewrite (separate stderr, distinct ctx-cancel surfacing, idle monitor).
+- Deferred to a future introspection cycle: `self:explain-decision`, `self:dashboard`, replay-from-log, active-listening primitive, per-space context scoping, Telegram reply-to capture, and a real Telegram backoff (the live polling loop uses the library's `GetUpdatesChan`).
+
 ## [0.1.2] - 2026-05-16
 
 No more nagging. The agent stops asking for manual permission on routine work.
