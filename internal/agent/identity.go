@@ -297,6 +297,17 @@ func persistAgentConfig(agent config.AgentConfig) error {
 	if err != nil {
 		return err
 	}
+	// Whole-block replace would clobber identity fields the caller didn't
+	// intend to touch: a /name rename carries an in-memory AgentConfig
+	// whose Personality may be empty, which previously erased the
+	// init-chosen personality on disk. Preserve the loaded value for any
+	// identity field the incoming config leaves blank.
+	if agent.Personality == "" {
+		agent.Personality = cfg.Agent.Personality
+	}
+	if agent.AgentName == "" {
+		agent.AgentName = cfg.Agent.AgentName
+	}
 	cfg.Agent = agent
 	return config.Save(cfg)
 }

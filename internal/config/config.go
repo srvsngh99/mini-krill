@@ -87,9 +87,15 @@ func (a *AgentConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 // into AutonomyFloor on first load.
 func (a AgentConfig) MarshalYAML() (interface{}, error) {
 	return &struct {
-		Name          string `yaml:"name"`
-		AgentName     string `yaml:"agent_name,omitempty"`
-		Personality   string `yaml:"personality,omitempty"`
+		Name string `yaml:"name"`
+		// agent_name and personality are deliberately NOT omitempty: they
+		// are user-chosen identity set at `minikrill init`. Omitting an
+		// empty value here let a runtime save with an empty in-memory field
+		// silently erase the line, after which the next load defaulted
+		// personality to "krill" — a silent identity downgrade. Always
+		// writing them makes the loss visible and round-trip-safe.
+		AgentName     string `yaml:"agent_name"`
+		Personality   string `yaml:"personality"`
 		MaxSubKrills  int    `yaml:"max_sub_krills"`
 		AutonomyFloor string `yaml:"autonomy_floor"`
 		RecoveryTurns int    `yaml:"recovery_turns,omitempty"`
