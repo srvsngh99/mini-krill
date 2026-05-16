@@ -38,7 +38,19 @@ type TelegramBot struct {
 	botTurnsMu  sync.Mutex
 	learnFn     LearnFunc            // optional: store group learnings to memory
 	providerMgr core.ProviderControl // optional: runtime model/provider switching
+	ownerWarn   sync.Once            // emits the "owner_id unset" hint at most once
 }
+
+// isOwner reports whether id is the configured single owner. When OwnerID is
+// unset (0) this is always false; callers treat unset as "owner-gating off".
+func (t *TelegramBot) isOwner(id int64) bool {
+	return t.cfg.OwnerID != 0 && id == t.cfg.OwnerID
+}
+
+// bystanderDecline is the only thing a non-owner who directly addresses the
+// bot gets back. It never reaches the agent, so no task/memory/destructive
+// side effects are possible from a bystander.
+const bystanderDecline = "Hey! 🦐 I only take instructions from my owner, so I can't run tasks or remember things for anyone else here — but say hi to them for me."
 
 // NewTelegramBot creates a TelegramBot using the provided config and handler.
 // Returns an error if the token is missing or invalid.
@@ -160,6 +172,35 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 			"username", msg.From.UserName,
 		)
 		return
+	}
+
+	// --- Owner authorization (single-owner model) ---
+	// When owner_id is set, only the owner drives the bot. A bystander in a
+	// shared group/chat is replied to ONLY if they directly address the bot,
+	// with a fixed decline that never reaches the agent — so a stranger can
+	// never trigger tasks, memory writes, or destructive actions. This is the
+	// safety counterpart to "no approval prompts by default". When owner_id is
+	// unset, behaviour is unchanged (legacy) with a one-time hint.
+	if msg.From != nil && !t.isOwner(msg.From.ID) {
+		if t.cfg.OwnerID == 0 {
+			t.ownerWarn.Do(func() {
+				log.Warn("telegram.owner_id is unset — anyone in a shared chat can drive the bot; set telegram.owner_id to your Telegram user ID for single-owner safety")
+			})
+		} else {
+			mentioned := t.isMentioned(msg, botUsername)
+			isReplyToMe := msg.ReplyToMessage != nil &&
+				msg.ReplyToMessage.From != nil &&
+				msg.ReplyToMessage.From.UserName == botUsername
+			if mentioned || isReplyToMe {
+				log.Info("bystander addressed the bot; declining (owner-gated)",
+					"user_id", msg.From.ID, "username", msg.From.UserName)
+				t.sendMessage(chatID, bystanderDecline)
+			} else {
+				log.Debug("bystander message ignored (owner-gated)",
+					"user_id", msg.From.ID, "username", msg.From.UserName)
+			}
+			return
+		}
 	}
 
 	// Handle commands (work in both DMs and groups).
@@ -312,6 +353,12 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 
 	// Check for cross-channel message directives in the response
 	resp, crossTargets := extractCrossPostDirectives(resp)
+	// #22: belt-and-braces — strip any malformed/unclosed CROSSPOST literal
+	// that the parser left behind so the raw token never reaches the user.
+	if scrubbed, did := scrubCrosspostLiterals(resp); did {
+		log.Warn("stripped residual CROSSPOST literal from response", "chat_id", chatID)
+		resp = scrubbed
+	}
 	for _, ct := range crossTargets {
 		targetID, parseErr := strconv.ParseInt(ct.ChatID, 10, 64)
 		if parseErr != nil {
@@ -992,6 +1039,39 @@ func extractCrossPostDirectives(text string) (string, []crossPostTarget) {
 		text = text[:start] + text[end+len("[/CROSSPOST]"):]
 	}
 	return strings.TrimSpace(text), targets
+}
+
+// scrubCrosspostLiterals removes any residual [CROSSPOST...] / [/CROSSPOST]
+// literal that survived extractCrossPostDirectives — e.g. an opening tag with
+// no matching close, or a stray closing tag. #22: without this, a malformed
+// directive leaks the raw token straight into the user's chat. Returns the
+// cleaned text and whether anything was stripped (for logging).
+func scrubCrosspostLiterals(text string) (string, bool) {
+	if !strings.Contains(text, "[CROSSPOST") && !strings.Contains(text, "[/CROSSPOST]") {
+		return text, false
+	}
+	cleaned := text
+	// Drop any "[CROSSPOST:...]" header fragment, then any bare close tag.
+	for {
+		s := strings.Index(cleaned, "[CROSSPOST")
+		if s == -1 {
+			break
+		}
+		e := strings.Index(cleaned[s:], "]")
+		if e == -1 {
+			// Unterminated header — cut from the marker to end of line.
+			nl := strings.IndexByte(cleaned[s:], '\n')
+			if nl == -1 {
+				cleaned = cleaned[:s]
+			} else {
+				cleaned = cleaned[:s] + cleaned[s+nl:]
+			}
+			continue
+		}
+		cleaned = cleaned[:s] + cleaned[s+e+1:]
+	}
+	cleaned = strings.ReplaceAll(cleaned, "[/CROSSPOST]", "")
+	return strings.TrimSpace(cleaned), true
 }
 
 // SendToChat sends a message to a specific chat ID. Enables cross-channel messaging.

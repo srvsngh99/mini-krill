@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strings"
+	"sync"
 
 	"github.com/bwmarrin/discordgo"
 
@@ -18,11 +19,20 @@ const discordMaxLen = 2000
 
 // DiscordBot implements core.ChatBot for Discord.
 type DiscordBot struct {
-	session *discordgo.Session
-	handler core.ChatHandler
-	cfg     config.DiscordConfig
-	done    chan struct{}
+	session   *discordgo.Session
+	handler   core.ChatHandler
+	cfg       config.DiscordConfig
+	done      chan struct{}
+	ownerWarn sync.Once // emits the "owner_id unset" hint at most once
 }
+
+// isOwner reports whether id is the configured single owner. Unset ("") →
+// always false → owner-gating off (legacy behaviour).
+func (d *DiscordBot) isOwner(id string) bool {
+	return d.cfg.OwnerID != "" && id == d.cfg.OwnerID
+}
+
+const discordBystanderDecline = "Hey! 🦐 I only take instructions from my owner, so I can't run tasks or remember things for anyone else here."
 
 // NewDiscordBot creates a DiscordBot with the provided config and handler.
 // The session is created but not opened - call Start to connect.
@@ -111,6 +121,36 @@ func (d *DiscordBot) onMessageCreate(ctx context.Context) func(s *discordgo.Sess
 		// Never reply to ourselves.
 		if m.Author.ID == s.State.User.ID {
 			return
+		}
+
+		// Owner authorization (single-owner model). When owner_id is set,
+		// non-owners are bystanders: replied to with a fixed decline only if
+		// they directly @mention the bot, and never routed to the agent — no
+		// tasks, memory writes, or destructive actions from a bystander. Unset
+		// → legacy behaviour with a one-time hint.
+		if !d.isOwner(m.Author.ID) {
+			if d.cfg.OwnerID == "" {
+				d.ownerWarn.Do(func() {
+					log.Warn("discord.owner_id is unset — anyone in a shared server can drive the bot; set discord.owner_id to your Discord user ID for single-owner safety")
+				})
+			} else {
+				addressed := m.GuildID == ""
+				for _, u := range m.Mentions {
+					if u.ID == s.State.User.ID {
+						addressed = true
+						break
+					}
+				}
+				if addressed {
+					log.Info("bystander addressed the bot; declining (owner-gated)", "user_id", m.Author.ID, "username", m.Author.Username)
+					if _, err := s.ChannelMessageSend(m.ChannelID, discordBystanderDecline); err != nil {
+						log.Debug("failed to send bystander decline", "error", err)
+					}
+				} else {
+					log.Debug("bystander message ignored (owner-gated)", "user_id", m.Author.ID)
+				}
+				return
+			}
 		}
 
 		// Guild/channel filter: if configured, only respond in matching contexts.
