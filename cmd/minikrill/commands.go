@@ -468,7 +468,9 @@ func daemonPID() int {
 		return 0
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
+	if err != nil || pid <= 0 {
+		// pid <= 0 guards a corrupt pid file: signalling pid -1 targets
+		// every process the user owns, and pid 0 the whole process group.
 		return 0
 	}
 	proc, err := os.FindProcess(pid)
@@ -509,13 +511,16 @@ func diveDaemon() error {
 
 	child := exec.Command(exe, childArgs...)
 	// Suppress macOS MallocStackLogging dyld warnings at the source so they
-	// never reach dive.log. Belt-and-suspenders alongside the per-subprocess
-	// env in internal/llm/cli_provider.go.
+	// never reach dive.log (per-subprocess env in internal/llm/cli_provider.go
+	// covers CLI children too).
 	child.Env = append(os.Environ(), "MallocStackLogging=0")
-	// Filter writer drops residual dyld noise lines if any leak through anyway.
-	filtered := newNoiseFilter(out)
-	child.Stdout = filtered
-	child.Stderr = filtered
+	// The child must inherit the log file descriptor directly. A plain
+	// io.Writer here (like the old noiseFilter wrapper) makes exec create an
+	// OS pipe pumped by goroutines in THIS process — which exits right after
+	// Release(), collapsing the pipe and killing the detached child with
+	// SIGPIPE on its first write, before it logs anything.
+	child.Stdout = out
+	child.Stderr = out
 	detachCommand(child)
 
 	if err := child.Start(); err != nil {
@@ -524,14 +529,17 @@ func diveDaemon() error {
 	}
 	out.Close()
 
+	// Capture the pid before Release — afterwards Process.Pid is -1.
+	pid := child.Process.Pid
+
 	// Detach - the parent does not wait for the child.
 	_ = child.Process.Release()
 
 	pidFile := filepath.Join(config.DataDir(), "krill.pid")
-	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(child.Process.Pid)), 0644)
+	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), 0644)
 
 	printBanner()
-	fmt.Printf(cBGreen+"  Mini Krill is swimming!"+cReset+" "+cDim+"(PID: %d)\n"+cReset, child.Process.Pid)
+	fmt.Printf(cBGreen+"  Mini Krill is swimming!"+cReset+" "+cDim+"(PID: %d)\n"+cReset, pid)
 	fmt.Printf(cDim+"  Log: %s\n"+cReset, logPath)
 	fmt.Println()
 	fmt.Println(cDim + "  Stop with: " + cReset + "minikrill surface")
