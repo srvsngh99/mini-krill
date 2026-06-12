@@ -16,6 +16,12 @@ import (
 	"github.com/srvsngh99/mini-krill/internal/reminder"
 )
 
+// turnDeadline bounds a single message turn end-to-end. Providers manage
+// their own per-call deadlines; this is the backstop that guarantees the
+// user eventually gets *some* reply even if a provider hangs indefinitely.
+// Generous on purpose: observed legitimate dives run ~2 minutes.
+const turnDeadline = 10 * time.Minute
+
 // ChatHandlerImpl implements core.ChatHandler by forwarding messages to the
 // agent and wrapping the result with personality-aware fallbacks.
 type ChatHandlerImpl struct {
@@ -45,6 +51,10 @@ func (h *ChatHandlerImpl) HandleMessage(ctx context.Context, msg core.ChatMessag
 	)
 
 	if response, handled := h.handleReminder(msg.Text); handled {
+		// The agent never sees reminder shortcuts — persist both sides here
+		// so the turn isn't invisible to history and recovery context.
+		h.recordTurn("user", msg.Text)
+		h.recordTurn("assistant", response)
 		return response, nil
 	}
 
@@ -64,7 +74,9 @@ func (h *ChatHandlerImpl) HandleMessage(ctx context.Context, msg core.ChatMessag
 			"user", msg.Username,
 			"error", err,
 		)
-		return "Bubbles! Something went wrong in the deep... (" + err.Error() + ")", nil
+		fallback := "Bubbles! Something went wrong in the deep... (" + err.Error() + ")"
+		h.recordTurn("assistant", fallback)
+		return fallback, nil
 	}
 
 	// Strip internal reasoning prefixes that some LLMs emit.
@@ -76,10 +88,27 @@ func (h *ChatHandlerImpl) HandleMessage(ctx context.Context, msg core.ChatMessag
 			"platform", msg.Platform,
 			"user", msg.Username,
 		)
-		return randomFact(), nil
+		fact := randomFact()
+		h.recordTurn("assistant", fact)
+		return fact, nil
 	}
 
 	return resp, nil
+}
+
+// turnRecorder is implemented by agents that can persist turns produced
+// outside their normal chat flow (KrillAgent.RecordTurn).
+type turnRecorder interface {
+	RecordTurn(role, content string)
+}
+
+// recordTurn persists an out-of-band turn if the agent supports it. Replies
+// sent to the user but not recorded here would be invisible to durable
+// history — the "silent bot" effect, where a fallback reply leaves no trace.
+func (h *ChatHandlerImpl) recordTurn(role, content string) {
+	if tr, ok := h.agent.(turnRecorder); ok {
+		tr.RecordTurn(role, content)
+	}
 }
 
 func (h *ChatHandlerImpl) handleReminder(input string) (string, bool) {

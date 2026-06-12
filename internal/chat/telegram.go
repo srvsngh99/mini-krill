@@ -375,8 +375,11 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 		log.Debug("failed to send typing action", "error", err)
 	}
 
-	// No fixed timeout - the agent and providers manage their own deadlines.
-	msgCtx, msgCancel := context.WithCancel(ctx)
+	// Providers manage their own per-call deadlines, but the turn as a whole
+	// gets a generous backstop: on 2026-05-16 a provider hang left a message
+	// unanswered for 16+ minutes until a restart silently dropped it. With a
+	// ceiling, the worst case is a late apology instead of eternal silence.
+	msgCtx, msgCancel := context.WithTimeout(ctx, turnDeadline)
 	defer msgCancel()
 
 	chatMsg := core.ChatMessage{
@@ -392,6 +395,10 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 	if handlerFailed {
 		log.Error("handler error", "chat_id", chatID, "error", err)
 		resp = "Bubbles! My handler hit a reef. Try again in a moment."
+	}
+	if msgCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
+		log.Error("turn exceeded deadline", "chat_id", chatID, "deadline", turnDeadline)
+		resp = fmt.Sprintf("Bubbles! That took longer than %s, so I stopped this turn rather than leave you hanging. Try again, or break the task into smaller pieces.", turnDeadline)
 	}
 	if strings.TrimSpace(resp) == "" {
 		resp = "..."

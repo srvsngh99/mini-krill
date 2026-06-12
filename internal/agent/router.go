@@ -134,7 +134,7 @@ var searchTriggers = []string{
 	"google", "look online", "find me info", "find me", "find some",
 	"news on", "news about", "latest on", "latest news", "any news",
 	"any updates on", "what's new with", "whats new with", "what's happening with",
-	"digest", "headlines", "recent updates", "recent news",
+	"headlines", "recent updates", "recent news",
 	"what happened today", "what happened yesterday", "today in",
 	"current price of", "price of", "stock price",
 }
@@ -239,6 +239,11 @@ func (r *IntentRouter) Classify(ctx context.Context, input string) RouteResult {
 	}
 	if matchesAny(lower, sysInfoTriggers) {
 		return RouteResult{Intent: IntentToolTask, ToolName: "sysinfo"}
+	}
+	// Digest requests get the dedicated digest skill (real, fresh sources)
+	// instead of a generic web search that returns homepage boilerplate.
+	if strings.Contains(lower, "digest") {
+		return RouteResult{Intent: IntentToolTask, ToolName: "digest"}
 	}
 	if matchesAny(lower, searchTriggers) {
 		return RouteResult{Intent: IntentToolTask, ToolName: "search"}

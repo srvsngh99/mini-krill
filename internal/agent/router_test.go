@@ -539,7 +539,6 @@ func TestRouterHardVerbsStillRouteThroughLLM(t *testing.T) {
 func TestRouterFreshnessRoutesToSearch(t *testing.T) {
 	r := newTestRouter("ANSWER")
 	cases := []string{
-		"find me some AI digest from today",
 		"what's the latest news on rust",
 		"any updates on the kubernetes release",
 		"what happened today in tech",
@@ -552,6 +551,22 @@ func TestRouterFreshnessRoutesToSearch(t *testing.T) {
 		}
 		if result.ToolName != "search" {
 			t.Errorf("Classify(%q).ToolName = %q, want 'search'", input, result.ToolName)
+		}
+	}
+}
+
+// Digest requests route to the dedicated digest skill, not generic search.
+func TestRouterDigestRoutesToDigestSkill(t *testing.T) {
+	r := newTestRouter("ANSWER")
+	cases := []string{
+		"Get me today AI Digest",
+		"find me some AI digest from today",
+		"can you get the latest ai digest",
+	}
+	for _, input := range cases {
+		result := r.Classify(context.Background(), input)
+		if result.Intent != IntentToolTask || result.ToolName != "digest" {
+			t.Errorf("Classify(%q) = %s/%s, want TOOL_TASK/digest", input, result.Intent, result.ToolName)
 		}
 	}
 }
@@ -605,16 +620,16 @@ func TestRouterSkillCreationBeatsSearchTriggers(t *testing.T) {
 				input, result.Intent, result.SkillName)
 		}
 	}
-	// Genuine search asks must still hit the search tool.
-	searches := []string{
-		"Get me today AI Digest",
-		"latest news on AI",
+	// Genuine fetch asks must still hit their direct tools.
+	fetches := []struct{ input, tool string }{
+		{"Get me today AI Digest", "digest"},
+		{"latest news on AI", "search"},
 	}
-	for _, input := range searches {
-		result := r.Classify(context.Background(), input)
-		if result.Intent != IntentToolTask || result.ToolName != "search" {
-			t.Errorf("Classify(%q) = %s/%s, want TOOL_TASK/search",
-				input, result.Intent, result.ToolName)
+	for _, tc := range fetches {
+		result := r.Classify(context.Background(), tc.input)
+		if result.Intent != IntentToolTask || result.ToolName != tc.tool {
+			t.Errorf("Classify(%q) = %s/%s, want TOOL_TASK/%s",
+				tc.input, result.Intent, result.ToolName, tc.tool)
 		}
 	}
 }

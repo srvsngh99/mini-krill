@@ -75,9 +75,22 @@ func (m *ProviderManager) ActiveInfo() ActiveInfo {
 // Switch changes the active LLM provider at runtime.
 // provider is the provider name (ollama, openai, anthropic, google).
 // model is optional - if empty, uses the provider's default.
+// conversationalTokens are words that reach Switch when a confirmation or
+// chat fragment is mistaken for a model name ("yes" once became the Google
+// model, failing every call with "models/yes is not found"). Never accept
+// them as models.
+var conversationalTokens = map[string]bool{
+	"yes": true, "no": true, "ok": true, "okay": true, "sure": true,
+	"please": true, "thanks": true, "thank you": true, "that": true,
+	"this": true, "it": true, "go": true, "go ahead": true, "do it": true,
+}
+
 func (m *ProviderManager) Switch(provider, model string) error {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	model = strings.TrimSpace(model)
+	if conversationalTokens[strings.ToLower(model)] {
+		return fmt.Errorf("%q doesn't look like a model name — try 'use <provider>' or 'use <provider> <model>'", model)
+	}
 
 	// Build config for the new provider
 	newCfg := m.cfg.LLM
