@@ -181,7 +181,7 @@ var selfSkillMap = []struct {
 	{[]string{"evolve your", "update your personality", "change your style", "change your trait", "add trait", "be more", "be less"}, "self:evolve"},
 	{[]string{"add a skill", "create a skill", "new skill", "add skill"}, "self:add-skill"},
 	{[]string{"heal yourself", "fix yourself", "self heal", "self-heal", "repair yourself"}, "self:heal"},
-	{[]string{"switch to ollama", "switch to codex", "switch to claude", "switch to openai", "switch to anthropic", "switch to google", "auto approve", "require approval", "log level"}, "self:configure"},
+	{[]string{"switch to krilllm", "switch to krill", "switch to ollama", "switch to codex", "switch to claude", "switch to openai", "switch to anthropic", "switch to google", "auto approve", "require approval", "log level"}, "self:configure"},
 	{[]string{"reflect on yourself", "reflect on our conversations", "evolve yourself", "how have i changed you", "what have you learned about me"}, "self:reflect"},
 	{[]string{"consolidate memories", "clean up memories", "merge memories", "deduplicate memories"}, "self:consolidate"},
 	// Read-only introspection
@@ -274,6 +274,14 @@ func (r *IntentRouter) Classify(ctx context.Context, input string) RouteResult {
 	return r.classifyWithLLM(ctx, input)
 }
 
+// skillCreationPattern catches skill-creation phrasings the literal triggers
+// miss — a creation verb followed by "skill" in the same clause, e.g.
+// "can you build this a skill to fetch AI digest for me?". Without it that
+// message fell through to the search triggers (bare "digest") and was
+// answered as a web search instead of self:add-skill (2026-05-16 bug:
+// the misrouted turn then hung in the provider and the user got no reply).
+var skillCreationPattern = regexp.MustCompile(`(?i)\b(build|create|make|add|write)\b[^.!?]*\bskill\b`)
+
 // detectSelfSkillTrigger checks if the message matches any self:* skill trigger.
 // Extracted from the old detectSelfSkill method on KrillAgent.
 func detectSelfSkillTrigger(msg string) (skillName, skillInput string) {
@@ -284,6 +292,9 @@ func detectSelfSkillTrigger(msg string) (skillName, skillInput string) {
 				return entry.skill, msg
 			}
 		}
+	}
+	if skillCreationPattern.MatchString(msg) {
+		return "self:add-skill", msg
 	}
 	return "", ""
 }

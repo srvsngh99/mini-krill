@@ -586,3 +586,35 @@ func TestDetectSelfSkillTrigger(t *testing.T) {
 		}
 	}
 }
+
+// Regression for the 2026-05-16 unanswered-message bug: a skill-creation
+// request containing a search noun ("digest") was hijacked by the bare
+// "digest" search trigger and never reached self:add-skill.
+func TestRouterSkillCreationBeatsSearchTriggers(t *testing.T) {
+	r := newTestRouter("CHAT")
+	cases := []string{
+		"Can you build this a skill to fetch AI digest for me ?",
+		"build me a skill that pulls the latest news",
+		"can you write a skill to check headlines",
+		"make a skill for stock price lookups",
+	}
+	for _, input := range cases {
+		result := r.Classify(context.Background(), input)
+		if result.Intent != IntentSelfSkill || result.SkillName != "self:add-skill" {
+			t.Errorf("Classify(%q) = %s/%s, want SELF_SKILL/self:add-skill",
+				input, result.Intent, result.SkillName)
+		}
+	}
+	// Genuine search asks must still hit the search tool.
+	searches := []string{
+		"Get me today AI Digest",
+		"latest news on AI",
+	}
+	for _, input := range searches {
+		result := r.Classify(context.Background(), input)
+		if result.Intent != IntentToolTask || result.ToolName != "search" {
+			t.Errorf("Classify(%q) = %s/%s, want TOOL_TASK/search",
+				input, result.Intent, result.ToolName)
+		}
+	}
+}

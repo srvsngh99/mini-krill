@@ -381,7 +381,7 @@ func selfConfigure(sc SelfContext) core.Skill {
 			changes := []string{}
 
 			// Provider switch
-			for _, p := range []string{"ollama", "codex", "claude", "openai", "anthropic", "google"} {
+			for _, p := range []string{"krilllm", "ollama", "codex", "claude", "openai", "anthropic", "google"} {
 				if strings.Contains(lower, "switch to "+p) || strings.Contains(lower, "use "+p) || strings.Contains(lower, "provider "+p) {
 					old := sc.Config.LLM.Provider
 					sc.Config.LLM.Provider = p

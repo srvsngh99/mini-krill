@@ -144,7 +144,23 @@ func (m *ProviderManager) ListProviders() []ProviderInfo {
 	}()
 	wg.Wait()
 
+	// KrillLM is the default provider. It shares the local Ollama daemon,
+	// so its model list is the primary model plus whatever Ollama has pulled.
+	krillModels := []string{KrillLMDefaultModel}
+	for _, mdl := range ollamaModels {
+		if mdl != KrillLMDefaultModel {
+			krillModels = append(krillModels, mdl)
+		}
+	}
+
 	providers := []ProviderInfo{
+		{
+			Name:     "krilllm",
+			Models:   krillModels,
+			IsActive: active.Provider == "krilllm",
+			NeedsKey: false,
+			HasKey:   true,
+		},
 		{
 			Name:     "ollama",
 			Models:   ollamaModels,
@@ -266,6 +282,10 @@ func (m *ProviderManager) ResolveTarget(input string) (provider, model string, o
 
 	// Provider aliases
 	aliases := map[string]string{
+		"krilllm":      "krilllm",
+		"krill-lm":     "krilllm",
+		"krill_lm":     "krilllm",
+		"krill":        "krilllm",
 		"ollama":       "ollama",
 		"local":        "ollama",
 		"codex":        "codex",
@@ -301,6 +321,18 @@ func (m *ProviderManager) ResolveTarget(input string) (provider, model string, o
 		short := strings.Split(mdl, ":")[0]
 		modelMap[strings.ToLower(mdl)] = "ollama"
 		modelMap[strings.ToLower(short)] = "ollama"
+	}
+
+	// KrillLM model shorthands win over the raw Ollama mapping so
+	// "gemma12b" and the primary model resolve to the default provider.
+	krillModelAliases := map[string]string{
+		"gemma12b":          KrillLMDefaultModel,
+		"gemma 12b":         KrillLMDefaultModel,
+		"gemma4:12b":        KrillLMDefaultModel,
+		KrillLMDefaultModel: KrillLMDefaultModel,
+	}
+	if mdl, found := krillModelAliases[input]; found {
+		return "krilllm", mdl, true
 	}
 
 	if prov, found := modelMap[input]; found {

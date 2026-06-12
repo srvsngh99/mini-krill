@@ -33,6 +33,13 @@ func NewProvider(cfg config.LLMConfig, ollamaCfg config.OllamaConfig) (core.LLMP
 		}
 		return NewOllamaProvider(host, model, cfg), nil
 
+	case "krilllm", "krill-lm", "krill_lm":
+		host := ollamaCfg.Host
+		if host == "" {
+			host = "http://localhost:11434"
+		}
+		return NewKrillLMProvider(host, cfg.Model, cfg), nil
+
 	case "codex", "codex_cli", "codex-cli":
 		return NewCLIProvider("codex", cfg), nil
 
@@ -46,6 +53,6 @@ func NewProvider(cfg config.LLMConfig, ollamaCfg config.OllamaConfig) (core.LLMP
 		return NewCloudProvider(provider, cfg), nil
 
 	default:
-		return nil, fmt.Errorf("unknown LLM provider %q (supported: ollama, codex, claude, openai, anthropic, google)", provider)
+		return nil, fmt.Errorf("unknown LLM provider %q (supported: krilllm, ollama, codex, claude, openai, anthropic, google)", provider)
 	}
 }

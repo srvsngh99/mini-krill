@@ -793,7 +793,7 @@ func (t *TelegramBot) handleSwitchCommand(chatID int64, msg *tgbotapi.Message) {
 	parts := strings.Fields(args)
 	provider, model, ok := t.providerMgr.ResolveTarget(parts[0])
 	if !ok {
-		t.sendMessage(chatID, fmt.Sprintf("Unknown target: %s\nAvailable: local, ollama, codex, claude", parts[0]))
+		t.sendMessage(chatID, fmt.Sprintf("Unknown target: %s\nAvailable: krilllm, local, ollama, codex, claude", parts[0]))
 		return
 	}
 	if len(parts) > 1 {
