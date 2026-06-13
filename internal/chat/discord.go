@@ -226,11 +226,20 @@ func (d *DiscordBot) onMessageCreate(ctx context.Context) func(s *discordgo.Sess
 			Text:     cleanText,
 		}
 
-		resp, err := d.handler.HandleMessage(ctx, chatMsg)
+		// Same turn-level backstop as Telegram — a hung provider produces a
+		// late apology instead of eternal silence. The handler owns the
+		// deadline wording and persists it; this block only fires on the
+		// exceptional non-nil-error path, which we persist here too.
+		msgCtx, msgCancel := context.WithTimeout(ctx, turnDeadline)
+		resp, err := d.handler.HandleMessage(msgCtx, chatMsg)
 		if err != nil {
 			log.Error("handler error", "error", err)
 			resp = "Bubbles! My handler hit a reef. Try again in a moment."
+			if tr, ok := d.handler.(interface{ RecordTurn(role, content string) }); ok {
+				tr.RecordTurn("assistant", resp)
+			}
 		}
+		msgCancel()
 		if strings.TrimSpace(resp) == "" {
 			resp = "..."
 		}

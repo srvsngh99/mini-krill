@@ -1289,7 +1289,7 @@ func (a *KrillAgent) handleToolTask(ctx context.Context, input, toolName string)
 
 	// Provenance: record every URL the tool surfaced as "actually fetched
 	// this turn" so the post-processor can validate [web:...] tags later.
-	if toolName == "search" || toolName == "web" || toolName == "youtube" || toolName == "research" {
+	if toolName == "search" || toolName == "web" || toolName == "youtube" || toolName == "research" || toolName == "digest" {
 		for _, u := range extractURLs(result) {
 			a.turnFetches.Record(u)
 		}
@@ -1800,6 +1800,17 @@ func (a *KrillAgent) saveTurn(role, content string) {
 			log.Debug("failed to save turn", "error", err)
 		}
 	}
+}
+
+// RecordTurn persists a turn produced outside the normal chat flow (reminder
+// shortcuts, handler fallbacks, error notices) so the durable history matches
+// what the user actually saw. Without it a failed turn looks like the bot
+// never replied, and the next turn's context loses the failure.
+func (a *KrillAgent) RecordTurn(role, content string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.appendMessage(core.Message{Role: role, Content: content})
+	a.saveTurn(role, content)
 }
 
 // buildRecoveryContext formats recent turns from the conversation store as

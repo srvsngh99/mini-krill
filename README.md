@@ -10,7 +10,7 @@
 
 Built by [Sourav Singh](https://souravailabs.ai/about/) / [Sourav AI Labs](https://souravailabs.ai)
 
-[![Version](https://img.shields.io/badge/version-0.1.3-blue.svg)](https://github.com/srvsngh99/mini-krill/releases)
+[![Version](https://img.shields.io/badge/version-0.1.4-blue.svg)](https://github.com/srvsngh99/mini-krill/releases)
 [![Go](https://img.shields.io/badge/Go-1.24+-00ADD8.svg?logo=go)](https://go.dev/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)]()
@@ -23,11 +23,11 @@ Built by [Sourav Singh](https://souravailabs.ai/about/) / [Sourav AI Labs](https
 
 Most AI agents need API keys, cloud accounts, or complex setup before you can use them. Mini Krill takes a different approach: **start local, stay private, upgrade when you want to.**
 
-- Run entirely on your machine with [Ollama](https://ollama.com) — no cloud account needed
+- Runs out of the box on **KrillLM** — Mini Krill's local stack (gemma 12b on [Ollama](https://ollama.com)), no cloud account needed
 - Switch to ChatGPT (via Codex CLI) or Claude (via Claude Code CLI) using your existing subscription
 - Every action goes through a **plan-before-execute** loop — the agent shows its plan and waits for your approval before acting
 - Chat from anywhere — **Telegram bot, terminal CLI, TUI dashboard, or Discord bot** — with shared memory across all interfaces
-- Runs on **Windows, Linux, and macOS** — single binary; local inference uses Ollama
+- Runs on **Windows, Linux, and macOS** — single binary; local inference uses KrillLM (gemma 12b)
 - Your data, your machine, your rules
 
 ---
@@ -45,7 +45,7 @@ minikrill init
 minikrill chat
 ```
 
-That's it. The init wizard walks you through choosing a provider (Ollama, Codex, or Claude Code).
+That's it. The init wizard defaults to **KrillLM** (local, gemma 12b) and can also set up Ollama with a custom model, Codex, or Claude Code.
 
 ---
 
@@ -53,7 +53,7 @@ That's it. The init wizard walks you through choosing a provider (Ollama, Codex,
 
 | Feature | Description |
 |---------|-------------|
-| **Local-first** | Runs via Ollama with no cloud dependency |
+| **Local-first** | Defaults to KrillLM (gemma 12b on Ollama) with no cloud dependency |
 | **Subscription optional** | Switch to Codex or Claude Code through their official CLIs |
 | **Plan-before-execute** | Shows its plan, waits for approval before acting |
 | **Personality** | Not a boring assistant — a crustaceous AI buddy with soul |
@@ -108,16 +108,21 @@ See [docs/INSTALL.md](docs/INSTALL.md) for detailed setup including binary relea
 
 ## Provider Setup
 
-Mini Krill starts with Ollama and can switch to subscription-backed CLIs without storing any API keys:
+Mini Krill defaults to **KrillLM** — its local, fully private stack running **gemma 12b** (`gemma4:12b-mlx`) on Ollama — and can switch to subscription-backed CLIs without storing any API keys:
 
 ```bash
-# Local — fully private
-minikrill ollama ensure        # installs Ollama + pulls a model
+# KrillLM — the default, fully private (gemma 12b on Ollama)
+minikrill ollama ensure        # installs Ollama + pulls the gemma 12b model
 minikrill chat
-/use local
+/use krilllm
 ```
 
-Recommended local model: `gemma3:4b` (or `llama3.2:3b` for low-RAM machines).
+Prefer a lighter local model? Use the plain Ollama provider and pick your own (e.g. `gemma3:4b`, or `llama3.2:3b` for low-RAM machines):
+
+```bash
+/use ollama
+/use llama3.2:3b
+```
 
 ```bash
 # ChatGPT subscription via Codex CLI
@@ -139,7 +144,8 @@ Switch providers any time inside chat:
 
 ```text
 /models         # list providers and auth status
-/use local      # switch to Ollama
+/use krilllm    # switch to KrillLM (default, gemma 12b)
+/use ollama     # switch to Ollama with a model of your choice
 /use codex      # switch to Codex CLI
 /use claude     # switch to Claude Code
 ```
@@ -224,7 +230,7 @@ cmd/minikrill/       CLI entry point (Cobra)
 internal/
   agent/             Core agent loop: think, plan, act
   brain/             Memory, personality, heartbeat, conversation store
-  llm/               Provider abstraction (Ollama, Codex CLI, Claude Code, cloud APIs)
+  llm/               Provider abstraction (KrillLM, Ollama, Codex CLI, Claude Code, cloud APIs)
   plugin/            Skill registry, YAML skills, MCP server registry
   chat/              Chat session management
   tui/               Terminal UI (Bubble Tea)
@@ -249,9 +255,9 @@ The agent follows a **plan-before-execute** workflow:
 
 Mini Krill is designed with a local-first, privacy-respecting architecture. Here is how your data stays protected:
 
-### Nothing leaves your machine (with Ollama)
+### Nothing leaves your machine (with KrillLM or Ollama)
 
-When using Ollama as the LLM provider, all prompts, responses, memories, and conversations stay entirely on your local machine. No data is sent to any external server.
+When using KrillLM (the default) or the plain Ollama provider, all prompts, responses, memories, and conversations stay entirely on your local machine. No data is sent to any external server.
 
 ### No telemetry
 
@@ -303,8 +309,8 @@ All persistent data lives in `~/.mini-krill/` on your machine:
 
 ```yaml
 llm:
-  provider: ollama          # ollama | codex | claude
-  model: gemma3:4b          # or "auto" for subscription CLIs
+  provider: krilllm         # krilllm (default) | ollama | codex | claude
+  model: gemma4:12b-mlx     # KrillLM primary (gemma 12b); or "auto" for subscription CLIs
   temperature: 0.7
   max_tokens: 4096
 
@@ -330,7 +336,7 @@ heartbeat:
 
 | Variable | Description |
 |---|---|
-| `KRILL_LLM_PROVIDER` | LLM provider (ollama, codex, claude, openai, anthropic, google) |
+| `KRILL_LLM_PROVIDER` | LLM provider (krilllm, ollama, codex, claude, openai, anthropic, google) |
 | `KRILL_LLM_API_KEY` | API key for direct cloud API access (not needed for Ollama, Codex CLI, or Claude CLI) |
 | `KRILL_LLM_MODEL` | Model name |
 | `KRILL_TELEGRAM_TOKEN` | Telegram bot token |

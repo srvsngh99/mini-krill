@@ -539,7 +539,6 @@ func TestRouterHardVerbsStillRouteThroughLLM(t *testing.T) {
 func TestRouterFreshnessRoutesToSearch(t *testing.T) {
 	r := newTestRouter("ANSWER")
 	cases := []string{
-		"find me some AI digest from today",
 		"what's the latest news on rust",
 		"any updates on the kubernetes release",
 		"what happened today in tech",
@@ -552,6 +551,42 @@ func TestRouterFreshnessRoutesToSearch(t *testing.T) {
 		}
 		if result.ToolName != "search" {
 			t.Errorf("Classify(%q).ToolName = %q, want 'search'", input, result.ToolName)
+		}
+	}
+}
+
+// Digest requests route to the dedicated digest skill, not generic search.
+func TestRouterDigestRoutesToDigestSkill(t *testing.T) {
+	r := newTestRouter("ANSWER")
+	cases := []string{
+		"Get me today AI Digest",
+		"find me some AI digest from today",
+		"can you get the latest ai digest",
+		"news digest please",
+		"give me the daily digest",
+	}
+	for _, input := range cases {
+		result := r.Classify(context.Background(), input)
+		if result.Intent != IntentToolTask || result.ToolName != "digest" {
+			t.Errorf("Classify(%q) = %s/%s, want TOOL_TASK/digest", input, result.Intent, result.ToolName)
+		}
+	}
+}
+
+// "digest" without a news/AI cue must NOT hijack to the digest skill — the
+// word also appears in unrelated requests.
+func TestRouterDigestDoesNotHijackUnrelated(t *testing.T) {
+	r := newTestRouter("CHAT")
+	cases := []string{
+		"digest this document for me",
+		"help me digest this article",
+		"I'm still digesting that idea",
+		"the digestive system is fascinating",
+	}
+	for _, input := range cases {
+		result := r.Classify(context.Background(), input)
+		if result.Intent == IntentToolTask && result.ToolName == "digest" {
+			t.Errorf("Classify(%q) wrongly routed to digest skill", input)
 		}
 	}
 }
@@ -583,6 +618,38 @@ func TestDetectSelfSkillTrigger(t *testing.T) {
 		skill, _ := detectSelfSkillTrigger(tc.input)
 		if skill != tc.skill {
 			t.Errorf("detectSelfSkillTrigger(%q) = %q, want %q", tc.input, skill, tc.skill)
+		}
+	}
+}
+
+// Regression for the 2026-05-16 unanswered-message bug: a skill-creation
+// request containing a search noun ("digest") was hijacked by the bare
+// "digest" search trigger and never reached self:add-skill.
+func TestRouterSkillCreationBeatsSearchTriggers(t *testing.T) {
+	r := newTestRouter("CHAT")
+	cases := []string{
+		"Can you build this a skill to fetch AI digest for me ?",
+		"build me a skill that pulls the latest news",
+		"can you write a skill to check headlines",
+		"make a skill for stock price lookups",
+	}
+	for _, input := range cases {
+		result := r.Classify(context.Background(), input)
+		if result.Intent != IntentSelfSkill || result.SkillName != "self:add-skill" {
+			t.Errorf("Classify(%q) = %s/%s, want SELF_SKILL/self:add-skill",
+				input, result.Intent, result.SkillName)
+		}
+	}
+	// Genuine fetch asks must still hit their direct tools.
+	fetches := []struct{ input, tool string }{
+		{"Get me today AI Digest", "digest"},
+		{"latest news on AI", "search"},
+	}
+	for _, tc := range fetches {
+		result := r.Classify(context.Background(), tc.input)
+		if result.Intent != IntentToolTask || result.ToolName != tc.tool {
+			t.Errorf("Classify(%q) = %s/%s, want TOOL_TASK/%s",
+				tc.input, result.Intent, result.ToolName, tc.tool)
 		}
 	}
 }

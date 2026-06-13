@@ -217,12 +217,12 @@ func ExecutePlanSteps(ctx context.Context, plan *core.Plan, llm core.LLMProvider
 		}
 	}
 
-	summary := fmt.Sprintf("--- Dive complete: %d/%d steps succeeded", done, len(plan.Steps))
+	summary := fmt.Sprintf("--- Dive complete: %d/%d steps completed", done, len(plan.Steps))
 	if failed > 0 {
 		summary += fmt.Sprintf(" (%d hit reefs)", failed)
 	}
 	if blocked > 0 {
-		summary += fmt.Sprintf(" (%d need input)", blocked)
+		summary += fmt.Sprintf(" (%d blocked or awaiting input)", blocked)
 	}
 	summary += " ---"
 	results.WriteString(summary)
@@ -265,17 +265,36 @@ func detectStepBlocker(output string) string {
 		"send the video link",
 		"send the url",
 	}
-	// Check the first 5 lines: a refusal typically opens the step.
+	// Prose blockers the structured signals miss. The 2026-05-16 dive logged
+	// "**Result: research step blocked.**" mid-output and still counted as
+	// done, reporting "4/5 steps succeeded" for a turn that produced nothing.
+	blockedPrefixes := []string{
+		"i can't actually",
+		"i cannot actually",
+		"i can't pull live",
+		"i cannot pull live",
+		"same blockers as",
+	}
+	// Check the first 10 lines: a refusal typically opens the step, and
+	// "Result: … blocked" verdicts land just after the flavour text.
 	lines := strings.Split(output, "\n")
-	if len(lines) > 5 {
-		lines = lines[:5]
+	if len(lines) > 10 {
+		lines = lines[:10]
 	}
 	for _, line := range lines {
-		l := strings.ToLower(strings.TrimSpace(line))
+		l := strings.ToLower(strings.Trim(strings.TrimSpace(line), "*_"))
 		for _, p := range needInputPrefixes {
 			if strings.HasPrefix(l, p) {
 				return "need_input"
 			}
+		}
+		for _, p := range blockedPrefixes {
+			if strings.HasPrefix(l, p) {
+				return "blocked"
+			}
+		}
+		if strings.HasPrefix(l, "result:") && strings.Contains(l, "blocked") {
+			return "blocked"
 		}
 	}
 	return ""

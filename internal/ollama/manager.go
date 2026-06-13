@@ -479,6 +479,7 @@ func (m *OllamaManager) healthMonitorLoop(ctx context.Context) {
 	backoff := 2 * time.Second
 	backoffMax := 60 * time.Second
 	consecutiveCrashes := 0
+	unmanagedDown := false // suppress repeat warns for an externally-run Ollama
 
 	for {
 		select {
@@ -497,6 +498,10 @@ func (m *OllamaManager) healthMonitorLoop(ctx context.Context) {
 				consecutiveCrashes = 0
 				backoff = 2 * time.Second
 			}
+			if unmanagedDown {
+				log.Info("ollama is reachable again")
+				unmanagedDown = false
+			}
 			continue
 		}
 
@@ -506,9 +511,17 @@ func (m *OllamaManager) healthMonitorLoop(ctx context.Context) {
 		m.mu.Unlock()
 
 		if !weStarted {
-			log.Warn("ollama is unreachable (not managed by us - will not restart)")
+			// Warn once per outage, not on every 15s probe — a long outage
+			// used to fill the log with hundreds of identical lines.
+			if !unmanagedDown {
+				log.Warn("ollama is unreachable (not managed by us - will not restart)")
+				unmanagedDown = true
+			} else {
+				log.Debug("ollama still unreachable (not managed by us)")
+			}
 			continue
 		}
+		unmanagedDown = false
 
 		consecutiveCrashes++
 		log.Warn("ollama crashed", "consecutive", consecutiveCrashes)

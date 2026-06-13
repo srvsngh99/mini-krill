@@ -47,15 +47,15 @@ Optional setup:
 - Run `claude auth login` for Claude subscription-backed Claude Code.
 - Add Telegram or Discord bot tokens for chat integrations.
 
-Recommended local provider:
+Recommended local provider — KrillLM (the default, gemma 12b):
 
 ```bash
 minikrill ollama ensure
-minikrill ollama pull gemma3:4b
+minikrill ollama pull gemma4:12b-mlx
 ```
 
-Low-memory local fallback:
+Low-memory local fallback (use the plain `ollama` provider with a lighter model):
 
 ```bash
-minikrill ollama pull llama3.2:3b
+minikrill ollama pull gemma3:4b      # or llama3.2:3b on very low-RAM machines
 ```

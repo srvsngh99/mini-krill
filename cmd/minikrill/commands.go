@@ -41,7 +41,7 @@ var initCmd = &cobra.Command{
 		fmt.Println()
 		fmt.Println(cBCyan + "  Required:" + cReset + " choose one model provider.")
 		fmt.Println(cBCyan + "  Optional:" + cReset + " Telegram/Discord bots, Codex login, Claude login.")
-		fmt.Println(cDim + "  Recommended local model: gemma3:4b. Low-memory fallback: llama3.2:3b." + cReset)
+		fmt.Println(cDim + "  Recommended: KrillLM (local, gemma 12b). Low-memory fallback: ollama + llama3.2:3b." + cReset)
 		fmt.Println()
 
 		// Load existing config so tokens and other settings survive re-init.
@@ -54,7 +54,8 @@ var initCmd = &cobra.Command{
 		fmt.Println(cBCyan + "  Choose your LLM provider:" + cReset)
 		fmt.Println()
 		providerIdx, err := promptSelect([]selectItem{
-			{label: "Ollama", desc: "local, free, private; pulls gemma3:4b"},
+			{label: "KrillLM", desc: "default; local, free, private; gemma 12b (" + config.DefaultKrillLMModel + ")"},
+			{label: "Ollama", desc: "local, free, private; choose your own model"},
 			{label: "Codex", desc: "ChatGPT subscription via official Codex CLI"},
 			{label: "Claude Code", desc: "Claude Pro/Max via official Claude CLI"},
 		})
@@ -67,7 +68,52 @@ var initCmd = &cobra.Command{
 		}
 
 		switch providerIdx {
-		case 0: // Ollama
+		case 0: // KrillLM — Ollama-backed local stack pinned to the gemma 12b primary model
+			cfg.LLM.Provider = "krilllm"
+			cfg.LLM.Model = config.DefaultKrillLMModel
+			fmt.Println()
+			mgr := ollama.NewManager(cfg.Ollama)
+			if !mgr.IsInstalled() {
+				ans := ask(scanner, cYellow+"  Ollama not found (KrillLM runs on it)."+cReset+" Install now? "+cDim+"[Y/n]"+cReset+" ")
+				if ans == "" || strings.HasPrefix(strings.ToLower(ans), "y") {
+					fmt.Println(cDim + "  Installing Ollama..." + cReset)
+					if err := mgr.Install(context.Background()); err != nil {
+						fmt.Printf(cRed+"  Install failed: %v\n"+cReset, err)
+						fmt.Println(cDim + "  Install manually: https://ollama.com" + cReset)
+					} else {
+						fmt.Println(cGreen + "  Ollama installed!" + cReset)
+					}
+				}
+			} else {
+				fmt.Println(cGreen + "  Ollama: found!" + cReset)
+			}
+			hasPrimary := false
+			if models, err := mgr.ListModels(context.Background()); err == nil {
+				for _, m := range models {
+					if m.Name == config.DefaultKrillLMModel {
+						hasPrimary = true
+						break
+					}
+				}
+			}
+			if !hasPrimary {
+				fmt.Println()
+				pullCtx, pullStop := signal.NotifyContext(context.Background(), os.Interrupt)
+				defer pullStop()
+				if err := mgr.EnsureRunning(pullCtx); err != nil {
+					fmt.Printf(cYellow+"  Could not start Ollama: %v\n"+cReset, err)
+					fmt.Println(cDim + "  You can pull the model later with: ollama pull " + config.DefaultKrillLMModel + cReset)
+				} else if err := mgr.PullWithProgress(pullCtx, config.DefaultKrillLMModel, os.Stdout); err != nil {
+					if pullCtx.Err() != nil {
+						fmt.Println(cDim + "\n  Download interrupted." + cReset)
+					} else {
+						fmt.Printf(cYellow+"  Pull failed: %v\n"+cReset, err)
+					}
+					fmt.Println(cDim + "  You can retry with: ollama pull " + config.DefaultKrillLMModel + cReset)
+				}
+				pullStop()
+			}
+		case 1: // Ollama
 			cfg.LLM.Provider = "ollama"
 			fmt.Println()
 			mgr := ollama.NewManager(cfg.Ollama)
@@ -151,7 +197,7 @@ var initCmd = &cobra.Command{
 				}
 				pullStop()
 			}
-		case 1: // Codex
+		case 2: // Codex
 			cfg.LLM.Provider = "codex"
 			cfg.LLM.Model = "auto"
 			fmt.Println()
@@ -169,7 +215,7 @@ var initCmd = &cobra.Command{
 					_ = cmd.Run()
 				}
 			}
-		case 2: // Claude Code
+		case 3: // Claude Code
 			cfg.LLM.Provider = "claude"
 			cfg.LLM.Model = "auto"
 			fmt.Println()
@@ -337,7 +383,7 @@ var diveCmd = &cobra.Command{
 		if cfg == nil {
 			cfg = config.DefaultConfig()
 		}
-		if cfg.LLM.Provider == "ollama" && cfg.Ollama.AutoStart {
+		if config.IsLocalProvider(cfg.LLM.Provider) && cfg.Ollama.AutoStart {
 			ollamaMgr = ollama.NewManager(cfg.Ollama)
 			if err := ollamaMgr.EnsureRunning(context.Background()); err != nil {
 				klog.Warn("ollama auto-start failed (will retry via health monitor)", "error", err)
@@ -422,7 +468,9 @@ func daemonPID() int {
 		return 0
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
+	if err != nil || pid <= 0 {
+		// pid <= 0 guards a corrupt pid file: signalling pid -1 targets
+		// every process the user owns, and pid 0 the whole process group.
 		return 0
 	}
 	proc, err := os.FindProcess(pid)
@@ -463,13 +511,16 @@ func diveDaemon() error {
 
 	child := exec.Command(exe, childArgs...)
 	// Suppress macOS MallocStackLogging dyld warnings at the source so they
-	// never reach dive.log. Belt-and-suspenders alongside the per-subprocess
-	// env in internal/llm/cli_provider.go.
+	// never reach dive.log (per-subprocess env in internal/llm/cli_provider.go
+	// covers CLI children too).
 	child.Env = append(os.Environ(), "MallocStackLogging=0")
-	// Filter writer drops residual dyld noise lines if any leak through anyway.
-	filtered := newNoiseFilter(out)
-	child.Stdout = filtered
-	child.Stderr = filtered
+	// The child must inherit the log file descriptor directly. A plain
+	// io.Writer here (like the old noiseFilter wrapper) makes exec create an
+	// OS pipe pumped by goroutines in THIS process — which exits right after
+	// Release(), collapsing the pipe and killing the detached child with
+	// SIGPIPE on its first write, before it logs anything.
+	child.Stdout = out
+	child.Stderr = out
 	detachCommand(child)
 
 	if err := child.Start(); err != nil {
@@ -478,14 +529,17 @@ func diveDaemon() error {
 	}
 	out.Close()
 
+	// Capture the pid before Release — afterwards Process.Pid is -1.
+	pid := child.Process.Pid
+
 	// Detach - the parent does not wait for the child.
 	_ = child.Process.Release()
 
 	pidFile := filepath.Join(config.DataDir(), "krill.pid")
-	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(child.Process.Pid)), 0644)
+	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), 0644)
 
 	printBanner()
-	fmt.Printf(cBGreen+"  Mini Krill is swimming!"+cReset+" "+cDim+"(PID: %d)\n"+cReset, child.Process.Pid)
+	fmt.Printf(cBGreen+"  Mini Krill is swimming!"+cReset+" "+cDim+"(PID: %d)\n"+cReset, pid)
 	fmt.Printf(cDim+"  Log: %s\n"+cReset, logPath)
 	fmt.Println()
 	fmt.Println(cDim + "  Stop with: " + cReset + "minikrill surface")

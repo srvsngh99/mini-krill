@@ -109,9 +109,23 @@ func (a AgentConfig) MarshalYAML() (interface{}, error) {
 	}, nil
 }
 
+// DefaultKrillLMModel is the primary model of the KrillLM provider —
+// Mini Krill's default, Ollama-backed local inference stack.
+const DefaultKrillLMModel = "gemma4:12b-mlx"
+
+// IsLocalProvider reports whether the provider runs on the local Ollama
+// daemon (and therefore needs Ollama auto-start/health monitoring).
+func IsLocalProvider(provider string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "krilllm", "krill-lm", "krill_lm", "ollama":
+		return true
+	}
+	return false
+}
+
 // LLMConfig selects and configures the LLM provider.
 type LLMConfig struct {
-	Provider    string  `yaml:"provider"` // ollama, codex, claude, openai, anthropic, google
+	Provider    string  `yaml:"provider"` // krilllm (default), ollama, codex, claude, openai, anthropic, google
 	Model       string  `yaml:"model"`
 	Temperature float64 `yaml:"temperature"`
 	MaxTokens   int     `yaml:"max_tokens"`
@@ -223,8 +237,8 @@ func DefaultConfig() *Config {
 			AutonomyFloor: "act",
 		},
 		LLM: LLMConfig{
-			Provider:    "ollama",
-			Model:       "gemma3:4b",
+			Provider:    "krilllm",
+			Model:       DefaultKrillLMModel,
 			Temperature: 0.7,
 			MaxTokens:   2048,
 		},
