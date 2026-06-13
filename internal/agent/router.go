@@ -163,6 +163,13 @@ var sysInfoTriggers = []string{
 	"cpu info", "disk space", "os info", "what os",
 }
 
+// digestRequestPattern matches an AI-news digest request: the whole word
+// "digest" sitting next to a news/AI/freshness cue. This keeps real asks
+// ("today's AI digest", "news digest") routing to the digest skill while
+// letting unrelated uses ("digest this document", "digesting", "digestive")
+// fall through to normal classification.
+var digestRequestPattern = regexp.MustCompile(`\b(ai|news|tech|headlines?|daily|today'?s?|latest|morning|industry)\b.*\bdigest\b|\bdigest\b.*\b(ai|news|tech|headlines?|today|latest|updates?)\b`)
+
 // urlPattern detects URLs in input.
 var urlPattern = regexp.MustCompile(`https?://[^\s]+`)
 
@@ -240,9 +247,11 @@ func (r *IntentRouter) Classify(ctx context.Context, input string) RouteResult {
 	if matchesAny(lower, sysInfoTriggers) {
 		return RouteResult{Intent: IntentToolTask, ToolName: "sysinfo"}
 	}
-	// Digest requests get the dedicated digest skill (real, fresh sources)
-	// instead of a generic web search that returns homepage boilerplate.
-	if strings.Contains(lower, "digest") {
+	// AI-news digest requests get the dedicated digest skill (real, fresh
+	// sources) instead of a generic web search that returns homepage
+	// boilerplate. Require "digest" as a whole word next to a news/AI cue so
+	// "digesting", "digestive", and "digest this document" don't misroute.
+	if digestRequestPattern.MatchString(lower) {
 		return RouteResult{Intent: IntentToolTask, ToolName: "digest"}
 	}
 	if matchesAny(lower, searchTriggers) {

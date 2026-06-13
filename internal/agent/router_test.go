@@ -562,11 +562,31 @@ func TestRouterDigestRoutesToDigestSkill(t *testing.T) {
 		"Get me today AI Digest",
 		"find me some AI digest from today",
 		"can you get the latest ai digest",
+		"news digest please",
+		"give me the daily digest",
 	}
 	for _, input := range cases {
 		result := r.Classify(context.Background(), input)
 		if result.Intent != IntentToolTask || result.ToolName != "digest" {
 			t.Errorf("Classify(%q) = %s/%s, want TOOL_TASK/digest", input, result.Intent, result.ToolName)
+		}
+	}
+}
+
+// "digest" without a news/AI cue must NOT hijack to the digest skill — the
+// word also appears in unrelated requests.
+func TestRouterDigestDoesNotHijackUnrelated(t *testing.T) {
+	r := newTestRouter("CHAT")
+	cases := []string{
+		"digest this document for me",
+		"help me digest this article",
+		"I'm still digesting that idea",
+		"the digestive system is fascinating",
+	}
+	for _, input := range cases {
+		result := r.Classify(context.Background(), input)
+		if result.Intent == IntentToolTask && result.ToolName == "digest" {
+			t.Errorf("Classify(%q) wrongly routed to digest skill", input)
 		}
 	}
 }
