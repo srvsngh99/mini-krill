@@ -10,7 +10,7 @@
 
 Built by [Sourav Singh](https://souravailabs.ai/about/) / [Sourav AI Labs](https://souravailabs.ai)
 
-[![Version](https://img.shields.io/badge/version-0.1.3-blue.svg)](https://github.com/srvsngh99/mini-krill/releases)
+[![Version](https://img.shields.io/badge/version-0.1.4-blue.svg)](https://github.com/srvsngh99/mini-krill/releases)
 [![Go](https://img.shields.io/badge/Go-1.24+-00ADD8.svg?logo=go)](https://go.dev/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)]()

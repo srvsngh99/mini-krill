@@ -74,7 +74,17 @@ func (h *ChatHandlerImpl) HandleMessage(ctx context.Context, msg core.ChatMessag
 			"user", msg.Username,
 			"error", err,
 		)
-		fallback := "Bubbles! Something went wrong in the deep... (" + err.Error() + ")"
+		// Deadline-aware wording: the turn-level backstop (turnDeadline) fires
+		// as a context deadline, so distinguish "I gave up after too long"
+		// from a genuine failure. Either way the fallback is the single
+		// user-facing string AND what we persist — the transports no longer
+		// override it, so durable history matches what the user saw.
+		var fallback string
+		if ctx.Err() == context.DeadlineExceeded {
+			fallback = fmt.Sprintf("Bubbles! That took longer than %s, so I stopped this turn rather than leave you hanging. Try again, or break the task into smaller pieces.", turnDeadline)
+		} else {
+			fallback = "Bubbles! Something went wrong in the deep... (" + err.Error() + ")"
+		}
 		h.recordTurn("assistant", fallback)
 		return fallback, nil
 	}
@@ -109,6 +119,15 @@ func (h *ChatHandlerImpl) recordTurn(role, content string) {
 	if tr, ok := h.agent.(turnRecorder); ok {
 		tr.RecordTurn(role, content)
 	}
+}
+
+// RecordTurn lets a transport layer persist a turn it generated itself (e.g.
+// a last-resort reply sent when HandleMessage returns a non-nil error, before
+// the handler could record its own fallback). Exported so the Telegram and
+// Discord bots can reach it through the core.ChatHandler interface via a type
+// assertion, keeping durable history aligned with what was actually sent.
+func (h *ChatHandlerImpl) RecordTurn(role, content string) {
+	h.recordTurn(role, content)
 }
 
 func (h *ChatHandlerImpl) handleReminder(input string) (string, bool) {

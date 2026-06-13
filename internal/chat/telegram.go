@@ -390,15 +390,19 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 		Text:     messageText,
 	}
 
+	// The handler owns all fallback wording (including the turnDeadline
+	// apology) and persists it, so durable history matches what the user
+	// saw. This block only fires if HandleMessage itself returns a non-nil
+	// error — exceptional, since the handler normally swallows failures into
+	// a recorded fallback. Persist it here so even that path leaves a trace.
 	resp, err := t.handler.HandleMessage(msgCtx, chatMsg)
 	handlerFailed := err != nil
 	if handlerFailed {
 		log.Error("handler error", "chat_id", chatID, "error", err)
 		resp = "Bubbles! My handler hit a reef. Try again in a moment."
-	}
-	if msgCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
-		log.Error("turn exceeded deadline", "chat_id", chatID, "deadline", turnDeadline)
-		resp = fmt.Sprintf("Bubbles! That took longer than %s, so I stopped this turn rather than leave you hanging. Try again, or break the task into smaller pieces.", turnDeadline)
+		if tr, ok := t.handler.(interface{ RecordTurn(role, content string) }); ok {
+			tr.RecordTurn("assistant", resp)
+		}
 	}
 	if strings.TrimSpace(resp) == "" {
 		resp = "..."
