@@ -20,6 +20,7 @@ func (r *SkillRegistryImpl) RegisterBuiltins() {
 		&sysinfoSkill{},
 		&timeSkill{},
 		&webSearchSkill{},
+		newAIDigestSkill(),
 	}
 	for _, s := range builtins {
 		if err := r.Register(s); err != nil {

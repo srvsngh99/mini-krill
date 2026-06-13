@@ -3,6 +3,27 @@
 All notable changes to Mini Krill will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.1.4] - 2026-06-13
+
+KrillLM as the default local provider (gemma 12b), a real AI-digest skill, and a batch of reliability fixes drawn from a full audit of the live chat history.
+
+### KrillLM default provider
+- New `krilllm` provider (`internal/llm/krilllm.go`): an Ollama-backed local stack whose primary model is **gemma 12b** (`gemma4:12b-mlx`). It is now the default everywhere — `DefaultConfig`, `config/default.yaml`, and the first/recommended option in `init`. Ollama, the CLI providers (Codex/Claude), and the API providers are secondary.
+- Switching surfaces all learn it: `ResolveTarget` aliases (`krilllm`/`krill`/`krill-lm` + a `gemma12b` model shorthand), `self:configure`, and the Telegram `/use` list. Ollama auto-start/health-monitoring now gates on `config.IsLocalProvider` so KrillLM gets the same daemon management as the bare `ollama` provider.
+
+### Daemon reliability
+- Fixed silent death of the detached `dive` daemon: the child's stdout/stderr were piped through an in-process writer, so the pipe collapsed (SIGPIPE) the moment the parent exited after `Release()`. The child now inherits the log file descriptor directly; dyld noise stays suppressed via `MallocStackLogging=0`.
+- `krill.pid` could contain `-1` (pid read after `Release()`), breaking `surface` and the already-running check. The pid is now captured before `Release()`, and `daemonPID` rejects `pid <= 0` so a corrupt file can never signal every process the user owns.
+
+### Routing & honesty fixes (from the chat-history audit)
+- Skill-creation requests (`build me a skill to …`) route to `self:add-skill` before the search triggers — fixes the 2026-05-16 message that was hijacked by the bare `digest` search keyword and never answered.
+- New `digest` builtin: real AI headlines from Hacker News (last 24h, Algolia API) plus a web sweep, summarised with a strict only-cite-listed-URLs instruction. Digest requests route here instead of generic search, which had been returning homepage boilerplate.
+- Out-of-band replies (handler error notices, krill-fact fallbacks, reminder shortcuts) are now persisted via `KrillAgent.RecordTurn`, so durable history matches what the user saw — a failed turn no longer looks like the bot stayed silent.
+- Turn-level deadline backstop (10 min) on Telegram and Discord: a hung provider now yields a late apology instead of eternal silence.
+- `ProviderManager.Switch` rejects conversational tokens (`yes`/`ok`/`sure`/…) as model names — a stray `yes` once became the Google model and failed every call with `models/yes is not found`.
+- The unmanaged-Ollama health warning is rate-limited to state transitions instead of logging at probe rate (a long outage previously wrote hundreds of identical lines).
+- Dive summaries now detect prose blockers (`Result: … blocked`, `I can't actually …`) that slipped past the structured signals, and report `N/M completed (… blocked or awaiting input)` instead of overstating success.
+
 ## [0.1.3] - 2026-05-16
 
 Closed-loop learning, cross-session memory, single-owner safety, and an honest provider catalog. The v0.1.3 cycle (PRs A, A2, B, C).

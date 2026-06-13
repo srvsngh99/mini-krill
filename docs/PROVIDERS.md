@@ -1,20 +1,31 @@
 # Providers
 
-Mini Krill starts with local Ollama and can switch to subscription-backed CLIs. API-key providers are kept for later/advanced use.
+Mini Krill defaults to **KrillLM**, its local stack running gemma 12b, and can switch to subscription-backed CLIs. API-key providers are kept for later/advanced use.
 
-## Local Ollama
+## KrillLM (default)
 
-Best for private local chat and planning.
+Mini Krill's branded local provider: an Ollama-backed stack whose primary model is **gemma 12b** (`gemma4:12b-mlx`). Best for private local chat and planning out of the box. Identifies as `krilllm` so switching and persistence treat it as a first-class target, but runs on the same local Ollama daemon as the `ollama` provider.
+
+```bash
+minikrill ollama ensure        # installs Ollama + pulls gemma 12b
+minikrill chat
+/use krilllm
+```
+
+Aliases: `krilllm`, `krill`, `krill-lm`. Model shorthand: `gemma12b`.
+
+## Ollama (custom local model)
+
+The plain Ollama provider when you want to pick your own local model instead of the gemma 12b default — e.g. a lighter model on a low-RAM machine.
 
 ```bash
 minikrill ollama ensure
 minikrill chat
-/use local
+/use ollama
+/use llama3.2:3b
 ```
 
-Recommended model: `gemma3:4b`
-
-Low-memory fallback: `llama3.2:3b`
+Lighter alternatives: `gemma3:4b`, or `llama3.2:3b` as a low-memory fallback.
 
 ## Codex CLI
 
@@ -26,14 +37,7 @@ minikrill chat
 /use codex
 ```
 
-Current CLI choices seen in subscription installs:
-
-- `auto`
-- `gpt-5.5`
-- `gpt-5.4`
-- `gpt-5.4-mini`
-- `gpt-5.3-codex`
-- `gpt-5.2`
+Mini Krill advertises only `auto` for Codex and delegates the actual model choice to the Codex CLI — it does not hard-code model IDs, which drift between CLI releases.
 
 Mini Krill does not read or store Codex OAuth tokens. The official Codex CLI owns authentication.
 
@@ -61,7 +65,8 @@ Mini Krill does not read or store Claude OAuth tokens. The official Claude CLI o
 ```text
 /model
 /models
-/use local
+/use krilllm
+/use ollama
 /use codex
 /use claude
 /auth codex

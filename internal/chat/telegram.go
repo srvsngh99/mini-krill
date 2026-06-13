@@ -375,8 +375,11 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 		log.Debug("failed to send typing action", "error", err)
 	}
 
-	// No fixed timeout - the agent and providers manage their own deadlines.
-	msgCtx, msgCancel := context.WithCancel(ctx)
+	// Providers manage their own per-call deadlines, but the turn as a whole
+	// gets a generous backstop: on 2026-05-16 a provider hang left a message
+	// unanswered for 16+ minutes until a restart silently dropped it. With a
+	// ceiling, the worst case is a late apology instead of eternal silence.
+	msgCtx, msgCancel := context.WithTimeout(ctx, turnDeadline)
 	defer msgCancel()
 
 	chatMsg := core.ChatMessage{
@@ -387,11 +390,19 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 		Text:     messageText,
 	}
 
+	// The handler owns all fallback wording (including the turnDeadline
+	// apology) and persists it, so durable history matches what the user
+	// saw. This block only fires if HandleMessage itself returns a non-nil
+	// error — exceptional, since the handler normally swallows failures into
+	// a recorded fallback. Persist it here so even that path leaves a trace.
 	resp, err := t.handler.HandleMessage(msgCtx, chatMsg)
 	handlerFailed := err != nil
 	if handlerFailed {
 		log.Error("handler error", "chat_id", chatID, "error", err)
 		resp = "Bubbles! My handler hit a reef. Try again in a moment."
+		if tr, ok := t.handler.(interface{ RecordTurn(role, content string) }); ok {
+			tr.RecordTurn("assistant", resp)
+		}
 	}
 	if strings.TrimSpace(resp) == "" {
 		resp = "..."
@@ -793,7 +804,7 @@ func (t *TelegramBot) handleSwitchCommand(chatID int64, msg *tgbotapi.Message) {
 	parts := strings.Fields(args)
 	provider, model, ok := t.providerMgr.ResolveTarget(parts[0])
 	if !ok {
-		t.sendMessage(chatID, fmt.Sprintf("Unknown target: %s\nAvailable: local, ollama, codex, claude", parts[0]))
+		t.sendMessage(chatID, fmt.Sprintf("Unknown target: %s\nAvailable: krilllm, local, ollama, codex, claude", parts[0]))
 		return
 	}
 	if len(parts) > 1 {

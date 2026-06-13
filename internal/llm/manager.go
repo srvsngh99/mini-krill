@@ -75,9 +75,22 @@ func (m *ProviderManager) ActiveInfo() ActiveInfo {
 // Switch changes the active LLM provider at runtime.
 // provider is the provider name (ollama, openai, anthropic, google).
 // model is optional - if empty, uses the provider's default.
+// conversationalTokens are words that reach Switch when a confirmation or
+// chat fragment is mistaken for a model name ("yes" once became the Google
+// model, failing every call with "models/yes is not found"). Never accept
+// them as models.
+var conversationalTokens = map[string]bool{
+	"yes": true, "no": true, "ok": true, "okay": true, "sure": true,
+	"please": true, "thanks": true, "thank you": true, "that": true,
+	"this": true, "it": true, "go": true, "go ahead": true, "do it": true,
+}
+
 func (m *ProviderManager) Switch(provider, model string) error {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	model = strings.TrimSpace(model)
+	if conversationalTokens[strings.ToLower(model)] {
+		return fmt.Errorf("%q doesn't look like a model name — try 'use <provider>' or 'use <provider> <model>'", model)
+	}
 
 	// Build config for the new provider
 	newCfg := m.cfg.LLM
@@ -144,7 +157,23 @@ func (m *ProviderManager) ListProviders() []ProviderInfo {
 	}()
 	wg.Wait()
 
+	// KrillLM is the default provider. It shares the local Ollama daemon,
+	// so its model list is the primary model plus whatever Ollama has pulled.
+	krillModels := []string{KrillLMDefaultModel}
+	for _, mdl := range ollamaModels {
+		if mdl != KrillLMDefaultModel {
+			krillModels = append(krillModels, mdl)
+		}
+	}
+
 	providers := []ProviderInfo{
+		{
+			Name:     "krilllm",
+			Models:   krillModels,
+			IsActive: active.Provider == "krilllm",
+			NeedsKey: false,
+			HasKey:   true,
+		},
 		{
 			Name:     "ollama",
 			Models:   ollamaModels,
@@ -266,6 +295,10 @@ func (m *ProviderManager) ResolveTarget(input string) (provider, model string, o
 
 	// Provider aliases
 	aliases := map[string]string{
+		"krilllm":      "krilllm",
+		"krill-lm":     "krilllm",
+		"krill_lm":     "krilllm",
+		"krill":        "krilllm",
 		"ollama":       "ollama",
 		"local":        "ollama",
 		"codex":        "codex",
@@ -301,6 +334,18 @@ func (m *ProviderManager) ResolveTarget(input string) (provider, model string, o
 		short := strings.Split(mdl, ":")[0]
 		modelMap[strings.ToLower(mdl)] = "ollama"
 		modelMap[strings.ToLower(short)] = "ollama"
+	}
+
+	// KrillLM model shorthands win over the raw Ollama mapping so
+	// "gemma12b" and the primary model resolve to the default provider.
+	krillModelAliases := map[string]string{
+		"gemma12b":          KrillLMDefaultModel,
+		"gemma 12b":         KrillLMDefaultModel,
+		"gemma4:12b":        KrillLMDefaultModel,
+		KrillLMDefaultModel: KrillLMDefaultModel,
+	}
+	if mdl, found := krillModelAliases[input]; found {
+		return "krilllm", mdl, true
 	}
 
 	if prov, found := modelMap[input]; found {

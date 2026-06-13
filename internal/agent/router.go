@@ -134,7 +134,7 @@ var searchTriggers = []string{
 	"google", "look online", "find me info", "find me", "find some",
 	"news on", "news about", "latest on", "latest news", "any news",
 	"any updates on", "what's new with", "whats new with", "what's happening with",
-	"digest", "headlines", "recent updates", "recent news",
+	"headlines", "recent updates", "recent news",
 	"what happened today", "what happened yesterday", "today in",
 	"current price of", "price of", "stock price",
 }
@@ -163,6 +163,13 @@ var sysInfoTriggers = []string{
 	"cpu info", "disk space", "os info", "what os",
 }
 
+// digestRequestPattern matches an AI-news digest request: the whole word
+// "digest" sitting next to a news/AI/freshness cue. This keeps real asks
+// ("today's AI digest", "news digest") routing to the digest skill while
+// letting unrelated uses ("digest this document", "digesting", "digestive")
+// fall through to normal classification.
+var digestRequestPattern = regexp.MustCompile(`\b(ai|news|tech|headlines?|daily|today'?s?|latest|morning|industry)\b.*\bdigest\b|\bdigest\b.*\b(ai|news|tech|headlines?|today|latest|updates?)\b`)
+
 // urlPattern detects URLs in input.
 var urlPattern = regexp.MustCompile(`https?://[^\s]+`)
 
@@ -181,7 +188,7 @@ var selfSkillMap = []struct {
 	{[]string{"evolve your", "update your personality", "change your style", "change your trait", "add trait", "be more", "be less"}, "self:evolve"},
 	{[]string{"add a skill", "create a skill", "new skill", "add skill"}, "self:add-skill"},
 	{[]string{"heal yourself", "fix yourself", "self heal", "self-heal", "repair yourself"}, "self:heal"},
-	{[]string{"switch to ollama", "switch to codex", "switch to claude", "switch to openai", "switch to anthropic", "switch to google", "auto approve", "require approval", "log level"}, "self:configure"},
+	{[]string{"switch to krilllm", "switch to krill", "switch to ollama", "switch to codex", "switch to claude", "switch to openai", "switch to anthropic", "switch to google", "auto approve", "require approval", "log level"}, "self:configure"},
 	{[]string{"reflect on yourself", "reflect on our conversations", "evolve yourself", "how have i changed you", "what have you learned about me"}, "self:reflect"},
 	{[]string{"consolidate memories", "clean up memories", "merge memories", "deduplicate memories"}, "self:consolidate"},
 	// Read-only introspection
@@ -240,6 +247,13 @@ func (r *IntentRouter) Classify(ctx context.Context, input string) RouteResult {
 	if matchesAny(lower, sysInfoTriggers) {
 		return RouteResult{Intent: IntentToolTask, ToolName: "sysinfo"}
 	}
+	// AI-news digest requests get the dedicated digest skill (real, fresh
+	// sources) instead of a generic web search that returns homepage
+	// boilerplate. Require "digest" as a whole word next to a news/AI cue so
+	// "digesting", "digestive", and "digest this document" don't misroute.
+	if digestRequestPattern.MatchString(lower) {
+		return RouteResult{Intent: IntentToolTask, ToolName: "digest"}
+	}
 	if matchesAny(lower, searchTriggers) {
 		return RouteResult{Intent: IntentToolTask, ToolName: "search"}
 	}
@@ -274,6 +288,14 @@ func (r *IntentRouter) Classify(ctx context.Context, input string) RouteResult {
 	return r.classifyWithLLM(ctx, input)
 }
 
+// skillCreationPattern catches skill-creation phrasings the literal triggers
+// miss — a creation verb followed by "skill" in the same clause, e.g.
+// "can you build this a skill to fetch AI digest for me?". Without it that
+// message fell through to the search triggers (bare "digest") and was
+// answered as a web search instead of self:add-skill (2026-05-16 bug:
+// the misrouted turn then hung in the provider and the user got no reply).
+var skillCreationPattern = regexp.MustCompile(`(?i)\b(build|create|make|add|write)\b[^.!?]*\bskill\b`)
+
 // detectSelfSkillTrigger checks if the message matches any self:* skill trigger.
 // Extracted from the old detectSelfSkill method on KrillAgent.
 func detectSelfSkillTrigger(msg string) (skillName, skillInput string) {
@@ -284,6 +306,9 @@ func detectSelfSkillTrigger(msg string) (skillName, skillInput string) {
 				return entry.skill, msg
 			}
 		}
+	}
+	if skillCreationPattern.MatchString(msg) {
+		return "self:add-skill", msg
 	}
 	return "", ""
 }
