@@ -458,6 +458,11 @@ var diveCmd = &cobra.Command{
 		fmt.Println()
 		fmt.Println(cCyan + "  Mini Krill is surfacing..." + cReset)
 		cancel()
+		if bs.web != nil {
+			// Stop the poll loop (via cancel above) then drain in-flight turns
+			// so a reply the hub already marked delivered still posts.
+			_ = bs.web.Stop()
+		}
 		_ = stack.hb.Stop()
 		_ = stack.mcp.Close()
 		return nil
@@ -584,6 +589,7 @@ type botStatus struct {
 	DiscordErr  error
 	WebOK       bool
 	WebErr      error
+	web         *chat.WebBot // set in reef mode; drained on shutdown
 }
 
 // startBots launches Telegram and Discord bots in the background when enabled.
@@ -606,6 +612,7 @@ func startBots(ctx context.Context, stack *krillStack) botStatus {
 			}
 		}()
 		s.WebOK = true
+		s.web = wbBot
 		klog.Info("web (reef) bot started", "agent", reef.AgentID())
 		return s
 	}
@@ -688,13 +695,18 @@ var chatCmd = &cobra.Command{
 		_ = stack.hb.Start(ctx)
 		defer func() { _ = stack.hb.Stop() }()
 
+		var bs botStatus
 		if daemonPID() == 0 {
-			bs := startBots(ctx, stack)
+			bs = startBots(ctx, stack)
 			if stack.cfg.Telegram.Enabled && bs.TelegramErr != nil {
 				klog.Warn("telegram bot failed to start", "error", bs.TelegramErr)
 			}
 		} else {
 			klog.Debug("skipping bot startup, dive daemon is running")
+		}
+		if bs.web != nil {
+			// On TUI exit, cancel the poll loop then drain in-flight turns.
+			defer func() { cancel(); _ = bs.web.Stop() }()
 		}
 
 		app := tui.NewApp(stack.agent, stack.brain, stack.hb, stack.skills, stack.mcp, core.Version, stack.cfg.Log.File)

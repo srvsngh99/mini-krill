@@ -16,6 +16,12 @@ import (
 // a flood of queued messages would spawn unbounded goroutines; this caps it.
 const maxConcurrentTurns = 4
 
+// drainGrace bounds how long Stop waits for in-flight dispatches to finish
+// posting their replies. It is short so shutdown (and launchd's SIGTERM window)
+// is never held hostage by a slow turn; turns past the grace are abandoned at
+// process exit. The hub does not redeliver, so this is a best-effort flush.
+const drainGrace = 5 * time.Second
+
 // WebBot is the Reef hub ChatBot: it long-polls the Reef outbox for the owner's
 // messages, runs each through the shared core.ChatHandler, and posts replies
 // back to the Reef chat channel. It is the headless, web-app equivalent of the
@@ -43,7 +49,6 @@ func (w *WebBot) Start(ctx context.Context) error {
 		log.Warn("reef startup ping failed", "error", err)
 	}
 	log.Info("web (reef) bot started", "agent", reef.AgentID())
-	defer w.wg.Wait()
 	for {
 		if ctx.Err() != nil {
 			return nil
@@ -107,9 +112,20 @@ func (w *WebBot) dispatch(ctx context.Context, text string) {
 	}
 }
 
-// Stop waits for in-flight dispatches; the poll loop stops via its Start
-// context. Start also drains on its own, so this is safe to call independently.
-func (w *WebBot) Stop() error { w.wg.Wait(); return nil }
+// Stop waits up to drainGrace for in-flight dispatches to finish posting their
+// replies, then returns. The poll loop itself stops via the Start context, so
+// callers should cancel that context before calling Stop. Bounding the wait
+// keeps shutdown responsive even if a turn is mid-flight.
+func (w *WebBot) Stop() error {
+	done := make(chan struct{})
+	go func() { w.wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(drainGrace):
+		log.Warn("reef web bot: drain timed out, some replies may still be in flight")
+	}
+	return nil
+}
 
 // sleepCtx sleeps for d or until ctx is cancelled, returning false if ctx ended.
 func sleepCtx(ctx context.Context, d time.Duration) bool {
