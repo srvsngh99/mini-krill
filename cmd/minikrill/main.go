@@ -53,7 +53,7 @@ func main() {
 
 var rootCmd = &cobra.Command{
 	Use:     "minikrill",
-	Short:   "mini-krill — a lightweight, local-first AI agent",
+	Short:   "mini-krill - a lightweight, local-first AI agent",
 	Version: core.Version,
 	Long: "  " + cBold + brand.Wordmark + cReset + "   " + cDim + brand.Tagline + cReset + `
 

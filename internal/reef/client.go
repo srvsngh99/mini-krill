@@ -6,6 +6,7 @@ package reef
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -71,13 +72,16 @@ type OutboxItem struct {
 	Text string `json:"text"`
 }
 
-// PollOutbox long-polls the hub for owner messages (waitSeconds <= 50).
-func PollOutbox(waitSeconds int) ([]OutboxItem, error) {
+// PollOutbox long-polls the hub for owner messages (waitSeconds <= 50). The
+// ctx aborts the in-flight request on shutdown so the caller does not block for
+// the full long-poll window. The hub blocks server-side up to waitSeconds when
+// the queue is empty (it does not return early), so callers do not spin.
+func PollOutbox(ctx context.Context, waitSeconds int) ([]OutboxItem, error) {
 	if !IsConfigured() {
 		return nil, nil
 	}
 	url := fmt.Sprintf("%s/api/outbox?agent=%s&wait=%d", baseURL(), AgentID(), waitSeconds)
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +91,10 @@ func PollOutbox(waitSeconds int) ([]OutboxItem, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		io.Copy(io.Discard, resp.Body)
+		return nil, fmt.Errorf("reef outbox: status %d", resp.StatusCode)
+	}
 	var out struct {
 		Items []OutboxItem `json:"items"`
 	}

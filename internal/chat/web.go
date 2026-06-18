@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/srvsngh99/mini-krill/internal/core"
@@ -10,38 +11,52 @@ import (
 	"github.com/srvsngh99/mini-krill/internal/reef"
 )
 
+// maxConcurrentTurns bounds how many owner messages WebBot processes at once.
+// The owner is a single human, so concurrency above a small number only means
+// a flood of queued messages would spawn unbounded goroutines; this caps it.
+const maxConcurrentTurns = 4
+
 // WebBot is the Reef hub ChatBot: it long-polls the Reef outbox for the owner's
 // messages, runs each through the shared core.ChatHandler, and posts replies
 // back to the Reef chat channel. It is the headless, web-app equivalent of the
 // Telegram and Discord bots and satisfies core.ChatBot.
 type WebBot struct {
 	handler core.ChatHandler
+	sem     chan struct{}  // bounds concurrent dispatches
+	wg      sync.WaitGroup // tracks in-flight dispatches for graceful drain
 }
 
 // NewWebBot creates a WebBot bound to the shared chat handler.
 func NewWebBot(handler core.ChatHandler) *WebBot {
-	return &WebBot{handler: handler}
+	return &WebBot{handler: handler, sem: make(chan struct{}, maxConcurrentTurns)}
 }
 
 // Platform identifies this bot for owner-gating and notifier routing.
 func (w *WebBot) Platform() string { return "web" }
 
 // Start posts a presence ping then long-polls the Reef outbox until ctx is
-// cancelled, dispatching each owner message to the handler.
+// cancelled, dispatching each owner message to the handler. On shutdown it
+// waits for in-flight dispatches to finish so replies the hub already marked
+// delivered are not silently dropped (the hub does not redeliver).
 func (w *WebBot) Start(ctx context.Context) error {
 	if err := reef.PostIngest("chat", "status", "Mini-Krill online on Reef."); err != nil {
 		log.Warn("reef startup ping failed", "error", err)
 	}
 	log.Info("web (reef) bot started", "agent", reef.AgentID())
+	defer w.wg.Wait()
 	for {
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			return nil
-		default:
 		}
-		items, err := reef.PollOutbox(25)
+		items, err := reef.PollOutbox(ctx, 25)
 		if err != nil {
-			time.Sleep(5 * time.Second)
+			if ctx.Err() != nil {
+				return nil
+			}
+			log.Warn("reef outbox poll failed", "error", err)
+			if !sleepCtx(ctx, 5*time.Second) {
+				return nil
+			}
 			continue
 		}
 		for _, it := range items {
@@ -49,9 +64,26 @@ func (w *WebBot) Start(ctx context.Context) error {
 			if text == "" {
 				continue
 			}
-			// Dispatch in a goroutine so a slow agent turn never stalls the
-			// poll loop (HandleMessage can run a full plan/execute cycle).
-			go w.dispatch(ctx, text)
+			// Acquire a slot before spawning so a burst of queued owner
+			// messages cannot spawn unbounded goroutines. Block (respecting
+			// ctx) until a slot frees, since the hub has already drained and
+			// marked these items delivered; dropping them would lose them.
+			select {
+			case w.sem <- struct{}{}:
+			case <-ctx.Done():
+				return nil
+			}
+			w.wg.Add(1)
+			go func(text string) {
+				defer w.wg.Done()
+				defer func() { <-w.sem }()
+				// Detach from ctx for the turn body so an in-flight reply still
+				// posts during shutdown drain, but cap it with turnDeadline so a
+				// hung turn cannot leak forever (parity with telegram/discord).
+				turnCtx, cancel := context.WithTimeout(context.Background(), turnDeadline)
+				defer cancel()
+				w.dispatch(turnCtx, text)
+			}(text)
 		}
 	}
 }
@@ -75,5 +107,18 @@ func (w *WebBot) dispatch(ctx context.Context, text string) {
 	}
 }
 
-// Stop is a no-op; the bot stops when its Start context is cancelled.
-func (w *WebBot) Stop() error { return nil }
+// Stop waits for in-flight dispatches; the poll loop stops via its Start
+// context. Start also drains on its own, so this is safe to call independently.
+func (w *WebBot) Stop() error { w.wg.Wait(); return nil }
+
+// sleepCtx sleeps for d or until ctx is cancelled, returning false if ctx ended.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
