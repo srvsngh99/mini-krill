@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Template. Copy to com.deepkrill.minikrill.plist (gitignored), fill the
+     REEF_AGENT_TOKEN with the contents of ~/reef/.agent_token, then install:
+       cp com.deepkrill.minikrill.plist ~/Library/LaunchAgents/
+       chmod 600 ~/Library/LaunchAgents/com.deepkrill.minikrill.plist
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.deepkrill.minikrill.plist
+     Never commit the filled-in plist - it holds the token in plaintext. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.deepkrill.minikrill</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/sourav/go/bin/minikrill</string>
+    <string>dive</string>
+    <string>--foreground</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/sourav/Desktop/playground/mini-krill</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>REEF_INGEST_URL</key>
+    <string>http://127.0.0.1:8770</string>
+    <key>REEF_AGENT_TOKEN</key>
+    <string>__REEF_AGENT_TOKEN__</string>
+    <key>REEF_AGENT_ID</key>
+    <string>minikrill</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/sourav/Library/Logs/deepkrill/minikrill.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/sourav/Library/Logs/deepkrill/minikrill.err</string>
+</dict>
+</plist>
