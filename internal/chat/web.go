@@ -49,22 +49,29 @@ func (w *WebBot) Start(ctx context.Context) error {
 			if text == "" {
 				continue
 			}
-			msg := core.ChatMessage{
-				Platform: "web", ChatID: "reef", UserID: "owner",
-				Username: "owner", Text: text,
-			}
-			resp, herr := w.handler.HandleMessage(ctx, msg)
-			if herr != nil {
-				log.Error("web handler error", "error", herr)
-				resp = "I hit an error processing that."
-			}
-			if strings.TrimSpace(resp) == "" {
-				continue
-			}
-			if err := reef.PostIngest("chat", "chat", resp); err != nil {
-				log.Error("reef reply post failed", "error", err)
-			}
+			// Dispatch in a goroutine so a slow agent turn never stalls the
+			// poll loop (HandleMessage can run a full plan/execute cycle).
+			go w.dispatch(ctx, text)
 		}
+	}
+}
+
+// dispatch runs one owner message through the handler and posts the reply.
+func (w *WebBot) dispatch(ctx context.Context, text string) {
+	msg := core.ChatMessage{
+		Platform: "web", ChatID: "reef", UserID: "owner",
+		Username: "owner", Text: text,
+	}
+	resp, err := w.handler.HandleMessage(ctx, msg)
+	if err != nil {
+		log.Error("web handler error", "error", err)
+		resp = "I hit an error processing that."
+	}
+	if strings.TrimSpace(resp) == "" {
+		return
+	}
+	if err := reef.PostIngest("chat", "chat", resp); err != nil {
+		log.Error("reef reply post failed", "error", err)
 	}
 }
 
