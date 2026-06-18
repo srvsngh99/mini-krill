@@ -53,31 +53,29 @@ func main() {
 
 var rootCmd = &cobra.Command{
 	Use:     "minikrill",
-	Short:   "Mini Krill - Your crustaceous AI buddy",
+	Short:   "mini-krill — a lightweight, local-first AI agent",
 	Version: core.Version,
-	Long: cBCyan + `
-   .-''''-.
-  /  >o  /)    Mini Krill
- |  /___/ |    by Sourav Singh / Sourav AI Labs
-  \__\_\_/` + cReset + `
+	Long: "  " + cBold + brand.Wordmark + cReset + "   " + cDim + brand.Tagline + cReset + `
 
   A lightweight, open-source AI agent that runs locally via
   Ollama or through subscription-backed Codex/Claude CLIs.
 
   ` + cDim + `Get started:` + cReset + `
-    ` + cCyan + `minikrill init` + cReset + `       Setup wizard
-    ` + cCyan + `minikrill chat` + cReset + `       Interactive chat
-    ` + cCyan + `minikrill dive` + cReset + `       Start background services
-    ` + cCyan + `minikrill tui` + cReset + `        Terminal dashboard
-    ` + cCyan + `minikrill doctor` + cReset + `     Health diagnostics
+    ` + cBold + `minikrill init` + cReset + `       Setup wizard
+    ` + cBold + `minikrill chat` + cReset + `       Interactive chat
+    ` + cBold + `minikrill dive` + cReset + `       Start background services
+    ` + cBold + `minikrill tui` + cReset + `        Terminal dashboard
+    ` + cBold + `minikrill doctor` + cReset + `     Health diagnostics
 
   ` + cDim + `Documentation:` + cReset + `
-    ` + cCyan + `README.md` + cReset + `            Overview and usage
-    ` + cCyan + `docs/INSTALL.md` + cReset + `     Install and setup
-    ` + cCyan + `docs/PROVIDERS.md` + cReset + `   Ollama, Codex, Claude
-    ` + cCyan + `docs/MEMORY.md` + cReset + `      Memory and preferences
-    ` + cCyan + `docs/INTERFACES.md` + cReset + `  CLI, Telegram, Discord
-    ` + cCyan + `docs/TESTING.md` + cReset + `     Feature test checklist`,
+    ` + cBold + `README.md` + cReset + `            Overview and usage
+    ` + cBold + `docs/INSTALL.md` + cReset + `     Install and setup
+    ` + cBold + `docs/PROVIDERS.md` + cReset + `   Ollama, Codex, Claude
+    ` + cBold + `docs/MEMORY.md` + cReset + `      Memory and preferences
+    ` + cBold + `docs/INTERFACES.md` + cReset + `  CLI, Telegram, Discord
+    ` + cBold + `docs/TESTING.md` + cReset + `     Feature test checklist
+
+  ` + cDim + brand.LabMark + "  " + brand.Lab + "  ·  " + brand.Site + cReset,
 }
 
 func init() {
@@ -217,18 +215,13 @@ func newOllamaManager() (*ollama.OllamaManager, *config.Config) {
 	return ollama.NewManager(cfg.Ollama), cfg
 }
 
+// printBanner prints the monochrome mini-krill lockup: the `>_ mini-krill`
+// wordmark in bold, the tagline and Sourav AI Labs lockup dimmed beneath.
 func printBanner() {
 	fmt.Println()
-	for i, line := range brand.BannerLines(core.Version, true) {
-		switch {
-		case i < len(brand.MarkCompact):
-			fmt.Println(cBCyan + line + cReset)
-		case i == len(brand.MarkCompact):
-			fmt.Println(cBold + line + cReset)
-		default:
-			fmt.Println(cDim + line + cReset)
-		}
-	}
+	fmt.Printf("  %s%s%s   %sv%s%s\n", cBold, brand.Wordmark, cReset, cDim, core.Version, cReset)
+	fmt.Printf("  %s%s%s\n", cDim, brand.Tagline, cReset)
+	fmt.Printf("  %s%s  %s  ·  %s%s\n", cDim, brand.LabMark, brand.Lab, brand.Site, cReset)
 	fmt.Println()
 }
 
@@ -255,6 +248,9 @@ func capitalizeFirstASCII(s string) string {
 
 // friendlyError strips raw API error dumps into a short, helpful message.
 func friendlyError(err error) string {
+	if err == nil {
+		return "not started"
+	}
 	msg := err.Error()
 	if idx := strings.Index(msg, `{"error"`); idx > 0 {
 		msg = msg[:idx]
