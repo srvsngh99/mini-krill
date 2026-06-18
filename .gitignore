@@ -46,3 +46,4 @@ docs/promo/
 credentials.*
 *.key
 *.pem
+com.deepkrill.minikrill.plist
