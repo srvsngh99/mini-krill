@@ -101,7 +101,7 @@ func React(ctx context.Context, messageID, emoji string) error {
 		return err
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("reef react: status %d", resp.StatusCode)
 	}
