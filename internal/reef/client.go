@@ -65,11 +65,47 @@ func PostIngest(channel, kind, content string) error {
 	return nil
 }
 
-// OutboxItem is one owner->agent message returned by the long-poll.
+// OutboxItem is one owner->agent message returned by the long-poll. Payload
+// carries the source owner message id, which React targets so the agent can
+// acknowledge the owner's message directly.
 type OutboxItem struct {
-	ID   string `json:"id"`
-	Type string `json:"type"`
-	Text string `json:"text"`
+	ID      string `json:"id"`
+	Type    string `json:"type"`
+	Text    string `json:"text"`
+	Payload struct {
+		MessageID string `json:"message_id"`
+	} `json:"payload"`
+}
+
+// React adds an emoji reaction to an owner message so the owner sees progress:
+// "cursor" when the agent starts working, "check" when it finishes. emoji is a
+// Reef emoji name (see GET /api/emoji). Best-effort: a failed react is ignored.
+func React(ctx context.Context, messageID, emoji string) error {
+	if !IsConfigured() || messageID == "" {
+		return nil
+	}
+	body, err := json.Marshal(map[string]any{
+		"agent": AgentID(), "message_id": messageID, "emoji": emoji,
+	})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL()+"/api/react", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Reef-Token", authToken())
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("reef react: status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // PollOutbox long-polls the hub for owner messages (waitSeconds <= 50). The

@@ -89,7 +89,7 @@ func (w *WebBot) Start(ctx context.Context) error {
 				return nil
 			}
 			w.wg.Add(1)
-			go func(id, text string) {
+			go func(id, msgID, text string) {
 				defer w.wg.Done()
 				defer func() { <-w.sem }()
 				// Detach from ctx for the turn body so an in-flight reply still
@@ -97,7 +97,9 @@ func (w *WebBot) Start(ctx context.Context) error {
 				// hung turn cannot leak forever (parity with telegram/discord).
 				turnCtx, cancel := context.WithTimeout(context.Background(), turnDeadline)
 				defer cancel()
+				reactReef(msgID, "cursor") // "on it", before acting
 				w.dispatch(turnCtx, text)
+				reactReef(msgID, "check") // "done", after replying
 				// Ack once handled so the hub stops redelivering. Detached +
 				// short timeout so it still completes during shutdown drain.
 				ackCtx, ackCancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -105,7 +107,7 @@ func (w *WebBot) Start(ctx context.Context) error {
 				if err := reef.Ack(ackCtx, []string{id}); err != nil {
 					log.Warn("reef ack failed", "error", err)
 				}
-			}(it.ID, text)
+			}(it.ID, it.Payload.MessageID, text)
 		}
 	}
 }
@@ -138,6 +140,19 @@ func (s *seenSet) take(id string) bool {
 		s.order = s.order[1:]
 	}
 	return true
+}
+
+// reactReef adds an emoji reaction to the owner's message (best-effort, short
+// detached timeout so it never blocks or fails the turn).
+func reactReef(msgID, emoji string) {
+	if msgID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := reef.React(ctx, msgID, emoji); err != nil {
+		log.Warn("reef react failed", "emoji", emoji, "error", err)
+	}
 }
 
 // dispatch runs one owner message through the handler and posts the reply.
