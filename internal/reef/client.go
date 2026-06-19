@@ -76,11 +76,19 @@ type OutboxItem struct {
 // ctx aborts the in-flight request on shutdown so the caller does not block for
 // the full long-poll window. The hub blocks server-side up to waitSeconds when
 // the queue is empty (it does not return early), so callers do not spin.
-func PollOutbox(ctx context.Context, waitSeconds int) ([]OutboxItem, error) {
+//
+// When ack is true the hub LEASES items instead of consuming them: the caller
+// must Ack each item id once handled, and an unacked item is redelivered after
+// the lease expires (at-least-once). When false the hub consumes items on pull
+// (legacy at-most-once).
+func PollOutbox(ctx context.Context, waitSeconds int, ack bool) ([]OutboxItem, error) {
 	if !IsConfigured() {
 		return nil, nil
 	}
 	url := fmt.Sprintf("%s/api/outbox?agent=%s&wait=%d", baseURL(), AgentID(), waitSeconds)
+	if ack {
+		url += "&ack=1"
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -102,4 +110,34 @@ func PollOutbox(ctx context.Context, waitSeconds int) ([]OutboxItem, error) {
 		return nil, err
 	}
 	return out.Items, nil
+}
+
+// Ack acknowledges handled outbox items so the hub stops redelivering them.
+// Pair with PollOutbox(ctx, wait, true). Best-effort from the caller's view: a
+// failed ack just means the item's lease expires and it is redelivered, which
+// the caller dedupes.
+func Ack(ctx context.Context, ids []string) error {
+	if !IsConfigured() || len(ids) == 0 {
+		return nil
+	}
+	body, err := json.Marshal(map[string]any{"agent": AgentID(), "ids": ids})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL()+"/api/ack", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Reef-Token", authToken())
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("reef ack: status %d", resp.StatusCode)
+	}
+	return nil
 }
