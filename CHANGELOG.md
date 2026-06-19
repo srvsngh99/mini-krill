@@ -3,6 +3,14 @@
 All notable changes to Mini Krill will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.1.5] - 2026-06-20
+
+Mini-Krill now acknowledges owner messages on Reef with emoji reactions: it reacts `cursor` ("on it") the moment it picks a message up and `check` ("done") after it posts the reply, so the owner sees progress before the answer lands.
+
+### Reef emoji acknowledgement
+- `reef.React(ctx, messageID, emoji)` posts to the hub's `/api/react`; `OutboxItem.Payload.MessageID` carries the owner message id to target.
+- The web dispatch loop reacts `cursor` before handling and `check` after replying (best-effort, short detached timeout so it never blocks the turn).
+
 ## [0.1.4] - 2026-06-13
 
 KrillLM as the default local provider (gemma 12b), a real AI-digest skill, and a batch of reliability fixes drawn from a full audit of the live chat history.
