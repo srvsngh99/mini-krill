@@ -10,6 +10,15 @@ const (
 	Attribution = "by Sourav Singh / Sourav AI Labs"
 	Tagline     = "Local-first AI agent with a crustaceous soul"
 	Credits     = "Inspired by Jarvis and OpenClaw"
+
+	// Terminal-prompt lockup marks used by the CLI banner (cmd/minikrill).
+	// They render as:
+	//   >_ mini-krill   v0.1.4
+	//   > SAI_  Sourav AI Labs  ·  souravailabs.ai
+	Wordmark = ">_ mini-krill"   // bold product wordmark
+	LabMark  = "> SAI_"          // Sourav AI Labs terminal monogram
+	Lab      = Studio            // "Sourav AI Labs"
+	Site     = "souravailabs.ai" // public site
 )
 
 // Mark is an ASCII krill/shrimp silhouette inspired by the circular logo.
