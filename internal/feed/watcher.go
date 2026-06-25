@@ -35,6 +35,11 @@ import (
 // pre-filter beyond this wait for the next cycle.
 const maxAppraisalsPerCycle = 6
 
+// mentionThreshold is the (low) interest bar applied when this agent is @tagged:
+// a direct address should almost always get a response, overriding the normal
+// selectivity and the depth-based ping-pong decay.
+const mentionThreshold = 0.2
+
 // FeedWatcher observes the feed and decides, genuinely, whether to engage.
 type FeedWatcher struct {
 	llm   core.LLMProvider
@@ -119,6 +124,16 @@ func (w *FeedWatcher) scan(ctx context.Context) error {
 // appraisePost asks the model whether this post genuinely warrants a like or a
 // comment, then acts if it clears the threshold and budget.
 func (w *FeedWatcher) appraisePost(ctx context.Context, p reef.FeedPost) {
+	// Being @tagged is a direct address: drop the bar so the agent almost
+	// always responds, and tell the model it was tagged.
+	effThreshold := w.cfg.Threshold
+	note := ""
+	if w.mentionsMe(p.Content) {
+		if effThreshold > mentionThreshold {
+			effThreshold = mentionThreshold
+		}
+		note = "\n\nNOTE: you were directly tagged (@" + w.me + ") in this post. You should almost certainly respond."
+	}
 	prompt := fmt.Sprintf(`A new post has appeared in the Reef feed (a private social feed for the Krill agent colony).
 
 POST by %s (@%s) in #%s:
@@ -127,17 +142,17 @@ POST by %s (@%s) in #%s:
 """
 It has %d likes and %d comments so far.
 
-Decide, honestly and in character, whether to engage. Most posts deserve no action — only engage if it genuinely interests you or you have something real to add. Do NOT engage just to be polite or active.
+Decide, honestly and in character, whether to engage. Most posts deserve no action — only engage if it genuinely interests you or you have something real to add. Do NOT engage just to be polite or active.%s
 
 Reply with ONLY a JSON object:
 {"interest": <0.0-1.0>, "action": "ignore|like|comment", "draft": "<your comment if action==comment, else empty>", "why": "<one short phrase>"}`,
-		p.Name, p.Agent, p.Channel, truncate(p.Content, 1200), p.HeartCount, p.CommentCount)
+		p.Name, p.Agent, p.Channel, truncate(p.Content, 1200), p.HeartCount, p.CommentCount, note)
 
 	a, ok := w.appraise(ctx, prompt)
 	if !ok {
 		return
 	}
-	if a.Interest < w.cfg.Threshold || a.Action == "ignore" || a.Action == "" {
+	if a.Interest < effThreshold || a.Action == "ignore" || a.Action == "" {
 		w.remember(ctx, "post:"+p.ID, "ignored ("+a.Why+")")
 		return
 	}
@@ -211,7 +226,14 @@ func (w *FeedWatcher) handleReplies(ctx context.Context, p reef.FeedPost, spent 
 // threshold rises with conversation depth so agent<->agent exchanges decay
 // instead of looping; the model is also told to reply only with something new.
 func (w *FeedWatcher) appraiseReply(ctx context.Context, p reef.FeedPost, c reef.Comment, depth int) {
+	// Depth raises the bar (ping-pong guard) — UNLESS the comment tags this
+	// agent, in which case it's a direct address and the bar drops sharply.
 	effThreshold := w.cfg.Threshold + 0.12*float64(depth)
+	note := ""
+	if w.mentionsMe(c.Text) {
+		effThreshold = mentionThreshold
+		note = "\n\nNOTE: you were directly tagged (@" + w.me + ") in this comment. You should almost certainly reply."
+	}
 	prompt := fmt.Sprintf(`In the Reef feed, on a post by %s in #%s:
 """
 %s
@@ -221,11 +243,11 @@ func (w *FeedWatcher) appraiseReply(ctx context.Context, p reef.FeedPost, c reef
 %s
 """
 
-Decide whether to REPLY. Only reply if you have something genuinely new or useful to add to the conversation — agreement or acknowledgement is not enough. This thread is %d level(s) deep between agents; the deeper it goes, the higher your bar to keep it going.
+Decide whether to REPLY. Only reply if you have something genuinely new or useful to add to the conversation — agreement or acknowledgement is not enough. This thread is %d level(s) deep between agents; the deeper it goes, the higher your bar to keep it going.%s
 
 Reply with ONLY a JSON object:
 {"interest": <0.0-1.0>, "action": "ignore|reply", "draft": "<your reply if action==reply, else empty>", "why": "<one short phrase>"}`,
-		p.Name, p.Channel, truncate(p.Content, 600), c.Author, c.Author, truncate(c.Text, 600), depth)
+		p.Name, p.Channel, truncate(p.Content, 600), c.Author, c.Author, truncate(c.Text, 600), depth, note)
 
 	a, ok := w.appraise(ctx, prompt)
 	if !ok {
@@ -407,6 +429,11 @@ func agentChainDepth(c reef.Comment, byID map[string]reef.Comment, me string) in
 
 func isOwner(author string) bool {
 	return author == "owner" || author == "sourav"
+}
+
+// mentionsMe reports whether the text @tags this agent by its handle (its id).
+func (w *FeedWatcher) mentionsMe(s string) bool {
+	return strings.Contains(strings.ToLower(s), "@"+strings.ToLower(w.me))
 }
 
 // parseAppraisal extracts the JSON verdict from a model response, tolerating
