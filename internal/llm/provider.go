@@ -5,12 +5,20 @@ package llm
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/srvsngh99/mini-krill/internal/config"
 	"github.com/srvsngh99/mini-krill/internal/core"
 	log "github.com/srvsngh99/mini-krill/internal/log"
 )
+
+func envOr(key, def string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return def
+}
 
 // NewProvider creates the appropriate LLMProvider based on configuration.
 func NewProvider(cfg config.LLMConfig, ollamaCfg config.OllamaConfig) (core.LLMProvider, error) {
@@ -33,12 +41,30 @@ func NewProvider(cfg config.LLMConfig, ollamaCfg config.OllamaConfig) (core.LLMP
 		}
 		return NewOllamaProvider(host, model, cfg), nil
 
-	case "krilllm", "krill-lm", "krill_lm":
-		host := ollamaCfg.Host
-		if host == "" {
-			host = "http://localhost:11434"
+	case "krill", "krilllm", "krill-lm", "krill_lm":
+		// Krill (the local engine on :57455) is primary; Ollama (a SMALL model,
+		// so it can coexist in RAM with Krill's 12B on a 16GB box) is the
+		// fallback. Krill endpoint/model are env-overridable (KRILLM_URL /
+		// KRILL_MODEL), matching how Reef locates the same server.
+		krillURL := envOr("KRILLM_URL", KrillDefaultURL)
+		krillModel := cfg.Model
+		if krillModel == "" || krillModel == "auto" {
+			krillModel = envOr("KRILL_MODEL", KrillModelDefault)
 		}
-		return NewKrillLMProvider(host, cfg.Model, cfg), nil
+		primary := NewKrillProvider(krillURL, krillModel, cfg)
+
+		oHost := ollamaCfg.Host
+		if oHost == "" {
+			oHost = "http://localhost:11434"
+		}
+		fbModel := ollamaCfg.FallbackModel
+		if fbModel == "" {
+			fbModel = "gemma4:e2b"
+		}
+		fallback := NewOllamaProvider(oHost, fbModel, cfg)
+		log.Info("krill primary + ollama fallback", "krill", krillURL,
+			"krill_model", krillModel, "fallback_model", fbModel)
+		return NewFailoverProvider(primary, fallback), nil
 
 	case "codex", "codex_cli", "codex-cli":
 		return NewCLIProvider("codex", cfg), nil

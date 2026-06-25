@@ -196,6 +196,10 @@ type OllamaConfig struct {
 	AutoInstall  bool   `yaml:"auto_install"`
 	AutoStart    bool   `yaml:"auto_start"`
 	DefaultModel string `yaml:"default_model"`
+	// FallbackModel is the model Ollama serves when it is the failover backend
+	// behind Krill. Kept SMALL on purpose so it can coexist in RAM with Krill's
+	// 12B on a 16GB box (a second 12B would not fit).
+	FallbackModel string `yaml:"fallback_model"`
 }
 
 // PluginsConfig for the skill registry.
@@ -257,8 +261,8 @@ func DefaultConfig() *Config {
 			AutonomyFloor: "act",
 		},
 		LLM: LLMConfig{
-			Provider:    "krilllm",
-			Model:       DefaultKrillLMModel,
+			Provider:    "krill", // Krill engine (:57455) primary, Ollama fallback
+			Model:       "gemma-4-12b",
 			Temperature: 0.7,
 			MaxTokens:   2048,
 		},
@@ -269,10 +273,11 @@ func DefaultConfig() *Config {
 			HeartbeatSec: 30,
 		},
 		Ollama: OllamaConfig{
-			Host:         "http://localhost:11434",
-			AutoInstall:  true,
-			AutoStart:    true,
-			DefaultModel: "gemma3:4b",
+			Host:          "http://localhost:11434",
+			AutoInstall:   true,
+			AutoStart:     true,
+			DefaultModel:  "gemma3:4b",
+			FallbackModel: "gemma4:e2b",
 		},
 		Plugins: PluginsConfig{
 			Dir: filepath.Join(dataDir, "skills"),

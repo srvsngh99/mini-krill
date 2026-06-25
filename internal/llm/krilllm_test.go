@@ -6,36 +6,39 @@ import (
 	"github.com/srvsngh99/mini-krill/internal/config"
 )
 
+// The krill/krilllm aliases now build a Krill-primary + Ollama-fallback stack.
 func TestNewProviderKrillLM(t *testing.T) {
-	for _, name := range []string{"krilllm", "krill-lm", "krill_lm"} {
+	for _, name := range []string{"krill", "krilllm", "krill-lm", "krill_lm"} {
 		p, err := NewProvider(config.LLMConfig{Provider: name}, config.OllamaConfig{})
 		if err != nil {
 			t.Fatalf("NewProvider(%q) error: %v", name, err)
 		}
-		if p.Name() != "krilllm" {
-			t.Errorf("NewProvider(%q).Name() = %q, want krilllm", name, p.Name())
+		if p.Name() != "krill+ollama" {
+			t.Errorf("NewProvider(%q).Name() = %q, want krill+ollama", name, p.Name())
 		}
-		if p.ModelName() != KrillLMDefaultModel {
-			t.Errorf("NewProvider(%q).ModelName() = %q, want %q", name, p.ModelName(), KrillLMDefaultModel)
+		// ModelName reflects the primary (Krill) model.
+		if p.ModelName() != KrillModelDefault {
+			t.Errorf("NewProvider(%q).ModelName() = %q, want %q", name, p.ModelName(), KrillModelDefault)
 		}
 	}
 }
 
-func TestKrillLMModelOverride(t *testing.T) {
-	p, err := NewProvider(config.LLMConfig{Provider: "krilllm", Model: "llama3.2:3b"}, config.OllamaConfig{})
+func TestKrillModelOverride(t *testing.T) {
+	// An explicit model is honoured for the Krill primary.
+	p, err := NewProvider(config.LLMConfig{Provider: "krill", Model: "gemma-4-26b-a4b-it-4bit"}, config.OllamaConfig{})
 	if err != nil {
 		t.Fatalf("NewProvider error: %v", err)
 	}
-	if p.ModelName() != "llama3.2:3b" {
-		t.Errorf("ModelName() = %q, want llama3.2:3b", p.ModelName())
+	if p.ModelName() != "gemma-4-26b-a4b-it-4bit" {
+		t.Errorf("ModelName() = %q, want gemma-4-26b-a4b-it-4bit", p.ModelName())
 	}
-	// "auto" resolves to the primary model rather than being sent to Ollama verbatim.
-	p, err = NewProvider(config.LLMConfig{Provider: "krilllm", Model: "auto"}, config.OllamaConfig{})
+	// "auto" resolves to the Krill default model.
+	p, err = NewProvider(config.LLMConfig{Provider: "krill", Model: "auto"}, config.OllamaConfig{})
 	if err != nil {
 		t.Fatalf("NewProvider error: %v", err)
 	}
-	if p.ModelName() != KrillLMDefaultModel {
-		t.Errorf("ModelName() with auto = %q, want %q", p.ModelName(), KrillLMDefaultModel)
+	if p.ModelName() != KrillModelDefault {
+		t.Errorf("ModelName() with auto = %q, want %q", p.ModelName(), KrillModelDefault)
 	}
 }
 

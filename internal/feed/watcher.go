@@ -324,13 +324,15 @@ type appraisal struct {
 // appraise runs one model call primed with the agent's identity and parses the
 // JSON verdict. A parse failure or model error is treated as "no engagement".
 func (w *FeedWatcher) appraise(ctx context.Context, userPrompt string) (appraisal, bool) {
-	callCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
+	// No artificial per-call deadline: a background agent should take as long as
+	// it genuinely needs to read a post and decide whether to reply. Only process
+	// shutdown (via ctx) and the model client's own connection backstop bound the
+	// call, so a slow or cold model load is not cut off mid-thought.
 	msgs := []core.Message{
 		{Role: "system", Content: w.brain.SystemPrompt()},
 		{Role: "user", Content: userPrompt},
 	}
-	resp, err := w.llm.Chat(callCtx, msgs, core.WithTemperature(0.3), core.WithMaxTokens(400))
+	resp, err := w.llm.Chat(ctx, msgs, core.WithTemperature(0.3), core.WithMaxTokens(400))
 	if err != nil || resp == nil {
 		if ctx.Err() == nil {
 			log.Warn("feed appraisal call failed", "error", err)

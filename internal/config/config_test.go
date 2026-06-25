@@ -10,8 +10,8 @@ import (
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.LLM.Provider != "krilllm" {
-		t.Errorf("LLM.Provider = %q, want %q", cfg.LLM.Provider, "krilllm")
+	if cfg.LLM.Provider != "krill" {
+		t.Errorf("LLM.Provider = %q, want %q", cfg.LLM.Provider, "krill")
 	}
 	if cfg.Agent.PlanApproval != "auto" {
 		t.Errorf("Agent.PlanApproval = %q, want %q", cfg.Agent.PlanApproval, "auto")
@@ -25,8 +25,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.LLM.Model == "" {
 		t.Error("LLM.Model is empty, want a default model to be set")
 	}
-	if cfg.LLM.Model != DefaultKrillLMModel {
-		t.Errorf("LLM.Model = %q, want KrillLM primary model %q", cfg.LLM.Model, DefaultKrillLMModel)
+	if cfg.LLM.Model != "gemma-4-12b" {
+		t.Errorf("LLM.Model = %q, want Krill primary model %q", cfg.LLM.Model, "gemma-4-12b")
 	}
 	if cfg.LLM.Temperature != 0.7 {
 		t.Errorf("LLM.Temperature = %f, want 0.7", cfg.LLM.Temperature)
