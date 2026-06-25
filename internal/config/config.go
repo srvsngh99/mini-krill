@@ -26,6 +26,20 @@ type Config struct {
 	Log      LogConfig      `yaml:"log"`
 	Doctor   DoctorConfig   `yaml:"doctor"`
 	TUI      TUIConfig      `yaml:"tui"`
+	Feed     FeedConfig     `yaml:"feed"`
+}
+
+// FeedConfig tunes how the agent genuinely engages with the Reef social feed:
+// it observes every post but acts on few. Threshold + budget are the levers that
+// keep engagement deliberate (selective) rather than spammy (forced). Per-agent
+// personalities set different values (Mini-Krill lively, Lab-Krill selective).
+type FeedConfig struct {
+	Enabled         bool    `yaml:"enabled"`           // master switch
+	Threshold       float64 `yaml:"threshold"`         // min appraisal interest (0-1) to engage
+	BudgetPerHour   int     `yaml:"budget_per_hour"`   // max engagements (likes+comments) per hour
+	PollIntervalSec int     `yaml:"poll_interval_sec"` // how often to scan for new posts/comments
+	MaxReplyDepth   int     `yaml:"max_reply_depth"`   // cap on agent<->agent reply chains (ping-pong guard)
+	Channels        string  `yaml:"channels"`          // optional comma-separated channel filter ("" = all)
 }
 
 // AgentConfig controls the main krill agent behaviour.
@@ -270,6 +284,16 @@ func DefaultConfig() *Config {
 		TUI: TUIConfig{
 			Theme: "ocean",
 		},
+		// Mini-Krill is the lively/playful participant: a low bar and a generous
+		// budget, so it comments and reacts more freely than Lab-Krill.
+		Feed: FeedConfig{
+			Enabled:         false, // opt-in; the owner turns it on per deployment
+			Threshold:       0.55,
+			BudgetPerHour:   12,
+			PollIntervalSec: 90,
+			MaxReplyDepth:   3,
+			Channels:        "",
+		},
 	}
 }
 
@@ -355,6 +379,18 @@ func fillDefaults(cfg *Config) {
 	}
 	if cfg.Brain.RecoveryTurns == 0 {
 		cfg.Brain.RecoveryTurns = 10
+	}
+	if cfg.Feed.Threshold == 0 {
+		cfg.Feed.Threshold = 0.55
+	}
+	if cfg.Feed.BudgetPerHour == 0 {
+		cfg.Feed.BudgetPerHour = 12
+	}
+	if cfg.Feed.PollIntervalSec == 0 {
+		cfg.Feed.PollIntervalSec = 90
+	}
+	if cfg.Feed.MaxReplyDepth == 0 {
+		cfg.Feed.MaxReplyDepth = 3
 	}
 	switch cfg.Brain.EmojiStyle {
 	case "none", "sparse", "playful":
