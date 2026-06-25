@@ -1,6 +1,7 @@
-// Package tui implements the Terminal UI for Mini Krill using Bubble Tea.
-// The ocean-themed interface is the showcase of the project - gorgeous,
-// functional, and full of crustaceous personality.
+// Package tui implements the Terminal UI for mini-krill using Bubble Tea.
+// Brand: a sanctioned "sonar" colour kit — mono house chrome (ink/paper/dim)
+// with ONE owned accent (sonar) reserved for the symbol + active state, and
+// functional state colour (OK / warn / error) only. See sai-brand-kit/mini-krill.
 package tui
 
 import (
@@ -13,19 +14,21 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Krill-themed color palette
+// Palette — mono house chrome + the sonar accent + functional state colours
 // ---------------------------------------------------------------------------
 
 const (
-	ColorOceanBg   = lipgloss.Color("#0a1628") // deep ocean background
-	ColorCyan      = lipgloss.Color("#00d4ff") // primary - sonar pulse
-	ColorLightBlue = lipgloss.Color("#7ec8e3") // secondary - shallow waters
-	ColorGreen     = lipgloss.Color("#00ff88") // bioluminescent accent
-	ColorAmber     = lipgloss.Color("#ffaa00") // warning - surface light
-	ColorCoral     = lipgloss.Color("#ff6b6b") // error - coral reef
-	ColorDimBlue   = lipgloss.Color("#1e3a5f") // borders - twilight zone
-	ColorMuted     = lipgloss.Color("#6b7b8d") // muted text - deep silt
-	ColorWhite     = lipgloss.Color("#e8f4f8") // bright text - foam
+	// mini-krill is a sanctioned "sonar" colour kit: mono chrome + ONE owned
+	// accent (sonar) on the symbol + active state; functional state colour only.
+	ColorOceanBg   = lipgloss.Color("#161310") // house dark ground
+	ColorCyan      = lipgloss.Color("#1fb8c9") // SONAR — the one owned accent (symbol + active state)
+	ColorLightBlue = lipgloss.Color("#cfc9bd") // dim paper (secondary text)
+	ColorGreen     = lipgloss.Color("#3fae6a") // functional — OK / live
+	ColorAmber     = lipgloss.Color("#c08a2e") // functional — warn / idle
+	ColorCoral     = lipgloss.Color("#cf5a4e") // functional — error / down
+	ColorDimBlue   = lipgloss.Color("#3a3733") // borders — dim
+	ColorMuted     = lipgloss.Color("#8a857c") // muted text
+	ColorWhite     = lipgloss.Color("#d8d3ca") // bright text (paper)
 )
 
 // ---------------------------------------------------------------------------
@@ -33,20 +36,20 @@ const (
 // ---------------------------------------------------------------------------
 
 var (
-	// HeaderStyle for the top banner area.
+	// HeaderStyle renders the banner mark — the symbol carries the sonar accent.
 	HeaderStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(ColorCyan).
 			Padding(0, 1)
 
-	// TabStyle for inactive tabs in the tab bar.
+	// TabStyle for inactive tabs in the tab bar (muted, mono).
 	TabStyle = lipgloss.NewStyle().
 			Foreground(ColorMuted).
 			Border(lipgloss.NormalBorder(), false, false, true, false).
 			BorderForeground(ColorDimBlue).
 			Padding(0, 2)
 
-	// ActiveTabStyle for the currently selected tab.
+	// ActiveTabStyle — active state carries the sonar accent.
 	ActiveTabStyle = lipgloss.NewStyle().
 			Foreground(ColorCyan).
 			Bold(true).
@@ -54,71 +57,71 @@ var (
 			BorderForeground(ColorCyan).
 			Padding(0, 2)
 
-	// UserBubbleStyle for user messages in chat (right-aligned feel).
+	// UserBubbleStyle for user messages (mono; distinguished by alignment).
 	UserBubbleStyle = lipgloss.NewStyle().
-			Foreground(ColorLightBlue).
-			Border(lipgloss.RoundedBorder()).
+			Foreground(ColorWhite).
+			Border(lipgloss.NormalBorder()).
 			BorderForeground(ColorDimBlue).
 			Padding(0, 1).
 			MarginLeft(4)
 
-	// KrillBubbleStyle for krill messages in chat (left-aligned).
+	// KrillBubbleStyle for krill messages (mono; distinguished by alignment).
 	KrillBubbleStyle = lipgloss.NewStyle().
-				Foreground(ColorGreen).
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(ColorDimBlue).
-				Padding(0, 1).
-				MarginRight(4)
+			Foreground(ColorWhite).
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(ColorDimBlue).
+			Padding(0, 1).
+			MarginRight(4)
 
-	// StatusOK renders a green LIVE badge.
+	// StatusOK renders a LIVE badge (functional green).
 	StatusOK = lipgloss.NewStyle().
 			Foreground(ColorGreen).
 			Bold(true)
 
-	// StatusWarn renders an amber IDLE badge.
+	// StatusWarn renders an IDLE badge (functional amber).
 	StatusWarn = lipgloss.NewStyle().
 			Foreground(ColorAmber).
 			Bold(true)
 
-	// StatusFail renders a coral DOWN badge.
+	// StatusFail renders a DOWN badge (functional red).
 	StatusFail = lipgloss.NewStyle().
 			Foreground(ColorCoral).
 			Bold(true)
 
-	// FooterStyle for the bottom status bar.
+	// FooterStyle for the bottom status bar (muted, mono).
 	FooterStyle = lipgloss.NewStyle().
 			Foreground(ColorMuted).
 			Border(lipgloss.NormalBorder(), true, false, false, false).
 			BorderForeground(ColorDimBlue).
 			Padding(0, 1)
 
-	// HelpKeyStyle for keyboard shortcut keys in help.
+	// HelpKeyStyle for keyboard shortcut keys (mono bold).
 	HelpKeyStyle = lipgloss.NewStyle().
-			Foreground(ColorCyan).
+			Foreground(ColorWhite).
 			Bold(true)
 
 	// HelpDescStyle for keyboard shortcut descriptions.
 	HelpDescStyle = lipgloss.NewStyle().
 			Foreground(ColorMuted)
 
-	// TitleStyle for section titles.
+	// TitleStyle for section titles (mono bold).
 	TitleStyle = lipgloss.NewStyle().
-			Foreground(ColorCyan).
+			Foreground(ColorWhite).
 			Bold(true)
 
-	// ErrorStyle for error messages.
+	// ErrorStyle for error messages (functional red).
 	ErrorStyle = lipgloss.NewStyle().
 			Foreground(ColorCoral)
 
-	// BoxStyle for dashboard panels.
+	// BoxStyle for dashboard panels (sharp border).
 	BoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
+			Border(lipgloss.NormalBorder()).
 			BorderForeground(ColorDimBlue).
 			Padding(1, 2)
 
-	// BoxTitleStyle for dashboard panel titles.
+	// BoxTitleStyle for dashboard panel titles (mono bold).
 	BoxTitleStyle = lipgloss.NewStyle().
-			Foreground(ColorCyan).
+			Foreground(ColorWhite).
 			Bold(true).
 			Padding(0, 1).
 			MarginBottom(1)
@@ -127,13 +130,13 @@ var (
 	ValueStyle = lipgloss.NewStyle().
 			Foreground(ColorWhite)
 
-	// LabelStyle for dashboard labels.
+	// LabelStyle for dashboard labels (muted, mono).
 	LabelStyle = lipgloss.NewStyle().
-			Foreground(ColorLightBlue)
+			Foreground(ColorMuted)
 
-	// InputStyle for the chat input field.
+	// InputStyle — the active input border carries the sonar accent.
 	InputStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
+			Border(lipgloss.NormalBorder()).
 			BorderForeground(ColorCyan).
 			Padding(0, 1)
 
@@ -141,13 +144,13 @@ var (
 	DimStyle = lipgloss.NewStyle().
 			Foreground(ColorMuted)
 
-	// AccentStyle for highlighted text.
+	// AccentStyle for highlighted text (the sonar accent).
 	AccentStyle = lipgloss.NewStyle().
-			Foreground(ColorGreen)
+			Foreground(ColorCyan)
 
-	// BrandStyle for Sourav AI Labs attribution.
+	// BrandStyle for Sourav AI Labs attribution (muted, mono).
 	BrandStyle = lipgloss.NewStyle().
-			Foreground(ColorCoral)
+			Foreground(ColorMuted)
 )
 
 // ---------------------------------------------------------------------------

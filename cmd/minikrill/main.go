@@ -24,23 +24,26 @@ import (
 	"github.com/srvsngh99/mini-krill/internal/reminder"
 )
 
-// ANSI color codes - ocean palette
+// ANSI codes - house mono + functional state. mini-krill is a "sonar" kit:
+// the owned accent lives in the TUI symbol/active-state, not the CLI chrome.
+// Decorative colours (cyan/blue/magenta) collapse to bold/dim; green=success,
+// yellow=warn, red=error are kept as functional state.
 const (
 	cReset   = "\033[0m"
 	cBold    = "\033[1m"
 	cDim     = "\033[2m"
-	cCyan    = "\033[36m"
-	cGreen   = "\033[32m"
-	cYellow  = "\033[33m"
-	cRed     = "\033[31m"
-	cBlue    = "\033[34m"
-	cMagenta = "\033[35m"
-	cBCyan   = "\033[1;36m"
-	cBGreen  = "\033[1;32m"
-	cBYellow = "\033[1;33m"
-	cBRed    = "\033[1;31m"
-	cBBlue   = "\033[1;34m"
-	cDimCyan = "\033[2;36m"
+	cCyan    = "\033[1m"    // decorative -> bold (mono)
+	cGreen   = "\033[32m"   // functional - success
+	cYellow  = "\033[33m"   // functional - warn
+	cRed     = "\033[31m"   // functional - error
+	cBlue    = "\033[1m"    // decorative -> bold (mono)
+	cMagenta = "\033[2m"    // decorative -> dim (mono)
+	cBCyan   = "\033[1m"    // decorative -> bold (mono)
+	cBGreen  = "\033[1;32m" // functional - success (bold)
+	cBYellow = "\033[1;33m" // functional - warn (bold)
+	cBRed    = "\033[1;31m" // functional - error (bold)
+	cBBlue   = "\033[1m"    // decorative -> bold (mono)
+	cDimCyan = "\033[2m"    // decorative -> dim (mono)
 )
 
 var verbose bool
