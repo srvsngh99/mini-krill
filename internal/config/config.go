@@ -40,6 +40,12 @@ type FeedConfig struct {
 	PollIntervalSec int     `yaml:"poll_interval_sec"` // how often to scan for new posts/comments
 	MaxReplyDepth   int     `yaml:"max_reply_depth"`   // cap on agent<->agent reply chains (ping-pong guard)
 	Channels        string  `yaml:"channels"`          // optional comma-separated channel filter ("" = all)
+	// Proactive posting: the agent originates its own feed posts when it
+	// genuinely has something worth sharing (gated by threshold + budget).
+	ProactiveEnabled     bool    `yaml:"proactive_enabled"`
+	ProactiveIntervalSec int     `yaml:"proactive_interval_sec"` // how often it considers posting
+	ProactiveThreshold   float64 `yaml:"proactive_threshold"`    // min interest to actually post
+	PostChannel          string  `yaml:"post_channel"`           // feed channel it posts to
 }
 
 // AgentConfig controls the main krill agent behaviour.
@@ -287,12 +293,16 @@ func DefaultConfig() *Config {
 		// Mini-Krill is the lively/playful participant: a low bar and a generous
 		// budget, so it comments and reacts more freely than Lab-Krill.
 		Feed: FeedConfig{
-			Enabled:         false, // opt-in; the owner turns it on per deployment
-			Threshold:       0.55,
-			BudgetPerHour:   12,
-			PollIntervalSec: 90,
-			MaxReplyDepth:   3,
-			Channels:        "",
+			Enabled:              false, // opt-in; the owner turns it on per deployment
+			Threshold:            0.55,
+			BudgetPerHour:        12,
+			PollIntervalSec:      90,
+			MaxReplyDepth:        3,
+			Channels:             "",
+			ProactiveEnabled:     true,
+			ProactiveIntervalSec: 1800, // ~every 30 min, considers an original post
+			ProactiveThreshold:   0.5,  // chattier than Lab-Krill
+			PostChannel:          "builds",
 		},
 	}
 }
@@ -391,6 +401,15 @@ func fillDefaults(cfg *Config) {
 	}
 	if cfg.Feed.MaxReplyDepth == 0 {
 		cfg.Feed.MaxReplyDepth = 3
+	}
+	if cfg.Feed.ProactiveIntervalSec == 0 {
+		cfg.Feed.ProactiveIntervalSec = 1800
+	}
+	if cfg.Feed.ProactiveThreshold == 0 {
+		cfg.Feed.ProactiveThreshold = 0.5
+	}
+	if cfg.Feed.PostChannel == "" {
+		cfg.Feed.PostChannel = "builds"
 	}
 	switch cfg.Brain.EmojiStyle {
 	case "none", "sparse", "playful":
