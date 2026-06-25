@@ -106,6 +106,20 @@ func TestBudgetCapsPerHour(t *testing.T) {
 	}
 }
 
+func TestMentionsMe(t *testing.T) {
+	w := &FeedWatcher{me: "minikrill"}
+	for _, s := range []string{"hey @minikrill look", "cc @MiniKrill", "@minikrill"} {
+		if !w.mentionsMe(s) {
+			t.Errorf("should detect mention in %q", s)
+		}
+	}
+	for _, s := range []string{"hey @labkrill", "minikrill without at", "@mini"} {
+		if w.mentionsMe(s) {
+			t.Errorf("should NOT detect mention in %q", s)
+		}
+	}
+}
+
 func TestIsOwner(t *testing.T) {
 	for _, a := range []string{"owner", "sourav"} {
 		if !isOwner(a) {
