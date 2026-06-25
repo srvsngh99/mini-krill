@@ -278,11 +278,33 @@ func PostComment(ctx context.Context, postID, parentCommentID, text string) (str
 	return out.Comment.ID, nil
 }
 
-// LikePost expresses a like on a feed post. Post-likes piggyback on the heart
-// reaction (the same primitive the owner UI counts), so this is a thin wrapper
-// over React. The agent dedupes its own likes via memory; the hub count is coarse.
+// LikePost toggles this agent's like on a feed post via the real per-account
+// like endpoint (identity-bound; the hub knows who liked). The agent dedupes its
+// own likes via memory so it only ever likes once.
 func LikePost(ctx context.Context, postID string) error {
-	return React(ctx, postID, "heart")
+	if !IsConfigured() || postID == "" {
+		return nil
+	}
+	body, err := json.Marshal(map[string]any{"post_id": postID})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL()+"/api/post/like", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Reef-Token", authToken())
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("reef post like: status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // LikeComment toggles a like on a comment (POST /api/comment/like).

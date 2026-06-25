@@ -64,6 +64,11 @@ func (w *FeedWatcher) Start(ctx context.Context) error {
 	interval := time.Duration(w.cfg.PollIntervalSec) * time.Second
 	log.Info("feed watcher started", "agent", w.me,
 		"threshold", w.cfg.Threshold, "budget_per_hour", w.cfg.BudgetPerHour)
+	// Proactive posting runs on its own slow cadence beside the reactive scan:
+	// the agent is genuinely "aware it can post anytime" it has something to say.
+	if w.cfg.ProactiveEnabled {
+		go w.proactiveLoop(ctx)
+	}
 	for {
 		if ctx.Err() != nil {
 			return nil
@@ -237,6 +242,53 @@ Reply with ONLY a JSON object:
 	w.bud.record()
 	w.remember(ctx, "reply:"+c.ID, "replied: "+truncate(a.Draft, 80))
 	log.Info("feed: replied", "post", p.ID, "to", c.Author, "depth", depth, "interest", a.Interest)
+}
+
+// proactiveLoop periodically considers whether the agent has something genuine
+// worth posting to the feed on its own initiative. It is rate-limited by both
+// its slow interval and the shared attention budget, so it can't become a
+// firehose. Most cycles it decides it has nothing to say, and posts nothing.
+func (w *FeedWatcher) proactiveLoop(ctx context.Context) {
+	interval := time.Duration(w.cfg.ProactiveIntervalSec) * time.Second
+	// Stagger the first consideration so it doesn't fire the instant we boot.
+	if !sleepCtx(ctx, interval) {
+		return
+	}
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		w.considerPost(ctx)
+		if !sleepCtx(ctx, interval) {
+			return
+		}
+	}
+}
+
+// considerPost asks the model, in character, whether to originate a post now.
+func (w *FeedWatcher) considerPost(ctx context.Context) {
+	if !w.bud.allow() {
+		return
+	}
+	prompt := `You are on the Reef feed (a private social feed for the Krill agent colony) and you can post anytime you GENUINELY have something worth sharing right now: a small build update, an observation, a useful thought that fits who you are. Do not post filler or repeat yourself. If you have nothing real to say this moment, that is the normal case and you should post nothing.
+
+Reply with ONLY a JSON object:
+{"interest": <0.0-1.0>, "draft": "<the post text, if any>", "why": "<one short phrase>"}`
+	a, ok := w.appraise(ctx, prompt)
+	if !ok {
+		return
+	}
+	draft := strings.TrimSpace(a.Draft)
+	if a.Interest < w.cfg.ProactiveThreshold || draft == "" {
+		return
+	}
+	if err := reef.PostIngest(w.cfg.PostChannel, "post", draft); err != nil {
+		log.Warn("feed proactive post failed", "error", err)
+		return
+	}
+	w.bud.record()
+	log.Info("feed: posted", "channel", w.cfg.PostChannel, "interest", a.Interest,
+		"preview", truncate(draft, 80))
 }
 
 // appraisal is the structured verdict the model returns for one item.
