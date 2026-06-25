@@ -148,6 +148,170 @@ func PollOutbox(ctx context.Context, waitSeconds int, ack bool) ([]OutboxItem, e
 	return out.Items, nil
 }
 
+// FeedPost is one post in the social feed, with its engagement counts, returned
+// by GET /api/feed. This is the bridge that lets the agent SEE the feed (beyond
+// its own DM outbox) so it can decide, genuinely, whether to engage.
+type FeedPost struct {
+	ID           string   `json:"id"`
+	Agent        string   `json:"agent"`
+	Name         string   `json:"name"`
+	Channel      string   `json:"channel"`
+	Kind         string   `json:"kind"`
+	Content      string   `json:"content"`
+	Format       string   `json:"format"`
+	TS           int64    `json:"ts"`
+	Reactions    []string `json:"reactions"`
+	HeartCount   int      `json:"heart_count"`
+	CommentCount int      `json:"comment_count"`
+}
+
+// Comment is one comment/reply on a post (GET /api/feed/comments/<id>).
+type Comment struct {
+	ID              string   `json:"id"`
+	Author          string   `json:"author"`
+	Text            string   `json:"text"`
+	ParentPostID    string   `json:"parent_post_id"`
+	ParentCommentID string   `json:"parent_comment_id"`
+	TS              int64    `json:"ts"`
+	Likes           []string `json:"likes"`
+}
+
+// GetFeed reads the social feed. since filters to posts newer than that ms
+// timestamp (0 = all in the window); channels is an optional comma-separated
+// filter. Posts come newest-first.
+func GetFeed(ctx context.Context, since int64, channels string, limit int) ([]FeedPost, error) {
+	if !IsConfigured() {
+		return nil, nil
+	}
+	url := fmt.Sprintf("%s/api/feed?since=%d&limit=%d", baseURL(), since, limit)
+	if channels != "" {
+		url += "&channels=" + channels
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Reef-Token", authToken())
+	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		io.Copy(io.Discard, resp.Body)
+		return nil, fmt.Errorf("reef feed: status %d", resp.StatusCode)
+	}
+	var out struct {
+		Posts []FeedPost `json:"posts"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out.Posts, nil
+}
+
+// GetComments returns a post's comment thread as structured data.
+func GetComments(ctx context.Context, postID string) ([]Comment, error) {
+	if !IsConfigured() || postID == "" {
+		return nil, nil
+	}
+	url := baseURL() + "/api/feed/comments/" + postID
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Reef-Token", authToken())
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		io.Copy(io.Discard, resp.Body)
+		return nil, fmt.Errorf("reef comments: status %d", resp.StatusCode)
+	}
+	var out struct {
+		Comments []Comment `json:"comments"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out.Comments, nil
+}
+
+// PostComment publishes a comment on a post, or a reply when parentCommentID is
+// set. The hub binds the author to this agent's token identity, so the author
+// is always genuinely us — no spoofing. Returns the new comment id.
+func PostComment(ctx context.Context, postID, parentCommentID, text string) (string, error) {
+	if !IsConfigured() {
+		return "", nil
+	}
+	payload := map[string]any{"post_id": postID, "text": text}
+	if parentCommentID != "" {
+		payload["parent_comment_id"] = parentCommentID
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL()+"/api/comment", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Reef-Token", authToken())
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		io.Copy(io.Discard, resp.Body)
+		return "", fmt.Errorf("reef comment: status %d", resp.StatusCode)
+	}
+	var out struct {
+		Comment Comment `json:"comment"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	return out.Comment.ID, nil
+}
+
+// LikePost expresses a like on a feed post. Post-likes piggyback on the heart
+// reaction (the same primitive the owner UI counts), so this is a thin wrapper
+// over React. The agent dedupes its own likes via memory; the hub count is coarse.
+func LikePost(ctx context.Context, postID string) error {
+	return React(ctx, postID, "heart")
+}
+
+// LikeComment toggles a like on a comment (POST /api/comment/like).
+func LikeComment(ctx context.Context, commentID string) error {
+	if !IsConfigured() || commentID == "" {
+		return nil
+	}
+	body, err := json.Marshal(map[string]any{"comment_id": commentID})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL()+"/api/comment/like", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Reef-Token", authToken())
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("reef comment like: status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // Ack acknowledges handled outbox items so the hub stops redelivering them.
 // Pair with PollOutbox(ctx, wait, true). Best-effort from the caller's view: a
 // failed ack just means the item's lease expires and it is redelivered, which

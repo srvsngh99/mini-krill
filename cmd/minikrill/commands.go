@@ -19,6 +19,7 @@ import (
 	"github.com/srvsngh99/mini-krill/internal/config"
 	"github.com/srvsngh99/mini-krill/internal/core"
 	"github.com/srvsngh99/mini-krill/internal/doctor"
+	"github.com/srvsngh99/mini-krill/internal/feed"
 	"github.com/srvsngh99/mini-krill/internal/llm"
 	klog "github.com/srvsngh99/mini-krill/internal/log"
 	"github.com/srvsngh99/mini-krill/internal/ollama"
@@ -611,6 +612,17 @@ func startBots(ctx context.Context, stack *krillStack) botStatus {
 				klog.Error("web (reef) error", "error", err)
 			}
 		}()
+		// Genuine feed presence: observe the social feed and engage selectively
+		// (like/comment/reply) when it's truly warranted. Shares ctx, llm, brain.
+		if stack.cfg.Feed.Enabled {
+			fw := feed.NewFeedWatcher(stack.llm, stack.brain, stack.cfg.Feed)
+			go func() {
+				if err := fw.Start(ctx); err != nil {
+					klog.Error("feed watcher error", "error", err)
+				}
+			}()
+			klog.Info("feed watcher enabled", "agent", reef.AgentID())
+		}
 		s.WebOK = true
 		s.web = wbBot
 		klog.Info("web (reef) bot started", "agent", reef.AgentID())
