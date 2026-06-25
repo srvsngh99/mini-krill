@@ -74,6 +74,21 @@ func TestAgentChainDepth(t *testing.T) {
 	}
 }
 
+// A cyclic parent chain from malformed hub data must not hang the walk.
+func TestAgentChainDepthCycle(t *testing.T) {
+	byID := map[string]reef.Comment{
+		"a": {ID: "a", Author: "labkrill", ParentCommentID: "b"},
+		"b": {ID: "b", Author: "minikrill", ParentCommentID: "a"},
+	}
+	done := make(chan int, 1)
+	go func() { done <- agentChainDepth(byID["a"], byID, "minikrill") }()
+	select {
+	case <-done: // returned (any finite value) = guard works
+	case <-time.After(2 * time.Second):
+		t.Fatal("agentChainDepth hung on a cyclic parent chain")
+	}
+}
+
 func TestBudgetCapsPerHour(t *testing.T) {
 	b := &budget{perHour: 2}
 	if !b.allow() {

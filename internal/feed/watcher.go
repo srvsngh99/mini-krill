@@ -333,15 +333,20 @@ func (b *budget) prune() {
 // human stepping in is not the runaway loop we guard against.
 func agentChainDepth(c reef.Comment, byID map[string]reef.Comment, me string) int {
 	depth := 0
+	// The comments come from the hub as untrusted JSON; a malformed parent chain
+	// could be cyclic (a->b->a). Track visited ids so a cycle stops the walk
+	// instead of spinning forever and pinning the goroutine.
+	visited := map[string]bool{c.ID: true}
 	cur := c
 	for cur.ParentCommentID != "" {
+		if visited[cur.ParentCommentID] {
+			break
+		}
 		parent, ok := byID[cur.ParentCommentID]
-		if !ok {
+		if !ok || isOwner(parent.Author) {
 			break
 		}
-		if isOwner(parent.Author) {
-			break
-		}
+		visited[cur.ParentCommentID] = true
 		depth++
 		cur = parent
 	}
