@@ -88,33 +88,12 @@ func New(agent string, cfg Config) *Store {
 func (s *Store) Enabled() bool { return s != nil && s.cfg.Enabled }
 
 // Remember stores one memory. Best-effort: any failure is logged and swallowed.
+// It delegates to Upsert so the write path has a single implementation.
 func (s *Store) Remember(ctx context.Context, m Memory) {
 	if !s.Enabled() || strings.TrimSpace(m.Text) == "" {
 		return
 	}
-	collID, err := s.collection(ctx)
-	if err != nil {
-		log.Printf("[socialmem] remember skipped (collection): %v", err)
-		return
-	}
-	emb, err := s.embed(ctx, m.Text)
-	if err != nil {
-		log.Printf("[socialmem] remember skipped (embed): %v", err)
-		return
-	}
-	if m.Meta == nil {
-		m.Meta = map[string]any{}
-	}
-	if _, ok := m.Meta["agent"]; !ok {
-		m.Meta["agent"] = s.agent
-	}
-	body := map[string]any{
-		"ids":        []string{m.ID},
-		"embeddings": [][]float32{emb},
-		"documents":  []string{m.Text},
-		"metadatas":  []map[string]any{m.Meta},
-	}
-	if err := s.post(ctx, s.collPath(collID)+"/upsert", body, nil); err != nil {
+	if err := s.Upsert(ctx, m); err != nil {
 		log.Printf("[socialmem] remember failed: %v", err)
 	}
 }
@@ -278,6 +257,28 @@ func (s *Store) embed(ctx context.Context, text string) ([]float32, error) {
 		return nil, fmt.Errorf("empty embedding")
 	}
 	return out.Data[0].Embedding, nil
+}
+
+// get issues a GET and decodes the JSON response into out.
+func (s *Store) get(ctx context.Context, url string, out any) error {
+	reqCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := s.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("%s -> %d", url, resp.StatusCode)
+	}
+	if out != nil {
+		return json.NewDecoder(resp.Body).Decode(out)
+	}
+	return nil
 }
 
 // post issues a JSON POST and optionally decodes the response into out.
