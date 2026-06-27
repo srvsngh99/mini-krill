@@ -1,3 +1,5 @@
+//go:build colony
+
 // Package feed gives the agent a genuine presence in the Reef social feed.
 //
 // The design goal is GENUINE engagement, not forced: the agent observes every
@@ -28,6 +30,7 @@ import (
 	"github.com/srvsngh99/mini-krill/internal/core"
 	log "github.com/srvsngh99/mini-krill/internal/log"
 	"github.com/srvsngh99/mini-krill/internal/reef"
+	"github.com/srvsngh99/mini-krill/internal/socialmem"
 )
 
 // maxAppraisalsPerCycle bounds how many local-model appraisal calls one scan
@@ -48,22 +51,25 @@ const mentionThreshold = 0.2
 
 // FeedWatcher observes the feed and decides, genuinely, whether to engage.
 type FeedWatcher struct {
-	llm   core.LLMProvider
-	brain core.Brain
-	cfg   config.FeedConfig
-	me    string
-	bud   *budget
+	llm    core.LLMProvider
+	brain  core.Brain
+	social *socialmem.Store // semantic social memory (nil-safe): recall + remember
+	cfg    config.FeedConfig
+	me     string
+	bud    *budget
 }
 
-// NewFeedWatcher wires the watcher to the shared model + brain. It engages as
-// reef.AgentID() and never acts on its own posts.
-func NewFeedWatcher(llm core.LLMProvider, brain core.Brain, cfg config.FeedConfig) *FeedWatcher {
+// NewFeedWatcher wires the watcher to the shared model, brain (durable dedup),
+// and the semantic social memory (which may be nil/disabled - all its methods
+// are no-ops then). It engages as reef.AgentID() and never acts on its own posts.
+func NewFeedWatcher(llm core.LLMProvider, brain core.Brain, social *socialmem.Store, cfg config.FeedConfig) *FeedWatcher {
 	return &FeedWatcher{
-		llm:   llm,
-		brain: brain,
-		cfg:   cfg,
-		me:    reef.AgentID(),
-		bud:   &budget{perHour: cfg.BudgetPerHour},
+		llm:    llm,
+		brain:  brain,
+		social: social,
+		cfg:    cfg,
+		me:     reef.AgentID(),
+		bud:    &budget{perHour: cfg.BudgetPerHour},
 	}
 }
 
@@ -154,6 +160,10 @@ Reply with ONLY a JSON object:
 {"interest": <0.0-1.0>, "action": "ignore|like|comment", "draft": "<your comment if action==comment, else empty>", "why": "<one short phrase>"}`,
 		p.Name, p.Agent, p.Channel, truncate(p.Content, 1200), p.HeartCount, p.CommentCount, note)
 
+	// Recall what this agent said/heard about similar things before, so it can
+	// reference the past and avoid repeating itself.
+	prompt += w.social.RecallBlock(ctx, p.Content)
+
 	a, ok := w.appraise(ctx, prompt)
 	if !ok {
 		return
@@ -170,6 +180,8 @@ Reply with ONLY a JSON object:
 		}
 		w.bud.record()
 		w.remember(ctx, "post:"+p.ID, "liked")
+		w.rememberSocial(ctx, "like:"+p.ID, fmt.Sprintf("I liked %s's post in #%s: %q", p.Name, p.Channel, truncate(p.Content, 200)),
+			map[string]any{"kind": "like", "surface": "feed", "post_id": p.ID, "counterparty": p.Agent, "channel": p.Channel})
 		log.Info("feed: liked post", "post", p.ID, "by", p.Agent, "interest", a.Interest)
 	case "comment":
 		text := strings.TrimSpace(a.Draft)
@@ -183,6 +195,8 @@ Reply with ONLY a JSON object:
 		}
 		w.bud.record()
 		w.remember(ctx, "post:"+p.ID, "commented: "+truncate(text, 80))
+		w.rememberSocial(ctx, "comment:"+p.ID, fmt.Sprintf("On %s's post in #%s about %q, I commented: %s", p.Name, p.Channel, truncate(p.Content, 160), text),
+			map[string]any{"kind": "comment", "surface": "feed", "post_id": p.ID, "counterparty": p.Agent, "channel": p.Channel})
 		log.Info("feed: commented", "post", p.ID, "by", p.Agent, "interest", a.Interest)
 	}
 }
@@ -255,6 +269,9 @@ Reply with ONLY a JSON object:
 {"interest": <0.0-1.0>, "action": "ignore|reply", "draft": "<your reply if action==reply, else empty>", "why": "<one short phrase>"}`,
 		p.Name, p.Channel, truncate(p.Content, 600), c.Author, c.Author, truncate(c.Text, 600), depth, note)
 
+	// Recall prior exchanges with this person / on this topic.
+	prompt += w.social.RecallBlock(ctx, c.Text+"\n"+p.Content)
+
 	a, ok := w.appraise(ctx, prompt)
 	if !ok {
 		return
@@ -263,12 +280,15 @@ Reply with ONLY a JSON object:
 		w.remember(ctx, "reply:"+c.ID, "ignored ("+a.Why+")")
 		return
 	}
-	if _, err := reef.PostComment(ctx, p.ID, c.ID, strings.TrimSpace(a.Draft)); err != nil {
+	reply := strings.TrimSpace(a.Draft)
+	if _, err := reef.PostComment(ctx, p.ID, c.ID, reply); err != nil {
 		log.Warn("feed reply failed", "comment", c.ID, "error", err)
 		return
 	}
 	w.bud.record()
 	w.remember(ctx, "reply:"+c.ID, "replied: "+truncate(a.Draft, 80))
+	w.rememberSocial(ctx, "reply:"+c.ID, fmt.Sprintf("Replying to %s (who said %q) on %s's post in #%s, I said: %s", c.Author, truncate(c.Text, 160), p.Name, p.Channel, reply),
+		map[string]any{"kind": "reply", "surface": "feed", "post_id": p.ID, "comment_id": c.ID, "counterparty": c.Author, "channel": p.Channel})
 	log.Info("feed: replied", "post", p.ID, "to", c.Author, "depth", depth, "interest", a.Interest)
 }
 
@@ -315,6 +335,8 @@ Reply with ONLY a JSON object:
 		return
 	}
 	w.bud.record()
+	w.rememberSocial(ctx, fmt.Sprintf("post:%d", time.Now().UnixMilli()), fmt.Sprintf("I posted in #%s: %s", w.cfg.PostChannel, draft),
+		map[string]any{"kind": "post", "surface": "feed", "channel": w.cfg.PostChannel})
 	log.Info("feed: posted", "channel", w.cfg.PostChannel, "interest", a.Interest,
 		"preview", truncate(draft, 80))
 }
@@ -377,6 +399,21 @@ func (w *FeedWatcher) remember(ctx context.Context, suffix, outcome string) {
 		CreatedAt:  time.Now(),
 		AccessedAt: time.Now(),
 	})
+}
+
+// rememberSocial records one SEMANTIC social memory (what the agent said/did) so
+// it can be recalled by meaning later - separate from the brain dedup above,
+// which is exact-key continuity only. Best-effort and nil-safe; ts is stamped
+// here so recall can render "a few days ago".
+func (w *FeedWatcher) rememberSocial(ctx context.Context, id, text string, meta map[string]any) {
+	if w.social == nil || !w.social.Enabled() {
+		return
+	}
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	meta["ts"] = time.Now().UnixMilli()
+	w.social.Remember(ctx, socialmem.Memory{ID: id, Text: text, Meta: meta})
 }
 
 // --- attention budget ------------------------------------------------------

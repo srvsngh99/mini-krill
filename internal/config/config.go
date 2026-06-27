@@ -15,18 +15,35 @@ import (
 
 // Config is the root configuration for Mini Krill.
 type Config struct {
-	Agent    AgentConfig    `yaml:"agent"`
-	LLM      LLMConfig      `yaml:"llm"`
-	Brain    BrainConfig    `yaml:"brain"`
-	Telegram TelegramConfig `yaml:"telegram"`
-	Discord  DiscordConfig  `yaml:"discord"`
-	Ollama   OllamaConfig   `yaml:"ollama"`
-	Plugins  PluginsConfig  `yaml:"plugins"`
-	MCP      MCPConfig      `yaml:"mcp"`
-	Log      LogConfig      `yaml:"log"`
-	Doctor   DoctorConfig   `yaml:"doctor"`
-	TUI      TUIConfig      `yaml:"tui"`
-	Feed     FeedConfig     `yaml:"feed"`
+	Agent     AgentConfig     `yaml:"agent"`
+	LLM       LLMConfig       `yaml:"llm"`
+	Brain     BrainConfig     `yaml:"brain"`
+	Telegram  TelegramConfig  `yaml:"telegram"`
+	Discord   DiscordConfig   `yaml:"discord"`
+	Ollama    OllamaConfig    `yaml:"ollama"`
+	Plugins   PluginsConfig   `yaml:"plugins"`
+	MCP       MCPConfig       `yaml:"mcp"`
+	Log       LogConfig       `yaml:"log"`
+	Doctor    DoctorConfig    `yaml:"doctor"`
+	TUI       TUIConfig       `yaml:"tui"`
+	Feed      FeedConfig      `yaml:"feed"`
+	SocialMem SocialMemConfig `yaml:"social_memory"`
+}
+
+// SocialMemConfig configures the agent's semantic social memory: its OWN Chroma
+// collection (isolated from other agents), embedded with the shared colony bge
+// embedder served by krillm. It remembers what the agent said/heard on the feed
+// and in DMs and recalls it by meaning. Best-effort: if Chroma/embedder are
+// unreachable it silently no-ops. Mirrors socialmem.Config so the config package
+// stays decoupled from internal/socialmem.
+type SocialMemConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	ChromaURL    string `yaml:"chroma_url"`
+	EmbedURL     string `yaml:"embed_url"`
+	EmbedModel   string `yaml:"embed_model"`
+	Collection   string `yaml:"collection"`
+	RecallK      int    `yaml:"recall_k"`
+	RetentionCap int    `yaml:"retention_cap"` // max rows kept; oldest trimmed (default 2000)
 }
 
 // FeedConfig tunes how the agent genuinely engages with the Reef social feed:
@@ -310,6 +327,14 @@ func DefaultConfig() *Config {
 			ProactiveIntervalSec: 1800, // ~every 30 min, considers an original post
 			ProactiveThreshold:   0.5,  // chattier than Lab-Krill
 			PostChannel:          "builds",
+		},
+		SocialMem: SocialMemConfig{
+			Enabled:      true,
+			ChromaURL:    "http://127.0.0.1:8001",
+			EmbedURL:     "http://127.0.0.1:57455",
+			EmbedModel:   "bge-base-en",
+			RecallK:      4,
+			RetentionCap: 2000,
 		},
 	}
 }

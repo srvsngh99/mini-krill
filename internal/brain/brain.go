@@ -16,7 +16,7 @@ import (
 // KrillBrain implements core.Brain, orchestrating memory, personality, soul,
 // and heartbeat into one cohesive cognitive system.
 type KrillBrain struct {
-	memory      *FileMemory
+	memory      core.Memory
 	convStore   *ConversationStore
 	soul        *core.Soul
 	personality *core.Personality
@@ -45,8 +45,11 @@ func New(cfg config.BrainConfig, llm core.LLMProvider) (*KrillBrain, error) {
 		return nil, fmt.Errorf("load soul: %w", err)
 	}
 
-	// Initialize file-based memory
-	memory, err := NewFileMemory(memDir, cfg.MaxMemories)
+	// Initialize the default memory backend. Build-tag selected: the public
+	// release uses file-backed memory (memory_default.go); colony builds use the
+	// Chroma-backed semantic memory and migrate the file store into it once
+	// (memory_chroma.go).
+	memory, err := newDefaultMemory(memDir, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("init memory: %w", err)
 	}

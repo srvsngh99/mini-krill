@@ -1,3 +1,5 @@
+//go:build colony
+
 package feed
 
 import (
