@@ -37,12 +37,13 @@ type Config struct {
 // unreachable it silently no-ops. Mirrors socialmem.Config so the config package
 // stays decoupled from internal/socialmem.
 type SocialMemConfig struct {
-	Enabled    bool   `yaml:"enabled"`
-	ChromaURL  string `yaml:"chroma_url"`
-	EmbedURL   string `yaml:"embed_url"`
-	EmbedModel string `yaml:"embed_model"`
-	Collection string `yaml:"collection"`
-	RecallK    int    `yaml:"recall_k"`
+	Enabled      bool   `yaml:"enabled"`
+	ChromaURL    string `yaml:"chroma_url"`
+	EmbedURL     string `yaml:"embed_url"`
+	EmbedModel   string `yaml:"embed_model"`
+	Collection   string `yaml:"collection"`
+	RecallK      int    `yaml:"recall_k"`
+	RetentionCap int    `yaml:"retention_cap"` // max rows kept; oldest trimmed (default 2000)
 }
 
 // FeedConfig tunes how the agent genuinely engages with the Reef social feed:
@@ -328,11 +329,12 @@ func DefaultConfig() *Config {
 			PostChannel:          "builds",
 		},
 		SocialMem: SocialMemConfig{
-			Enabled:    true,
-			ChromaURL:  "http://127.0.0.1:8001",
-			EmbedURL:   "http://127.0.0.1:57455",
-			EmbedModel: "bge-base-en",
-			RecallK:    4,
+			Enabled:      true,
+			ChromaURL:    "http://127.0.0.1:8001",
+			EmbedURL:     "http://127.0.0.1:57455",
+			EmbedModel:   "bge-base-en",
+			RecallK:      4,
+			RetentionCap: 2000,
 		},
 	}
 }

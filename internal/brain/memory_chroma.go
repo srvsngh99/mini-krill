@@ -18,7 +18,7 @@ import (
 
 // ChromaMemory is the COLONY default memory backend: the agent's entire memory
 // lives in its OWN Chroma collection (embedded with the shared bge embedder),
-// so every recall is semantic — "what did I learn / say about X" returns by
+// so every recall is semantic - "what did I learn / say about X" returns by
 // meaning, not exact key. It satisfies core.Memory and is selected over
 // FileMemory only in colony builds (see memory_default.go for the public one).
 //
@@ -30,7 +30,7 @@ type ChromaMemory struct {
 }
 
 // NewChromaMemory builds a Chroma-backed memory for the agent. The collection is
-// the agent id, so it is the same store the feed watcher records into — one mind,
+// the agent id, so it is the same store the feed watcher records into - one mind,
 // one collection.
 func NewChromaMemory(agent string, max int) *ChromaMemory {
 	s := socialmem.New(agent, socialmem.Config{Enabled: true, Collection: agent})
@@ -187,11 +187,24 @@ func migrateFileMemoryOnce(memDir string, cfg config.BrainConfig, cm *ChromaMemo
 		return
 	}
 	migrated := 0
+	allOK := true
 	for _, e := range entries {
-		if err := cm.Store(context.Background(), e); err == nil {
-			migrated++
+		if err := cm.Store(context.Background(), e); err != nil {
+			// Chroma/embedder is likely down at this first colony boot. Do NOT mark
+			// migration complete, so a later boot retries against the intact
+			// FileMemory rather than orphaning it forever.
+			allOK = false
+			klog.Warn("FileMemory -> Chroma migration: store failed", "key", e.Key, "error", err)
+			continue
 		}
+		migrated++
 	}
+	if !allOK {
+		klog.Warn("FileMemory -> Chroma migration incomplete; leaving FileMemory intact for retry",
+			"migrated", migrated, "of", len(entries))
+		return
+	}
+	// Every entry landed: it is now safe to mark migration done so we never re-run.
 	_ = os.WriteFile(marker, []byte(time.Now().UTC().Format(time.RFC3339)), 0o644)
 	klog.Info("migrated FileMemory -> Chroma", "entries", migrated, "of", len(entries))
 }

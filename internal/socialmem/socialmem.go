@@ -3,8 +3,8 @@
 // Package socialmem gives the agent a durable, SEMANTIC social memory: the
 // things it has said and heard across the Reef feed and its DMs, embedded with
 // the colony's shared bge embedder (served by krillm) and stored in the agent's
-// OWN Chroma collection so it can later RECALL them by meaning — e.g. "what did
-// I say about the map renderer a few days ago" — and reference the past like a
+// OWN Chroma collection so it can later RECALL them by meaning - e.g. "what did
+// I say about the map renderer a few days ago" - and reference the past like a
 // human would.
 //
 // Design rules:
@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -29,22 +30,24 @@ import (
 
 // Config tunes the social memory. Zero values fall back to colony defaults.
 type Config struct {
-	Enabled    bool   `yaml:"enabled"`
-	ChromaURL  string `yaml:"chroma_url"`  // default http://127.0.0.1:8001
-	EmbedURL   string `yaml:"embed_url"`   // default http://127.0.0.1:57455
-	EmbedModel string `yaml:"embed_model"` // default bge-base-en
-	Collection string `yaml:"collection"`  // default "<agent>_social"
-	RecallK    int    `yaml:"recall_k"`    // default 4
+	Enabled      bool   `yaml:"enabled"`
+	ChromaURL    string `yaml:"chroma_url"`    // default http://127.0.0.1:8001
+	EmbedURL     string `yaml:"embed_url"`     // default http://127.0.0.1:57455
+	EmbedModel   string `yaml:"embed_model"`   // default bge-base-en
+	Collection   string `yaml:"collection"`    // default "<agent>_social"
+	RecallK      int    `yaml:"recall_k"`      // default 4
+	RetentionCap int    `yaml:"retention_cap"` // max rows kept; oldest trimmed (default 2000)
 }
 
 // Store is the agent's social memory. A nil *Store is safe (all methods no-op),
 // so callers never need to nil-check before using it.
 type Store struct {
-	cfg    Config
-	agent  string
-	http   *http.Client
-	mu     sync.Mutex
-	collID string // resolved lazily and cached
+	cfg      Config
+	agent    string
+	http     *http.Client
+	mu       sync.Mutex
+	collID   string // resolved lazily and cached
+	remCount int64  // writes since start; drives periodic retention trim
 }
 
 // Memory is one thing worth remembering. Meta is free-form structured context
@@ -81,6 +84,9 @@ func New(agent string, cfg Config) *Store {
 	if cfg.RecallK == 0 {
 		cfg.RecallK = 4
 	}
+	if cfg.RetentionCap == 0 {
+		cfg.RetentionCap = 2000
+	}
 	return &Store{cfg: cfg, agent: agent, http: &http.Client{Timeout: 20 * time.Second}}
 }
 
@@ -95,6 +101,43 @@ func (s *Store) Remember(ctx context.Context, m Memory) {
 	}
 	if err := s.Upsert(ctx, m); err != nil {
 		log.Printf("[socialmem] remember failed: %v", err)
+	}
+}
+
+// secretPattern matches common secret shapes (key=value pairs for tokens/keys/
+// passwords, OpenAI-style sk- keys, and long hex blobs) so they are not stored
+// verbatim. Conservative on purpose to avoid mangling normal prose.
+var secretPattern = regexp.MustCompile(
+	`(?i)(api[_-]?key|secret|token|password|passwd|bearer)\s*[:=]\s*\S+` +
+		`|sk-[A-Za-z0-9_-]{16,}` +
+		`|\b[0-9a-fA-F]{32,}\b`)
+
+// redact masks anything that looks like a credential in free-form social text.
+// Feed/DM content is untrusted, so it is scrubbed before being embedded or
+// persisted.
+func redact(text string) string {
+	return secretPattern.ReplaceAllString(text, "[REDACTED]")
+}
+
+// trim deletes the oldest rows beyond the retention cap (best-effort, never
+// fatal). Ordering is by the `ts` metadata field; rows without a ts sort oldest.
+func (s *Store) trim(ctx context.Context) {
+	if !s.Enabled() || s.cfg.RetentionCap <= 0 {
+		return
+	}
+	recs, err := s.All(ctx, 0)
+	if err != nil || len(recs) <= s.cfg.RetentionCap {
+		return
+	}
+	sort.SliceStable(recs, func(i, j int) bool {
+		ti, _ := metaInt(recs[i].Meta, "ts")
+		tj, _ := metaInt(recs[j].Meta, "ts")
+		return ti < tj
+	})
+	for _, r := range recs[:len(recs)-s.cfg.RetentionCap] {
+		if err := s.Delete(ctx, r.ID); err != nil {
+			log.Printf("[socialmem] retention delete %s failed: %v", r.ID, err)
+		}
 	}
 }
 
@@ -158,11 +201,11 @@ func (s *Store) RecallBlock(ctx context.Context, query string) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("\n\nYOUR RELEVANT MEMORY (things you said or heard before — reference them naturally if useful, don't repeat yourself):\n")
+	b.WriteString("\n\nYOUR RELEVANT MEMORY (things you said or heard before - reference them naturally if useful, don't repeat yourself):\n")
 	for _, h := range hits {
 		when := ""
 		if ts, ok := metaInt(h.Meta, "ts"); ok && ts > 0 {
-			when = relTime(ts) + " — "
+			when = relTime(ts) + " - "
 		}
 		ctxLabel := ""
 		if k, _ := h.Meta["kind"].(string); k != "" {

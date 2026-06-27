@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 )
 
 // Record is a stored row (id + document + metadata) returned by Get/All. It is
@@ -20,11 +21,17 @@ type Record struct {
 
 // Upsert writes one memory (id + text + metadata), embedding the text with the
 // shared bge embedder. Unlike Remember (best-effort, void), Upsert returns the
-// error so callers that need to know — e.g. a migration — can react.
+// error so callers that need to know - e.g. a migration - can react. This is the
+// single write chokepoint, so it also redacts secrets before anything is
+// embedded or persisted, and periodically trims the collection to the retention
+// cap.
 func (s *Store) Upsert(ctx context.Context, m Memory) error {
 	if !s.Enabled() {
 		return fmt.Errorf("social memory disabled")
 	}
+	// Untrusted feed/DM text passes through here, so scrub obvious secrets before
+	// they are embedded and stored verbatim.
+	m.Text = redact(m.Text)
 	if strings.TrimSpace(m.Text) == "" {
 		return fmt.Errorf("empty text")
 	}
@@ -48,7 +55,15 @@ func (s *Store) Upsert(ctx context.Context, m Memory) error {
 		"documents":  []string{m.Text},
 		"metadatas":  []map[string]any{m.Meta},
 	}
-	return s.post(ctx, s.collPath(collID)+"/upsert", body, nil)
+	if err := s.post(ctx, s.collPath(collID)+"/upsert", body, nil); err != nil {
+		return err
+	}
+	// Bound growth: periodically trim the oldest rows past the retention cap so a
+	// long-lived agent's collection does not grow without limit.
+	if atomic.AddInt64(&s.remCount, 1)%64 == 0 {
+		go s.trim(context.Background())
+	}
+	return nil
 }
 
 // Get returns the row with the given id, or (nil, nil) if it does not exist.

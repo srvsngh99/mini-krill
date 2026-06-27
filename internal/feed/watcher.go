@@ -60,7 +60,7 @@ type FeedWatcher struct {
 }
 
 // NewFeedWatcher wires the watcher to the shared model, brain (durable dedup),
-// and the semantic social memory (which may be nil/disabled — all its methods
+// and the semantic social memory (which may be nil/disabled - all its methods
 // are no-ops then). It engages as reef.AgentID() and never acts on its own posts.
 func NewFeedWatcher(llm core.LLMProvider, brain core.Brain, social *socialmem.Store, cfg config.FeedConfig) *FeedWatcher {
 	return &FeedWatcher{
@@ -402,7 +402,7 @@ func (w *FeedWatcher) remember(ctx context.Context, suffix, outcome string) {
 }
 
 // rememberSocial records one SEMANTIC social memory (what the agent said/did) so
-// it can be recalled by meaning later — separate from the brain dedup above,
+// it can be recalled by meaning later - separate from the brain dedup above,
 // which is exact-key continuity only. Best-effort and nil-safe; ts is stamped
 // here so recall can render "a few days ago".
 func (w *FeedWatcher) rememberSocial(ctx context.Context, id, text string, meta map[string]any) {

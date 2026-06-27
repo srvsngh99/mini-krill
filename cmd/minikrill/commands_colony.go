@@ -19,7 +19,7 @@ func maybeStartFeed(ctx context.Context, stack *krillStack) {
 	// the other agents), embedded with the shared colony bge embedder. No-ops
 	// unless enabled and reachable.
 	// Unify storage: feed interactions and general memory share ONE collection
-	// per agent (the agent id) — its whole mind in one place — so feed recall can
+	// per agent (the agent id) - its whole mind in one place - so feed recall can
 	// surface general learnings and vice versa. Falls back to the agent id when
 	// no explicit collection is configured.
 	coll := stack.cfg.SocialMem.Collection
@@ -27,12 +27,13 @@ func maybeStartFeed(ctx context.Context, stack *krillStack) {
 		coll = reef.AgentID()
 	}
 	social := socialmem.New(reef.AgentID(), socialmem.Config{
-		Enabled:    stack.cfg.SocialMem.Enabled,
-		ChromaURL:  stack.cfg.SocialMem.ChromaURL,
-		EmbedURL:   stack.cfg.SocialMem.EmbedURL,
-		EmbedModel: stack.cfg.SocialMem.EmbedModel,
-		Collection: coll,
-		RecallK:    stack.cfg.SocialMem.RecallK,
+		Enabled:      stack.cfg.SocialMem.Enabled,
+		ChromaURL:    stack.cfg.SocialMem.ChromaURL,
+		EmbedURL:     stack.cfg.SocialMem.EmbedURL,
+		EmbedModel:   stack.cfg.SocialMem.EmbedModel,
+		Collection:   coll,
+		RecallK:      stack.cfg.SocialMem.RecallK,
+		RetentionCap: stack.cfg.SocialMem.RetentionCap,
 	})
 	if social.Enabled() {
 		klog.Info("social memory enabled", "collection", coll)

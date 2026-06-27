@@ -102,6 +102,11 @@ cd mini-krill
 go build -o minikrill ./cmd/minikrill
 ```
 
+> Note: `make install` (and the commands above) build the public binary, which
+> intentionally excludes the Reef feed and the Chroma-backed social memory. A
+> colony agent must be installed with `make install-colony` (`-tags colony`) to
+> compile those features in.
+
 See [docs/INSTALL.md](docs/INSTALL.md) for detailed setup including binary releases, Docker Compose, and PATH configuration.
 
 ---
