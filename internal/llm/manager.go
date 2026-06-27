@@ -131,6 +131,18 @@ func (m *ProviderManager) Switch(provider, model string) error {
 	return nil
 }
 
+// isKrillActive reports whether the active provider name belongs to the Krill
+// stack so the "krilllm" catalog entry is marked active. The live failover stack
+// reports "krill+ollama" via Name(); older or persisted configs may report
+// "krill" or "krilllm". All of these map to the same catalog entry.
+func isKrillActive(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "krill", "krilllm", "krill-lm", "krill_lm", "krill+ollama":
+		return true
+	}
+	return false
+}
+
 // ListProviders returns all known providers with their availability.
 func (m *ProviderManager) ListProviders() []ProviderInfo {
 	active := m.ActiveInfo()
@@ -170,7 +182,7 @@ func (m *ProviderManager) ListProviders() []ProviderInfo {
 		{
 			Name:     "krilllm",
 			Models:   krillModels,
-			IsActive: active.Provider == "krilllm",
+			IsActive: isKrillActive(active.Provider),
 			NeedsKey: false,
 			HasKey:   true,
 		},
@@ -342,6 +354,7 @@ func (m *ProviderManager) ResolveTarget(input string) (provider, model string, o
 		"gemma12b":          KrillLMDefaultModel,
 		"gemma 12b":         KrillLMDefaultModel,
 		"gemma4:12b":        KrillLMDefaultModel,
+		"gemma4:12b-mlx":    KrillLMDefaultModel, // old id, still resolves to the served model
 		KrillLMDefaultModel: KrillLMDefaultModel,
 	}
 	if mdl, found := krillModelAliases[input]; found {
