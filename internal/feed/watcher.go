@@ -35,6 +35,12 @@ import (
 // pre-filter beyond this wait for the next cycle.
 const maxAppraisalsPerCycle = 6
 
+// appraisalTimeout caps one appraisal call end to end. The failover stack drops
+// a hung primary to Ollama within its own bounded budget; this is the outer
+// guard so a single appraisal (primary plus any fallback) cannot stall the feed
+// loop for the model client's full 10m timeout.
+const appraisalTimeout = 3 * time.Minute
+
 // mentionThreshold is the (low) interest bar applied when this agent is @tagged:
 // a direct address should almost always get a response, overriding the normal
 // selectivity and the depth-based ping-pong decay.
@@ -324,10 +330,14 @@ type appraisal struct {
 // appraise runs one model call primed with the agent's identity and parses the
 // JSON verdict. A parse failure or model error is treated as "no engagement".
 func (w *FeedWatcher) appraise(ctx context.Context, userPrompt string) (appraisal, bool) {
-	// No artificial per-call deadline: a background agent should take as long as
-	// it genuinely needs to read a post and decide whether to reply. Only process
-	// shutdown (via ctx) and the model client's own connection backstop bound the
-	// call, so a slow or cold model load is not cut off mid-thought.
+	// Bound each appraisal so a slow or wedged model can't stall the feed loop.
+	// The failover stack already drops a hung primary (krillm) to Ollama well
+	// inside this budget; this deadline is the outer backstop that also covers a
+	// slow fallback, so the loop never freezes for the client's 10m timeout.
+	// Genuine shutdown still arrives via the parent ctx, and the budget is
+	// generous enough for warm 12B inference of a short verdict.
+	ctx, cancel := context.WithTimeout(ctx, appraisalTimeout)
+	defer cancel()
 	msgs := []core.Message{
 		{Role: "system", Content: w.brain.SystemPrompt()},
 		{Role: "user", Content: userPrompt},

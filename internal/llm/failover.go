@@ -2,33 +2,61 @@ package llm
 
 import (
 	"context"
+	"time"
 
 	"github.com/srvsngh99/mini-krill/internal/core"
 	log "github.com/srvsngh99/mini-krill/internal/log"
 )
 
-// FailoverProvider runs a primary provider and, on error, falls back to a
-// secondary one. The colony uses it to run Krill (the local engine) as primary
-// with Ollama as the fallback: if Krill is down or erroring, the agent still
-// answers via Ollama. A context cancellation (shutdown) is never masked by a
-// fallback attempt.
+// defaultPrimaryTimeout bounds how long the failover stack waits on the primary
+// before giving up and trying the fallback. A connected-but-hung primary (a
+// wedged krillm mid-generation) would otherwise stall the caller for the Krill
+// client's full 10m request timeout, freezing the feed loop. After this budget
+// we drop to Ollama. It is generous enough for warm 12B inference of a short
+// verdict yet far below the 10m connection backstop. Genuine context
+// cancellation (shutdown) is still surfaced immediately and never masked.
+const defaultPrimaryTimeout = 90 * time.Second
+
+// FailoverProvider runs a primary provider and, on error or excessive slowness,
+// falls back to a secondary one. The colony uses it to run Krill (the local
+// engine) as primary with Ollama as the fallback: if Krill is down, erroring, or
+// hung, the agent still answers via Ollama. A context cancellation (shutdown) is
+// never masked by a fallback attempt.
 type FailoverProvider struct {
-	primary  core.LLMProvider
-	fallback core.LLMProvider
+	primary        core.LLMProvider
+	fallback       core.LLMProvider
+	primaryTimeout time.Duration // bounded primary attempt; <=0 means no bound
 }
 
 func NewFailoverProvider(primary, fallback core.LLMProvider) *FailoverProvider {
-	return &FailoverProvider{primary: primary, fallback: fallback}
+	return &FailoverProvider{
+		primary:        primary,
+		fallback:       fallback,
+		primaryTimeout: defaultPrimaryTimeout,
+	}
 }
 
 func (f *FailoverProvider) Chat(ctx context.Context, messages []core.Message, opts ...core.ChatOption) (*core.Response, error) {
-	resp, err := f.primary.Chat(ctx, messages, opts...)
+	// Bound the primary attempt on a derived context so a hung primary fails over
+	// within primaryTimeout instead of blocking for the client's 10m timeout. The
+	// fallback still runs on the PARENT ctx, so dropping to Ollama is not itself
+	// cut short by the primary budget.
+	pctx := ctx
+	if f.primaryTimeout > 0 {
+		var cancel context.CancelFunc
+		pctx, cancel = context.WithTimeout(ctx, f.primaryTimeout)
+		defer cancel()
+	}
+	resp, err := f.primary.Chat(pctx, messages, opts...)
 	if err == nil {
 		return resp, nil
 	}
 	if ctx.Err() != nil {
-		return nil, err // shutdown/cancel: don't retry, surface it
+		return nil, err // parent shutdown/cancel: don't retry, surface it
 	}
+	// The primary either erred outright or blew its bounded budget (pctx deadline)
+	// while the parent ctx is still live. Both degrade to the fallback so a hung
+	// or slow Krill drops to Ollama within a bounded time.
 	log.Warn("primary LLM failed, falling back",
 		"primary", f.primary.Name(), "fallback", f.fallback.Name(), "error", err)
 	return f.fallback.Chat(ctx, messages, opts...)

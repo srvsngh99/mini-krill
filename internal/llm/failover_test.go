@@ -4,9 +4,37 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/srvsngh99/mini-krill/internal/core"
 )
+
+// blockingProvider hangs until its context is done, modelling a connected but
+// wedged primary (krillm stuck mid-generation).
+type blockingProvider struct {
+	name  string
+	calls int
+}
+
+func (b *blockingProvider) Chat(ctx context.Context, _ []core.Message, _ ...core.ChatOption) (*core.Response, error) {
+	b.calls++
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (b *blockingProvider) Stream(ctx context.Context, m []core.Message, o ...core.ChatOption) (<-chan core.StreamChunk, error) {
+	ch := make(chan core.StreamChunk, 1)
+	go func() {
+		defer close(ch)
+		_, err := b.Chat(ctx, m, o...)
+		ch <- core.StreamChunk{Done: true, Err: err}
+	}()
+	return ch, nil
+}
+
+func (b *blockingProvider) Name() string                   { return b.name }
+func (b *blockingProvider) ModelName() string              { return b.name }
+func (b *blockingProvider) Available(context.Context) bool { return true }
 
 type fakeProvider struct {
 	name  string
@@ -77,6 +105,32 @@ func TestFailoverRespectsCancel(t *testing.T) {
 	}
 	if fb.calls != 0 {
 		t.Errorf("must not fall back when ctx is cancelled (calls=%d)", fb.calls)
+	}
+}
+
+// A connected-but-hung primary must fail over to the fallback within the bounded
+// primary budget instead of blocking for the client's full request timeout.
+func TestFailoverDropsHungPrimary(t *testing.T) {
+	p := &blockingProvider{name: "krill"}
+	fb := &fakeProvider{name: "ollama", reply: "from-ollama"}
+	f := &FailoverProvider{primary: p, fallback: fb, primaryTimeout: 20 * time.Millisecond}
+	done := make(chan struct{})
+	var resp *core.Response
+	var err error
+	go func() {
+		resp, err = f.Chat(context.Background(), nil)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("hung primary stalled the call past its bounded budget")
+	}
+	if err != nil || resp == nil || resp.Content != "from-ollama" {
+		t.Fatalf("hung primary should fall over to ollama, got %v err=%v", resp, err)
+	}
+	if fb.calls != 1 {
+		t.Errorf("fallback should be called exactly once (calls=%d)", fb.calls)
 	}
 }
 

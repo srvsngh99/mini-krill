@@ -23,6 +23,26 @@ func TestNewProviderKrillLM(t *testing.T) {
 	}
 }
 
+// The persisted provider name must round-trip through NewProvider. When the
+// manager switches to the Krill stack it persists the FailoverProvider's Name()
+// ("krill+ollama") to config; the next launch feeds that exact string back into
+// NewProvider. If it is not recognized, main hard-fails with "unknown LLM
+// provider" and startup bricks. This proves the round trip is stable.
+func TestKrillProviderNameRoundTrips(t *testing.T) {
+	p, err := NewProvider(config.LLMConfig{Provider: "krill"}, config.OllamaConfig{})
+	if err != nil {
+		t.Fatalf("NewProvider(krill) error: %v", err)
+	}
+	persisted := p.Name() // what Switch writes to config
+	p2, err := NewProvider(config.LLMConfig{Provider: persisted}, config.OllamaConfig{})
+	if err != nil {
+		t.Fatalf("NewProvider(%q) round-trip error: %v", persisted, err)
+	}
+	if p2.Name() != persisted {
+		t.Errorf("name drifted on round trip: %q -> %q", persisted, p2.Name())
+	}
+}
+
 func TestKrillModelOverride(t *testing.T) {
 	// An explicit model is honoured for the Krill primary.
 	p, err := NewProvider(config.LLMConfig{Provider: "krill", Model: "gemma-4-26b-a4b-it-4bit"}, config.OllamaConfig{})

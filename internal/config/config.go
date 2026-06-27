@@ -129,9 +129,11 @@ func (a AgentConfig) MarshalYAML() (interface{}, error) {
 	}, nil
 }
 
-// DefaultKrillLMModel is the primary model of the KrillLM provider —
-// Mini Krill's default, Ollama-backed local inference stack.
-const DefaultKrillLMModel = "gemma4:12b-mlx"
+// DefaultKrillLMModel is the primary model of the KrillLM provider. It must
+// match the model id the Krill engine (krillm serve on :57455) actually loads
+// and serves over its OpenAI-compatible API, otherwise requests name a model
+// the engine does not have and fail. The live engine serves "gemma-4-12b".
+const DefaultKrillLMModel = "gemma-4-12b"
 
 // IsLocalProvider reports whether the provider runs on the local Ollama
 // daemon (and therefore needs Ollama auto-start/health monitoring).

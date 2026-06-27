@@ -41,7 +41,11 @@ func NewProvider(cfg config.LLMConfig, ollamaCfg config.OllamaConfig) (core.LLMP
 		}
 		return NewOllamaProvider(host, model, cfg), nil
 
-	case "krill", "krilllm", "krill-lm", "krill_lm":
+	case "krill", "krilllm", "krill-lm", "krill_lm", "krill+ollama":
+		// "krill+ollama" is the FailoverProvider's own Name(): a previous run that
+		// switched to this stack persisted it to config, and on the next launch it
+		// is fed straight back in here. Recognizing it keeps the persisted provider
+		// name round-trip safe so startup never bricks with "unknown LLM provider".
 		// Krill (the local engine on :57455) is primary; Ollama (a SMALL model,
 		// so it can coexist in RAM with Krill's 12B on a 16GB box) is the
 		// fallback. Krill endpoint/model are env-overridable (KRILLM_URL /
