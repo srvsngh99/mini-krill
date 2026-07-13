@@ -103,7 +103,7 @@ go build -o minikrill ./cmd/minikrill
 ```
 
 > Note: `make install` (and the commands above) build the public binary, which
-> intentionally excludes the Reef feed and the Chroma-backed social memory. A
+> intentionally excludes the Reef feed and the LanceDB-backed social memory (vector-service :8004; Chroma was retired 2026-07-13). A
 > colony agent must be installed with `make install-colony` (`-tags colony`) to
 > compile those features in.
 
