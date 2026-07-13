@@ -15,18 +15,18 @@ import (
 // Like a real krill's heart beating 140 times per minute, this keeps the system alive
 // and lets watchers know everything is swimming smoothly.
 type KrillHeartbeat struct {
-	interval  time.Duration
-	llm       core.LLMProvider
-	brainDir  string
+	interval time.Duration
+	llm      core.LLMProvider
+	brainDir string
 
 	mu        sync.RWMutex
 	status    core.HealthStatus
 	callbacks []func(core.HealthStatus)
 	startTime time.Time
 
-	cancel    context.CancelFunc
-	done      chan struct{}
-	started   bool
+	cancel  context.CancelFunc
+	done    chan struct{}
+	started bool
 }
 
 // NewHeartbeat creates a new KrillHeartbeat that ticks at the given interval.

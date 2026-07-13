@@ -48,9 +48,9 @@ type jsonRPCError struct {
 
 // initializeParams is the params for the MCP initialize request.
 type initializeParams struct {
-	ProtocolVersion string           `json:"protocolVersion"`
-	Capabilities    struct{}         `json:"capabilities"`
-	ClientInfo      mcpClientInfo    `json:"clientInfo"`
+	ProtocolVersion string        `json:"protocolVersion"`
+	Capabilities    struct{}      `json:"capabilities"`
+	ClientInfo      mcpClientInfo `json:"clientInfo"`
 }
 
 // mcpClientInfo identifies this MCP client.

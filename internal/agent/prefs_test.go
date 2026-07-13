@@ -506,7 +506,7 @@ func TestPendingPlan_LearnsNoApprovalDuringPending(t *testing.T) {
 	callCount := 0
 	provider := &sequentialMockProvider{
 		responses: []string{
-			"UNRELATED", // approval judge for "no need for approval"
+			"UNRELATED",  // approval judge for "no need for approval"
 			"chat reply", // re-routed chat
 		},
 		callCount: &callCount,

@@ -88,7 +88,7 @@ func TestWordOverlap(t *testing.T) {
 		min  float64
 	}{
 		{"I like Go", "I like Go", 1.0},
-		{"I like Go", "I prefer Python", 0.1},  // "I" is shared
+		{"I like Go", "I prefer Python", 0.1}, // "I" is shared
 		{"completely different", "no match here", 0.0},
 		{"Go backend development", "Go backend services", 0.5},
 	}

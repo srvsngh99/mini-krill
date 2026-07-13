@@ -67,11 +67,11 @@ var (
 
 	// KrillBubbleStyle for krill messages (mono; distinguished by alignment).
 	KrillBubbleStyle = lipgloss.NewStyle().
-			Foreground(ColorWhite).
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(ColorDimBlue).
-			Padding(0, 1).
-			MarginRight(4)
+				Foreground(ColorWhite).
+				Border(lipgloss.NormalBorder()).
+				BorderForeground(ColorDimBlue).
+				Padding(0, 1).
+				MarginRight(4)
 
 	// StatusOK renders a LIVE badge (functional green).
 	StatusOK = lipgloss.NewStyle().

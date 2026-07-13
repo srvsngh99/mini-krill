@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -32,7 +33,7 @@ import (
 type Config struct {
 	Enabled      bool   `yaml:"enabled"`
 	ChromaURL    string `yaml:"chroma_url"`    // default http://127.0.0.1:8001
-	EmbedURL     string `yaml:"embed_url"`     // default http://127.0.0.1:57455
+	EmbedURL     string `yaml:"embed_url"`     // default http://127.0.0.1:7997 (embed-service)
 	EmbedModel   string `yaml:"embed_model"`   // default bge-base-en
 	Collection   string `yaml:"collection"`    // default "<agent>_social"
 	RecallK      int    `yaml:"recall_k"`      // default 4
@@ -69,11 +70,20 @@ type Hit struct {
 // any unset config field. The collection defaults to "<agent>_social" so each
 // agent's memory is isolated.
 func New(agent string, cfg Config) *Store {
+	// Defaults are load-bearing: NewChromaMemory (internal/brain) constructs a
+	// Store with an EMPTY Config, so the brain's semantic memory NEVER sees the
+	// config file and lands on exactly these values. Two consequences bit us:
+	// the embedder default pointed at :57455 (krillm, long dead), so brain
+	// embeddings failed silently for weeks; and the store default pointed at a
+	// ChromaDB server that is now retired.
+	//
+	// The colony is on LanceDB now. vector-service (:8004) speaks the same API
+	// subset this file already calls, so nothing else here changes.
 	if cfg.ChromaURL == "" {
-		cfg.ChromaURL = "http://127.0.0.1:8001"
+		cfg.ChromaURL = envOr("COLONY_VECTOR_URL", "http://127.0.0.1:8004")
 	}
 	if cfg.EmbedURL == "" {
-		cfg.EmbedURL = "http://127.0.0.1:57455"
+		cfg.EmbedURL = envOr("COLONY_EMBED_URL", "http://127.0.0.1:7997")
 	}
 	if cfg.EmbedModel == "" {
 		cfg.EmbedModel = "bge-base-en"
@@ -351,4 +361,12 @@ func (s *Store) post(ctx context.Context, url string, payload any, out any) erro
 		return json.NewDecoder(resp.Body).Decode(out)
 	}
 	return nil
+}
+
+// envOr returns the environment value for key, or def when unset/empty.
+func envOr(key, def string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return def
 }

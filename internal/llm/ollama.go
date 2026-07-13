@@ -38,11 +38,11 @@ func NewOllamaProvider(host string, model string, defaultOpts config.LLMConfig) 
 		maxTok = 2048
 	}
 	return &OllamaProvider{
-		host:        host,
-		model:       model,
-		temperature: temp,
-		maxTokens:   maxTok,
-		chatClient:  &http.Client{Timeout: 120 * time.Second},
+		host:         host,
+		model:        model,
+		temperature:  temp,
+		maxTokens:    maxTok,
+		chatClient:   &http.Client{Timeout: 120 * time.Second},
 		healthClient: &http.Client{Timeout: 5 * time.Second},
 	}
 }
@@ -242,7 +242,7 @@ func (o *OllamaProvider) Stream(ctx context.Context, messages []core.Message, op
 }
 
 func (o *OllamaProvider) Name() string      { return "ollama" }
-func (o *OllamaProvider) ModelName() string  { return o.model }
+func (o *OllamaProvider) ModelName() string { return o.model }
 
 func (o *OllamaProvider) Available(ctx context.Context) bool {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, o.host+"/api/tags", nil)

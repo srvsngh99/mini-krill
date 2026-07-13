@@ -37,7 +37,7 @@ func newToolboxSkillRegistry(skills ...core.Skill) *toolboxSkillRegistry {
 	return r
 }
 
-func (r *toolboxSkillRegistry) Register(s core.Skill) error      { r.skills[s.Name()] = s; return nil }
+func (r *toolboxSkillRegistry) Register(s core.Skill) error       { r.skills[s.Name()] = s; return nil }
 func (r *toolboxSkillRegistry) Unregister(name string) error      { delete(r.skills, name); return nil }
 func (r *toolboxSkillRegistry) SetEnabled(_ string, _ bool) error { return nil }
 func (r *toolboxSkillRegistry) IsEnabled(_ string) bool           { return true }
@@ -337,7 +337,7 @@ func TestExtractShellCommand(t *testing.T) {
 		{"Run `ls -la /tmp`", "ls -la /tmp"},
 		{"Execute `git status`", "git status"},
 		{"List the files in the directory", ""},
-		{"run cat README.md", ""},  // no backticks → not extracted
+		{"run cat README.md", ""}, // no backticks → not extracted
 	}
 	for _, tc := range cases {
 		got := extractShellCommand(tc.desc)

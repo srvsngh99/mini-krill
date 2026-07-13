@@ -280,7 +280,7 @@ func DefaultConfig() *Config {
 			AutonomyFloor: "act",
 		},
 		LLM: LLMConfig{
-			Provider:    "krill", // Krill engine (:57455) primary, Ollama fallback
+			Provider:    "krill", // Krill engine (:57456, gemma-4-e2b) primary, Ollama fallback
 			Model:       "gemma-4-12b",
 			Temperature: 0.7,
 			MaxTokens:   2048,
@@ -330,8 +330,8 @@ func DefaultConfig() *Config {
 		},
 		SocialMem: SocialMemConfig{
 			Enabled:      true,
-			ChromaURL:    "http://127.0.0.1:8001",
-			EmbedURL:     "http://127.0.0.1:57455",
+			ChromaURL:    "http://127.0.0.1:8004",
+			EmbedURL:     "http://127.0.0.1:7997",
 			EmbedModel:   "bge-base-en",
 			RecallK:      4,
 			RetentionCap: 2000,
