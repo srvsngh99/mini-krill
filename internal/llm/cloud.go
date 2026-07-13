@@ -95,8 +95,8 @@ func (c *CloudProvider) Stream(ctx context.Context, messages []core.Message, opt
 	return ch, nil
 }
 
-func (c *CloudProvider) Name() string                    { return c.providerName }
-func (c *CloudProvider) ModelName() string               { return c.model }
+func (c *CloudProvider) Name() string                     { return c.providerName }
+func (c *CloudProvider) ModelName() string                { return c.model }
 func (c *CloudProvider) Available(_ context.Context) bool { return c.apiKey != "" }
 
 // ---------------------------------------------------------------------------

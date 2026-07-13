@@ -25,9 +25,9 @@ func (m *mockLLM) Stream(_ context.Context, msgs []core.Message, _ ...core.ChatO
 	return ch, nil
 }
 
-func (m *mockLLM) Name() string                          { return "mock" }
-func (m *mockLLM) ModelName() string                     { return "mock-model" }
-func (m *mockLLM) Available(_ context.Context) bool      { return true }
+func (m *mockLLM) Name() string                     { return "mock" }
+func (m *mockLLM) ModelName() string                { return "mock-model" }
+func (m *mockLLM) Available(_ context.Context) bool { return true }
 
 // ---------------------------------------------------------------------------
 // FileMemory tests

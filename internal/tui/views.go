@@ -484,7 +484,7 @@ func (l *LogsView) View() string {
 	if l.copied {
 		hint = "scroll: j/k  copy: c  " + AccentStyle.Render("✓ copied!")
 	} else if l.copyErr != "" {
-		hint = "scroll: j/k  copy: c  " + ErrorStyle.Render("✗ " + l.copyErr)
+		hint = "scroll: j/k  copy: c  " + ErrorStyle.Render("✗ "+l.copyErr)
 	}
 	header := DimStyle.Render(fmt.Sprintf("  Log: %s  (%s)", l.logFile, hint))
 	return lipgloss.JoinVertical(lipgloss.Left, header, l.viewport.View())

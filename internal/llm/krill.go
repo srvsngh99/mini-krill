@@ -19,7 +19,7 @@ import (
 // OpenAI-compatible API. It is the colony's primary local backend; Ollama is the
 // fallback. (Distinct from Ollama - do not confuse the two.)
 const (
-	KrillDefaultURL   = "http://127.0.0.1:57455"
+	KrillDefaultURL   = "http://127.0.0.1:57456"
 	KrillModelDefault = "gemma-4-12b"
 )
 

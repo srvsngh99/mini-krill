@@ -15,7 +15,7 @@ func TestSecretMatch(t *testing.T) {
 		j("/repo", "config.yaml.bak"),
 		j("/repo", ".env"),
 		j("/repo", "prod.env"),
-		j("/repo", ".env.local"),             // dotenv multi-env (regression)
+		j("/repo", ".env.local"),              // dotenv multi-env (regression)
 		j("/repo", ".env.production"),         // dotenv multi-env (regression)
 		j("/repo", "app", ".env.development"), // dotenv multi-env (regression)
 		j("/repo", "server.pem.bak"),          // backup of a .pem (regression)
@@ -36,10 +36,10 @@ func TestSecretMatch(t *testing.T) {
 	allow := []string{
 		j("/repo", "notconfig.yaml.txt"), // the regression this fixes
 		j("/repo", "internal", "agent", "agent.go"),
-		j("/repo", "envparser.go"),       // contains "env" but not a .env file
-		j("/repo", "keyboard.go"),        // contains "key" but not a .key file
-		j("/repo", "configurator.md"),    // starts like "config" but not config.yaml
-		j("/repo", "my_credentials.md"),  // "credentials" mid-name, not a component
+		j("/repo", "envparser.go"),      // contains "env" but not a .env file
+		j("/repo", "keyboard.go"),       // contains "key" but not a .key file
+		j("/repo", "configurator.md"),   // starts like "config" but not config.yaml
+		j("/repo", "my_credentials.md"), // "credentials" mid-name, not a component
 	}
 	for _, p := range allow {
 		if pat, hit := secretMatch(p); hit {

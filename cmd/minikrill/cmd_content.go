@@ -12,12 +12,12 @@ import (
 )
 
 var (
-	summarizeTimeout         time.Duration
-	webReadTimeout           time.Duration
-	webSummarizeTimeout      time.Duration
-	researchTimeout          time.Duration
-	youtubeTimeout           time.Duration
-	youtubeSummarizeTimeout  time.Duration
+	summarizeTimeout        time.Duration
+	webReadTimeout          time.Duration
+	webSummarizeTimeout     time.Duration
+	researchTimeout         time.Duration
+	youtubeTimeout          time.Duration
+	youtubeSummarizeTimeout time.Duration
 )
 
 var summarizeCmd = &cobra.Command{
