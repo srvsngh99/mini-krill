@@ -596,6 +596,16 @@ type botStatus struct {
 // Bots are tied to ctx and will shut down when the context is cancelled.
 func startBots(ctx context.Context, stack *krillStack) botStatus {
 	var s botStatus
+	// Genuine feed presence + semantic social memory are COLONY-ONLY: they
+	// compile in only under `-tags colony`, so the public Mini-Krill release
+	// stays lean (no Reef feed, no vector-store dependency). maybeStartColony is
+	// a no-op in public builds. See commands_colony.go / commands_nocolony.go.
+	//
+	// It runs BEFORE the adapter split because semantic memory now also feeds the
+	// CHAT/DM prompt, so Telegram and Discord chats need it too, not just Reef.
+	// The feed watcher itself is still gated on Reef inside maybeStartColony.
+	maybeStartColony(ctx, stack)
+
 	// One adapter at a time: when Reef is configured, run only the web bot.
 	if reef.IsConfigured() {
 		wbBot := chat.NewWebBot(stack.handler)
@@ -611,11 +621,6 @@ func startBots(ctx context.Context, stack *krillStack) botStatus {
 				klog.Error("web (reef) error", "error", err)
 			}
 		}()
-		// Genuine feed presence + semantic social memory are COLONY-ONLY: they
-		// compile in only under `-tags colony`, so the public Mini-Krill release
-		// stays lean (no Reef feed, no Chroma dependency). maybeStartFeed is a
-		// no-op in public builds. See commands_colony.go / commands_nocolony.go.
-		maybeStartFeed(ctx, stack)
 		s.WebOK = true
 		s.web = wbBot
 		klog.Info("web (reef) bot started", "agent", reef.AgentID())

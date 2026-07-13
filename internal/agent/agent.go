@@ -65,6 +65,7 @@ type KrillAgent struct {
 	cachedEmojiStyle  string         // cached read of cfg.Brain.EmojiStyle; refreshed on /emoji
 	cachedOverlayDirs []string       // cached overlay directives; invalidated on /persona writes
 	cachedOverlayInit bool           // true once cachedOverlayDirs has been loaded at least once
+	semantic          SemanticMemory // vector-backed semantic memory (colony-only; nil in public builds)
 	mu                sync.Mutex
 }
 
@@ -367,6 +368,17 @@ func (a *KrillAgent) ChatFromPlatform(ctx context.Context, platform, chatID, inp
 	// --- Phase 5: Learn from interaction (adaptive personality) ---
 	if err == nil && a.brain.Memory() != nil {
 		go a.recordFeedback(context.Background(), input, response, prevAssistant)
+	}
+
+	// --- Phase 6: Persist the turn into SEMANTIC memory ---
+	// Only feed engagements were ever stored, so DM/chat turns were unrecallable
+	// by meaning: the agent could not remember a conversation you had with it
+	// directly. Storing both sides here is what makes the recall injected in
+	// handleChat/handleAnswer have anything to find. Best-effort and async - a
+	// memory failure must never affect the reply. See semantic.go.
+	if err == nil {
+		a.rememberChatTurn("dm_in", input)
+		a.rememberChatTurn("dm_out", response)
 	}
 
 	return response, err
@@ -1038,6 +1050,11 @@ func (a *KrillAgent) handleChat(ctx context.Context) (string, error) {
 		enriched = insertBeforeLast(enriched, memoryMsg)
 	}
 
+	// Semantic (vector) recall of things this agent said or heard before. This
+	// used to run in the FEED WATCHER ONLY, which is why the agent could not
+	// remember a conversation you had with it in a DM. See semantic.go.
+	enriched = a.injectSemanticMemory(ctx, enriched)
+
 	enriched = a.injectSessionContext(ctx, enriched)
 
 	if styleDirective := buildStyleDirective(ctx, a.brain.Memory()); styleDirective != "" {
@@ -1380,6 +1397,11 @@ func (a *KrillAgent) handleAnswer(ctx context.Context) (string, error) {
 		}
 		enriched = insertBeforeLast(enriched, memoryMsg)
 	}
+
+	// Answering a question is a normal conversational turn too, so it gets the
+	// same semantic recall as handleChat. Feed-only recall (the old wiring) left
+	// this path with no memory of past DMs at all. See semantic.go.
+	enriched = a.injectSemanticMemory(ctx, enriched)
 
 	enriched = a.injectSessionContext(ctx, enriched)
 
