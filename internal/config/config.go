@@ -147,10 +147,15 @@ func (a AgentConfig) MarshalYAML() (interface{}, error) {
 }
 
 // DefaultKrillLMModel is the primary model of the KrillLM provider. It must
-// match the model id the Krill engine (krillm serve on :57455) actually loads
-// and serves over its OpenAI-compatible API, otherwise requests name a model
-// the engine does not have and fail. The live engine serves "gemma-4-12b".
-const DefaultKrillLMModel = "gemma-4-12b"
+// match the model the Krill engine on :57456 is launched with
+// (com.sourav.deepkrill-llm: `krillm serve --model gemma-4-e2b`).
+//
+// Naming a different model does NOT fail: krillm honours the model in each
+// request over the one on its command line, and it runs with
+// KRILL_MAX_LOADED_MODELS=1, so it evicts the resident model and loads the
+// named one instead. This said "gemma-4-12b" (a leftover from when the 12b
+// lived on Reef's :57455) and kept an 8GB model pinned in RAM.
+const DefaultKrillLMModel = "gemma-4-e2b"
 
 // IsLocalProvider reports whether the provider runs on the local Ollama
 // daemon (and therefore needs Ollama auto-start/health monitoring).
@@ -281,7 +286,7 @@ func DefaultConfig() *Config {
 		},
 		LLM: LLMConfig{
 			Provider:    "krill", // Krill engine (:57456, gemma-4-e2b) primary, Ollama fallback
-			Model:       "gemma-4-12b",
+			Model:       DefaultKrillLMModel,
 			Temperature: 0.7,
 			MaxTokens:   2048,
 		},

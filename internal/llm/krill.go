@@ -19,8 +19,14 @@ import (
 // OpenAI-compatible API. It is the colony's primary local backend; Ollama is the
 // fallback. (Distinct from Ollama - do not confuse the two.)
 const (
-	KrillDefaultURL   = "http://127.0.0.1:57456"
-	KrillModelDefault = "gemma-4-12b"
+	KrillDefaultURL = "http://127.0.0.1:57456"
+	// Must match what the engine on KrillDefaultURL is launched with
+	// (com.sourav.deepkrill-llm: `krillm serve --model gemma-4-e2b`). krillm
+	// honours the model named in the request, not the one on its command line,
+	// and runs with KRILL_MAX_LOADED_MODELS=1 - so naming a different model
+	// here does not fail, it evicts the resident model and loads this one.
+	// Naming the 12b kept an 8GB model pinned in RAM.
+	KrillModelDefault = "gemma-4-e2b"
 )
 
 // KrillProvider calls Krill's OpenAI-compatible /v1/chat/completions endpoint.
