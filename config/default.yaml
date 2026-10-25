@@ -4,7 +4,7 @@
 
 agent:
   name: krill
-  max_sub_krills: 3
+  max_sub_agents: 3
   plan_approval: true    # always show plan before executing
 
 llm:

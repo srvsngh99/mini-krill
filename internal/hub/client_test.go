@@ -1,4 +1,4 @@
-package reef
+package hub
 
 import (
 	"context"
@@ -12,14 +12,14 @@ import (
 // configure points the client at a mock hub for the duration of a test.
 func configure(t *testing.T, url string) {
 	t.Helper()
-	t.Setenv("REEF_INGEST_URL", url)
-	t.Setenv("REEF_AGENT_TOKEN", "test-token")
-	t.Setenv("REEF_AGENT_ID", "minikrill")
+	t.Setenv("HUB_INGEST_URL", url)
+	t.Setenv("HUB_AGENT_TOKEN", "test-token")
+	t.Setenv("HUB_AGENT_ID", "minikrill")
 }
 
 func TestIsConfigured(t *testing.T) {
-	t.Setenv("REEF_INGEST_URL", "")
-	t.Setenv("REEF_AGENT_TOKEN", "")
+	t.Setenv("HUB_INGEST_URL", "")
+	t.Setenv("HUB_AGENT_TOKEN", "")
 	if IsConfigured() {
 		t.Fatal("IsConfigured should be false with no env")
 	}
@@ -33,7 +33,7 @@ func TestPollOutboxLeasesWithAck(t *testing.T) {
 	var gotPath, gotToken string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.String()
-		gotToken = r.Header.Get("X-Reef-Token")
+		gotToken = r.Header.Get("X-Hub-Token")
 		json.NewEncoder(w).Encode(map[string]any{
 			"items": []map[string]string{{"id": "m1", "type": "reply", "text": "hi"}},
 		})
@@ -96,7 +96,7 @@ func TestAckPostsIDs(t *testing.T) {
 	var gotPath, gotToken string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
-		gotToken = r.Header.Get("X-Reef-Token")
+		gotToken = r.Header.Get("X-Hub-Token")
 		json.NewDecoder(r.Body).Decode(&body)
 		io.WriteString(w, `{"ok":true,"acked":1}`)
 	}))

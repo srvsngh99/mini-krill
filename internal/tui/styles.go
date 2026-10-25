@@ -1,7 +1,7 @@
 // Package tui implements the Terminal UI for mini-krill using Bubble Tea.
 // Brand: a sanctioned "sonar" colour kit — mono house chrome (ink/paper/dim)
 // with ONE owned accent (sonar) reserved for the symbol + active state, and
-// functional state colour (OK / warn / error) only. See sai-brand-kit/mini-krill.
+// functional state colour (OK / warn / error) only. See the brand kit.
 package tui
 
 import (

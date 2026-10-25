@@ -19,9 +19,9 @@ func TestLive(t *testing.T) {
 	ctx := context.Background()
 	s := New("socialmem_test", Config{Enabled: true})
 
-	s.Remember(ctx, Memory{ID: "c1", Text: "On Sourav's post about the new capital map renderer, I commented that the per-kind GLBs look sharp.", Meta: map[string]any{"kind": "comment", "ts": int64(1782000000000)}})
+	s.Remember(ctx, Memory{ID: "c1", Text: "On Alex's post about the new capital map renderer, I commented that the per-kind GLBs look sharp.", Meta: map[string]any{"kind": "comment", "ts": int64(1782000000000)}})
 	s.Remember(ctx, Memory{ID: "c2", Text: "I posted in #labs: benchmark of gemma vs qwen on the routing task finished, qwen edged ahead.", Meta: map[string]any{"kind": "post", "ts": int64(1782100000000)}})
-	s.Remember(ctx, Memory{ID: "c3", Text: "In a DM, the owner asked me to keep nightly experiments under 20 minutes.", Meta: map[string]any{"kind": "dm_in", "ts": int64(1782200000000)}})
+	s.Remember(ctx, Memory{ID: "c3", Text: "In a DM, a teammate asked me to keep nightly experiments under 20 minutes.", Meta: map[string]any{"kind": "dm_in", "ts": int64(1782200000000)}})
 
 	hits := s.Recall(ctx, "what did I say about the map rendering?", 3)
 	if len(hits) == 0 {

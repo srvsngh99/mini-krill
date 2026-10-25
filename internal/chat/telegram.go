@@ -399,7 +399,7 @@ func (t *TelegramBot) processUpdate(ctx context.Context, update tgbotapi.Update)
 	handlerFailed := err != nil
 	if handlerFailed {
 		log.Error("handler error", "chat_id", chatID, "error", err)
-		resp = "Bubbles! My handler hit a reef. Try again in a moment."
+		resp = "Bubbles! My handler hit a snag. Try again in a moment."
 		if tr, ok := t.handler.(interface{ RecordTurn(role, content string) }); ok {
 			tr.RecordTurn("assistant", resp)
 		}

@@ -237,7 +237,7 @@ func (c *ChatView) Update(msg tea.Msg) tea.Cmd {
 		c.waiting = false
 		response := msg.response
 		if msg.err != nil {
-			response = fmt.Sprintf("Oops, hit a reef: %v", msg.err)
+			response = fmt.Sprintf("Oops, hit a snag: %v", msg.err)
 			log.Error("chat response error", "error", msg.err)
 		}
 		c.messages = append(c.messages, chatEntry{

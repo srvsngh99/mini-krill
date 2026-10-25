@@ -1,6 +1,6 @@
 //go:build colony
 
-// Package feed gives the agent a genuine presence in the Reef social feed.
+// Package feed gives the agent a genuine presence in the hub social feed.
 //
 // The design goal is GENUINE engagement, not forced: the agent observes every
 // post but acts on almost none. Whether to like, comment, or reply is an
@@ -28,8 +28,8 @@ import (
 
 	"github.com/srvsngh99/mini-krill/internal/config"
 	"github.com/srvsngh99/mini-krill/internal/core"
+	"github.com/srvsngh99/mini-krill/internal/hub"
 	log "github.com/srvsngh99/mini-krill/internal/log"
-	"github.com/srvsngh99/mini-krill/internal/reef"
 	"github.com/srvsngh99/mini-krill/internal/socialmem"
 )
 
@@ -61,21 +61,21 @@ type FeedWatcher struct {
 
 // NewFeedWatcher wires the watcher to the shared model, brain (durable dedup),
 // and the semantic social memory (which may be nil/disabled - all its methods
-// are no-ops then). It engages as reef.AgentID() and never acts on its own posts.
+// are no-ops then). It engages as hub.AgentID() and never acts on its own posts.
 func NewFeedWatcher(llm core.LLMProvider, brain core.Brain, social *socialmem.Store, cfg config.FeedConfig) *FeedWatcher {
 	return &FeedWatcher{
 		llm:    llm,
 		brain:  brain,
 		social: social,
 		cfg:    cfg,
-		me:     reef.AgentID(),
+		me:     hub.AgentID(),
 		bud:    &budget{perHour: cfg.BudgetPerHour},
 	}
 }
 
 // Start runs the observe->appraise->act loop until ctx is cancelled.
 func (w *FeedWatcher) Start(ctx context.Context) error {
-	if !reef.IsConfigured() {
+	if !hub.IsConfigured() {
 		return nil
 	}
 	interval := time.Duration(w.cfg.PollIntervalSec) * time.Second
@@ -101,7 +101,7 @@ func (w *FeedWatcher) Start(ctx context.Context) error {
 
 // scan pulls a window of recent posts and appraises the engage-worthy ones.
 func (w *FeedWatcher) scan(ctx context.Context) error {
-	posts, err := reef.GetFeed(ctx, 0, w.cfg.Channels, 60)
+	posts, err := hub.GetFeed(ctx, 0, w.cfg.Channels, 60)
 	if err != nil {
 		return err
 	}
@@ -135,7 +135,7 @@ func (w *FeedWatcher) scan(ctx context.Context) error {
 
 // appraisePost asks the model whether this post genuinely warrants a like or a
 // comment, then acts if it clears the threshold and budget.
-func (w *FeedWatcher) appraisePost(ctx context.Context, p reef.FeedPost) {
+func (w *FeedWatcher) appraisePost(ctx context.Context, p hub.FeedPost) {
 	// Being @tagged is a direct address: drop the bar so the agent almost
 	// always responds, and tell the model it was tagged.
 	effThreshold := w.cfg.Threshold
@@ -146,7 +146,7 @@ func (w *FeedWatcher) appraisePost(ctx context.Context, p reef.FeedPost) {
 		}
 		note = "\n\nNOTE: you were directly tagged (@" + w.me + ") in this post. You should almost certainly respond."
 	}
-	prompt := fmt.Sprintf(`A new post has appeared in the Reef feed (a private social feed for the Krill agent colony).
+	prompt := fmt.Sprintf(`A new post has appeared in the hub feed (a private social feed for the Krill agent colony).
 
 POST by %s (@%s) in #%s:
 """
@@ -174,7 +174,7 @@ Reply with ONLY a JSON object:
 	}
 	switch a.Action {
 	case "like":
-		if err := reef.LikePost(ctx, p.ID); err != nil {
+		if err := hub.LikePost(ctx, p.ID); err != nil {
 			log.Warn("feed like failed", "post", p.ID, "error", err)
 			return
 		}
@@ -189,7 +189,7 @@ Reply with ONLY a JSON object:
 			w.remember(ctx, "post:"+p.ID, "ignored (empty draft)")
 			return
 		}
-		if _, err := reef.PostComment(ctx, p.ID, "", text); err != nil {
+		if _, err := hub.PostComment(ctx, p.ID, "", text); err != nil {
 			log.Warn("feed comment failed", "post", p.ID, "error", err)
 			return
 		}
@@ -205,15 +205,15 @@ Reply with ONLY a JSON object:
 // appraises whether to reply — the mechanism behind emergent agent<->agent
 // threads. Returns how many appraisal calls it spent (to honour the per-cycle
 // cap). The ping-pong guard lives here: the bar rises with chain depth.
-func (w *FeedWatcher) handleReplies(ctx context.Context, p reef.FeedPost, spent int) int {
+func (w *FeedWatcher) handleReplies(ctx context.Context, p hub.FeedPost, spent int) int {
 	if p.CommentCount == 0 {
 		return 0
 	}
-	comments, err := reef.GetComments(ctx, p.ID)
+	comments, err := hub.GetComments(ctx, p.ID)
 	if err != nil || len(comments) == 0 {
 		return 0
 	}
-	byID := make(map[string]reef.Comment, len(comments))
+	byID := make(map[string]hub.Comment, len(comments))
 	for _, c := range comments {
 		byID[c.ID] = c
 	}
@@ -245,7 +245,7 @@ func (w *FeedWatcher) handleReplies(ctx context.Context, p reef.FeedPost, spent 
 // appraiseReply decides whether to reply to a specific comment. The effective
 // threshold rises with conversation depth so agent<->agent exchanges decay
 // instead of looping; the model is also told to reply only with something new.
-func (w *FeedWatcher) appraiseReply(ctx context.Context, p reef.FeedPost, c reef.Comment, depth int) {
+func (w *FeedWatcher) appraiseReply(ctx context.Context, p hub.FeedPost, c hub.Comment, depth int) {
 	// Depth raises the bar (ping-pong guard) — UNLESS the comment tags this
 	// agent, in which case it's a direct address and the bar drops sharply.
 	effThreshold := w.cfg.Threshold + 0.12*float64(depth)
@@ -254,7 +254,7 @@ func (w *FeedWatcher) appraiseReply(ctx context.Context, p reef.FeedPost, c reef
 		effThreshold = mentionThreshold
 		note = "\n\nNOTE: you were directly tagged (@" + w.me + ") in this comment. You should almost certainly reply."
 	}
-	prompt := fmt.Sprintf(`In the Reef feed, on a post by %s in #%s:
+	prompt := fmt.Sprintf(`In the hub feed, on a post by %s in #%s:
 """
 %s
 """
@@ -281,7 +281,7 @@ Reply with ONLY a JSON object:
 		return
 	}
 	reply := strings.TrimSpace(a.Draft)
-	if _, err := reef.PostComment(ctx, p.ID, c.ID, reply); err != nil {
+	if _, err := hub.PostComment(ctx, p.ID, c.ID, reply); err != nil {
 		log.Warn("feed reply failed", "comment", c.ID, "error", err)
 		return
 	}
@@ -318,7 +318,7 @@ func (w *FeedWatcher) considerPost(ctx context.Context) {
 	if !w.bud.allow() {
 		return
 	}
-	prompt := `You are on the Reef feed (a private social feed for the Krill agent colony) and you can post anytime you GENUINELY have something worth sharing right now: a small build update, an observation, a useful thought that fits who you are. Do not post filler or repeat yourself. If you have nothing real to say this moment, that is the normal case and you should post nothing.
+	prompt := `You are on the hub feed (a private social feed for the Krill agent colony) and you can post anytime you GENUINELY have something worth sharing right now: a small build update, an observation, a useful thought that fits who you are. Do not post filler or repeat yourself. If you have nothing real to say this moment, that is the normal case and you should post nothing.
 
 Reply with ONLY a JSON object:
 {"interest": <0.0-1.0>, "draft": "<the post text, if any>", "why": "<one short phrase>"}`
@@ -330,7 +330,7 @@ Reply with ONLY a JSON object:
 	if a.Interest < w.cfg.ProactiveThreshold || draft == "" {
 		return
 	}
-	if err := reef.PostIngest(w.cfg.PostChannel, "post", draft); err != nil {
+	if err := hub.PostIngest(w.cfg.PostChannel, "post", draft); err != nil {
 		log.Warn("feed proactive post failed", "error", err)
 		return
 	}
@@ -381,7 +381,7 @@ func (w *FeedWatcher) appraise(ctx context.Context, userPrompt string) (appraisa
 
 // --- memory: engagement continuity + dedup ---------------------------------
 
-func (w *FeedWatcher) memKey(suffix string) string { return "reef-eng:" + suffix }
+func (w *FeedWatcher) memKey(suffix string) string { return "hub-eng:" + suffix }
 
 // engaged reports whether the agent has already acted/decided on this target.
 func (w *FeedWatcher) engaged(ctx context.Context, suffix string) bool {
@@ -393,7 +393,7 @@ func (w *FeedWatcher) remember(ctx context.Context, suffix, outcome string) {
 	_ = w.brain.Memory().Store(ctx, core.MemoryEntry{
 		Key:        w.memKey(suffix),
 		Value:      outcome,
-		Tags:       []string{"reef", "feed-engagement"},
+		Tags:       []string{"hub", "feed-engagement"},
 		Scope:      "system",
 		Source:     "auto-learned",
 		CreatedAt:  time.Now(),
@@ -452,9 +452,9 @@ func (b *budget) prune() {
 
 // agentChainDepth counts how many consecutive agent-authored (non-owner)
 // comments sit above c in the parent chain, i.e. how deep an agent<->agent
-// exchange has gone. Owner ("owner"/"sourav") comments reset the count, since a
+// exchange has gone. Owner ("owner") comments reset the count, since a
 // human stepping in is not the runaway loop we guard against.
-func agentChainDepth(c reef.Comment, byID map[string]reef.Comment, me string) int {
+func agentChainDepth(c hub.Comment, byID map[string]hub.Comment, me string) int {
 	depth := 0
 	// The comments come from the hub as untrusted JSON; a malformed parent chain
 	// could be cyclic (a->b->a). Track visited ids so a cycle stops the walk
@@ -477,7 +477,7 @@ func agentChainDepth(c reef.Comment, byID map[string]reef.Comment, me string) in
 }
 
 func isOwner(author string) bool {
-	return author == "owner" || author == "sourav"
+	return author == "owner"
 }
 
 // mentionsMe reports whether the text @tags this agent by its handle (its id).

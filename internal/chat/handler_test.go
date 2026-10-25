@@ -12,10 +12,10 @@ import (
 
 type fakeAgent struct{}
 
-func (fakeAgent) Chat(context.Context, string) (string, error)               { return "agent response", nil }
-func (fakeAgent) Plan(context.Context, string) (*core.Plan, error)           { return nil, nil }
-func (fakeAgent) ExecutePlan(context.Context, *core.Plan) (string, error)    { return "", nil }
-func (fakeAgent) SpawnKrill(context.Context, string) (*core.SubKrill, error) { return nil, nil }
+func (fakeAgent) Chat(context.Context, string) (string, error)                  { return "agent response", nil }
+func (fakeAgent) Plan(context.Context, string) (*core.Plan, error)              { return nil, nil }
+func (fakeAgent) ExecutePlan(context.Context, *core.Plan) (string, error)       { return "", nil }
+func (fakeAgent) SpawnSubAgent(context.Context, string) (*core.SubAgent, error) { return nil, nil }
 
 func TestCleanInternalPrefixes(t *testing.T) {
 	tests := []struct {

@@ -20,8 +20,8 @@ func TestSafeRepoPath_RejectsEscape(t *testing.T) {
 	cases := []string{
 		"../../etc/passwd",
 		"../outside",
-		"/etc/passwd",      // absolute
-		"/Users/elsewhere", // absolute
+		"/etc/passwd",    // absolute
+		"/opt/elsewhere", // absolute
 	}
 	for _, rel := range cases {
 		if _, err := safeRepoPath(rel); err == nil {

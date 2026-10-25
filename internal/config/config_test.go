@@ -19,8 +19,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Agent.Name != "krill" {
 		t.Errorf("Agent.Name = %q, want %q", cfg.Agent.Name, "krill")
 	}
-	if cfg.Agent.MaxSubKrills != 3 {
-		t.Errorf("Agent.MaxSubKrills = %d, want 3", cfg.Agent.MaxSubKrills)
+	if cfg.Agent.MaxSubAgents != 3 {
+		t.Errorf("Agent.MaxSubAgents = %d, want 3", cfg.Agent.MaxSubAgents)
 	}
 	if cfg.LLM.Model == "" {
 		t.Error("LLM.Model is empty, want a default model to be set")
@@ -264,5 +264,23 @@ func TestEnvOverrideTelegramToken(t *testing.T) {
 	}
 	if !cfg.Telegram.Enabled {
 		t.Error("Telegram.Enabled = false, want true when token is set via env")
+	}
+}
+
+func TestMaxSubAgentsLegacyKey(t *testing.T) {
+	for key, want := range map[string]int{"max_sub_krills": 7, "max_sub_agents": 5} {
+		tmpDir := t.TempDir()
+		t.Setenv("KRILL_DATA_DIR", tmpDir)
+		yamlData := []byte(fmt.Sprintf("agent:\n  name: krill\n  %s: %d\n", key, want))
+		if err := os.WriteFile(filepath.Join(tmpDir, "config.yaml"), yamlData, 0600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if cfg.Agent.MaxSubAgents != want {
+			t.Errorf("%s: MaxSubAgents = %d, want %d", key, cfg.Agent.MaxSubAgents, want)
+		}
 	}
 }
