@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/srvsngh99/mini-krill/internal/core"
+	"github.com/srvsngh99/mini-krill/internal/hub"
 	log "github.com/srvsngh99/mini-krill/internal/log"
-	"github.com/srvsngh99/mini-krill/internal/reef"
 )
 
 // maxConcurrentTurns bounds how many owner messages WebBot processes at once.
@@ -22,9 +22,9 @@ const maxConcurrentTurns = 4
 // process exit. The hub does not redeliver, so this is a best-effort flush.
 const drainGrace = 5 * time.Second
 
-// WebBot is the Reef hub ChatBot: it long-polls the Reef outbox for the owner's
+// WebBot is the message hub ChatBot: it long-polls the hub outbox for the owner's
 // messages, runs each through the shared core.ChatHandler, and posts replies
-// back to the Reef chat channel. It is the headless, web-app equivalent of the
+// back to the hub chat channel. It is the headless, web-app equivalent of the
 // Telegram and Discord bots and satisfies core.ChatBot.
 type WebBot struct {
 	handler core.ChatHandler
@@ -40,7 +40,7 @@ func NewWebBot(handler core.ChatHandler) *WebBot {
 // Platform identifies this bot for owner-gating and notifier routing.
 func (w *WebBot) Platform() string { return "web" }
 
-// Start posts a presence ping then long-polls the Reef outbox until ctx is
+// Start posts a presence ping then long-polls the hub outbox until ctx is
 // cancelled, dispatching each owner message to the handler. Delivery is
 // at-least-once: it polls with ack=1 (the hub leases items rather than consuming
 // them), acks each item once its turn finishes, and dedupes redeliveries by id.
@@ -48,21 +48,21 @@ func (w *WebBot) Platform() string { return "web" }
 // redelivers it rather than dropping the owner message. On shutdown it waits for
 // in-flight dispatches to finish so their replies still post and ack.
 func (w *WebBot) Start(ctx context.Context) error {
-	if err := reef.PostIngest("chat", "status", "Mini-Krill online on Reef."); err != nil {
-		log.Warn("reef startup ping failed", "error", err)
+	if err := hub.PostIngest("chat", "status", "Mini-Krill online on the hub."); err != nil {
+		log.Warn("hub startup ping failed", "error", err)
 	}
-	log.Info("web (reef) bot started", "agent", reef.AgentID())
+	log.Info("web (hub) bot started", "agent", hub.AgentID())
 	seen := newSeenSet(1000)
 	for {
 		if ctx.Err() != nil {
 			return nil
 		}
-		items, err := reef.PollOutbox(ctx, 25, true)
+		items, err := hub.PollOutbox(ctx, 25, true)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
-			log.Warn("reef outbox poll failed", "error", err)
+			log.Warn("hub outbox poll failed", "error", err)
 			if !sleepCtx(ctx, 5*time.Second) {
 				return nil
 			}
@@ -72,12 +72,12 @@ func (w *WebBot) Start(ctx context.Context) error {
 			// A redelivery of an item we already took: re-ack it, in case our
 			// earlier ack was lost (otherwise it redelivers-and-skips forever).
 			if !seen.take(it.ID) {
-				_ = reef.Ack(ctx, []string{it.ID})
+				_ = hub.Ack(ctx, []string{it.ID})
 				continue
 			}
 			text := strings.TrimSpace(it.Text)
 			if text == "" {
-				_ = reef.Ack(ctx, []string{it.ID}) // consume empty items
+				_ = hub.Ack(ctx, []string{it.ID}) // consume empty items
 				continue
 			}
 			// Acquire a slot before spawning so a burst of queued owner
@@ -97,15 +97,15 @@ func (w *WebBot) Start(ctx context.Context) error {
 				// hung turn cannot leak forever (parity with telegram/discord).
 				turnCtx, cancel := context.WithTimeout(context.Background(), turnDeadline)
 				defer cancel()
-				reactReef(msgID, "cursor") // "on it", before acting
+				reactHub(msgID, "cursor") // "on it", before acting
 				w.dispatch(turnCtx, text)
-				reactReef(msgID, "check") // "done", after replying
+				reactHub(msgID, "check") // "done", after replying
 				// Ack once handled so the hub stops redelivering. Detached +
 				// short timeout so it still completes during shutdown drain.
 				ackCtx, ackCancel := context.WithTimeout(context.Background(), 15*time.Second)
 				defer ackCancel()
-				if err := reef.Ack(ackCtx, []string{id}); err != nil {
-					log.Warn("reef ack failed", "error", err)
+				if err := hub.Ack(ackCtx, []string{id}); err != nil {
+					log.Warn("hub ack failed", "error", err)
 				}
 			}(it.ID, it.Payload.MessageID, text)
 		}
@@ -142,23 +142,23 @@ func (s *seenSet) take(id string) bool {
 	return true
 }
 
-// reactReef adds an emoji reaction to the owner's message (best-effort, short
+// reactHub adds an emoji reaction to the owner's message (best-effort, short
 // detached timeout so it never blocks or fails the turn).
-func reactReef(msgID, emoji string) {
+func reactHub(msgID, emoji string) {
 	if msgID == "" {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := reef.React(ctx, msgID, emoji); err != nil {
-		log.Warn("reef react failed", "emoji", emoji, "error", err)
+	if err := hub.React(ctx, msgID, emoji); err != nil {
+		log.Warn("hub react failed", "emoji", emoji, "error", err)
 	}
 }
 
 // dispatch runs one owner message through the handler and posts the reply.
 func (w *WebBot) dispatch(ctx context.Context, text string) {
 	msg := core.ChatMessage{
-		Platform: "web", ChatID: "reef", UserID: "owner",
+		Platform: "web", ChatID: "hub", UserID: "owner",
 		Username: "owner", Text: text,
 	}
 	resp, err := w.handler.HandleMessage(ctx, msg)
@@ -169,8 +169,8 @@ func (w *WebBot) dispatch(ctx context.Context, text string) {
 	if strings.TrimSpace(resp) == "" {
 		return
 	}
-	if err := reef.PostIngest("chat", "chat", resp); err != nil {
-		log.Error("reef reply post failed", "error", err)
+	if err := hub.PostIngest("chat", "chat", resp); err != nil {
+		log.Error("hub reply post failed", "error", err)
 	}
 }
 
@@ -184,7 +184,7 @@ func (w *WebBot) Stop() error {
 	select {
 	case <-done:
 	case <-time.After(drainGrace):
-		log.Warn("reef web bot: drain timed out, some replies may still be in flight")
+		log.Warn("hub web bot: drain timed out, some replies may still be in flight")
 	}
 	return nil
 }

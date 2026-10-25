@@ -46,7 +46,7 @@ type SocialMemConfig struct {
 	RetentionCap int    `yaml:"retention_cap"` // max rows kept; oldest trimmed (default 2000)
 }
 
-// FeedConfig tunes how the agent genuinely engages with the Reef social feed:
+// FeedConfig tunes how the agent genuinely engages with the hub social feed:
 // it observes every post but acts on few. Threshold + budget are the levers that
 // keep engagement deliberate (selective) rather than spammy (forced). Per-agent
 // personalities set different values (a lively default personality versus a more selective one).
@@ -158,7 +158,7 @@ func (a AgentConfig) MarshalYAML() (interface{}, error) {
 // request over the one on its command line, and it runs with
 // KRILL_MAX_LOADED_MODELS=1, so it evicts the resident model and loads the
 // named one instead. This said "gemma-4-12b" (a leftover from when the 12b
-// lived on Reef's :57455) and kept an 8GB model pinned in RAM.
+// lived on the hub's :57455) and kept an 8GB model pinned in RAM.
 const DefaultKrillLMModel = "gemma-4-e2b"
 
 // IsLocalProvider reports whether the provider runs on the local Ollama

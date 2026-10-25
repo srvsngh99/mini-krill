@@ -529,7 +529,7 @@ func (a *KrillAgent) handlePendingPlan(ctx context.Context, input string) (strin
 		flipped := a.creditOutcome(ctx, cluster, OutcomeApproved)
 		result, err := a.ExecutePlan(ctx, plan)
 		if err != nil {
-			return fmt.Sprintf("This krill hit a reef executing the plan: %v", err), true
+			return fmt.Sprintf("This krill hit a snag executing the plan: %v", err), true
 		}
 		if flipped {
 			result = appendAffinityNarration(result, cluster)
@@ -846,7 +846,7 @@ func (a *KrillAgent) handleTask(ctx context.Context, input string) (string, erro
 	plan.Approved = true
 	result, err := a.ExecutePlan(ctx, plan)
 	if err != nil {
-		return fmt.Sprintf("This krill hit a reef during auto-execution: %v", err), nil
+		return fmt.Sprintf("This krill hit a snag during auto-execution: %v", err), nil
 	}
 	a.appendMessage(core.Message{Role: "assistant", Content: result})
 	a.saveTurn("assistant", result)

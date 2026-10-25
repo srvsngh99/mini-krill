@@ -1,8 +1,8 @@
-// Package reef connects Mini-Krill to the Reef messaging hub: it posts the
+// Package hub connects Mini-Krill to the message hub: it posts the
 // agent's messages and long-polls for the owner's replies. When
-// REEF_INGEST_URL / REEF_AGENT_TOKEN are unset the client is inert
+// HUB_INGEST_URL / HUB_AGENT_TOKEN are unset the client is inert
 // (IsConfigured returns false) and Mini-Krill uses its other channels.
-package reef
+package hub
 
 import (
 	"bytes"
@@ -16,18 +16,18 @@ import (
 	"time"
 )
 
-func baseURL() string   { return strings.TrimRight(os.Getenv("REEF_INGEST_URL"), "/") }
-func authToken() string { return os.Getenv("REEF_AGENT_TOKEN") }
+func baseURL() string   { return strings.TrimRight(os.Getenv("HUB_INGEST_URL"), "/") }
+func authToken() string { return os.Getenv("HUB_AGENT_TOKEN") }
 
-// AgentID is this agent's id in Reef (default "minikrill").
+// AgentID is this agent's id on the hub (default "minikrill").
 func AgentID() string {
-	if v := os.Getenv("REEF_AGENT_ID"); v != "" {
+	if v := os.Getenv("HUB_AGENT_ID"); v != "" {
 		return v
 	}
 	return "minikrill"
 }
 
-// IsConfigured reports whether the Reef hub URL and token are both set.
+// IsConfigured reports whether the message hub URL and token are both set.
 func IsConfigured() bool { return baseURL() != "" && authToken() != "" }
 
 type ingestPayload struct {
@@ -38,7 +38,7 @@ type ingestPayload struct {
 	Content string `json:"content"`
 }
 
-// PostIngest delivers one message to the Reef hub.
+// PostIngest delivers one message to the message hub.
 func PostIngest(channel, kind, content string) error {
 	if !IsConfigured() {
 		return nil
@@ -52,7 +52,7 @@ func PostIngest(channel, kind, content string) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Reef-Token", authToken())
+	req.Header.Set("X-Hub-Token", authToken())
 	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
 	if err != nil {
 		return err
@@ -60,7 +60,7 @@ func PostIngest(channel, kind, content string) error {
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("reef ingest: status %d", resp.StatusCode)
+		return fmt.Errorf("hub ingest: status %d", resp.StatusCode)
 	}
 	return nil
 }
@@ -79,7 +79,7 @@ type OutboxItem struct {
 
 // React adds an emoji reaction to an owner message so the owner sees progress:
 // "cursor" when the agent starts working, "check" when it finishes. emoji is a
-// Reef emoji name (see GET /api/emoji). Best-effort: a failed react is ignored.
+// hub emoji name (see GET /api/emoji). Best-effort: a failed react is ignored.
 func React(ctx context.Context, messageID, emoji string) error {
 	if !IsConfigured() || messageID == "" {
 		return nil
@@ -95,7 +95,7 @@ func React(ctx context.Context, messageID, emoji string) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Reef-Token", authToken())
+	req.Header.Set("X-Hub-Token", authToken())
 	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
 	if err != nil {
 		return err
@@ -103,7 +103,7 @@ func React(ctx context.Context, messageID, emoji string) error {
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("reef react: status %d", resp.StatusCode)
+		return fmt.Errorf("hub react: status %d", resp.StatusCode)
 	}
 	return nil
 }
@@ -129,7 +129,7 @@ func PollOutbox(ctx context.Context, waitSeconds int, ack bool) ([]OutboxItem, e
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("X-Reef-Token", authToken())
+	req.Header.Set("X-Hub-Token", authToken())
 	resp, err := (&http.Client{Timeout: time.Duration(waitSeconds+10) * time.Second}).Do(req)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func PollOutbox(ctx context.Context, waitSeconds int, ack bool) ([]OutboxItem, e
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		io.Copy(io.Discard, resp.Body)
-		return nil, fmt.Errorf("reef outbox: status %d", resp.StatusCode)
+		return nil, fmt.Errorf("hub outbox: status %d", resp.StatusCode)
 	}
 	var out struct {
 		Items []OutboxItem `json:"items"`
@@ -191,7 +191,7 @@ func GetFeed(ctx context.Context, since int64, channels string, limit int) ([]Fe
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("X-Reef-Token", authToken())
+	req.Header.Set("X-Hub-Token", authToken())
 	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
 	if err != nil {
 		return nil, err
@@ -199,7 +199,7 @@ func GetFeed(ctx context.Context, since int64, channels string, limit int) ([]Fe
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		io.Copy(io.Discard, resp.Body)
-		return nil, fmt.Errorf("reef feed: status %d", resp.StatusCode)
+		return nil, fmt.Errorf("hub feed: status %d", resp.StatusCode)
 	}
 	var out struct {
 		Posts []FeedPost `json:"posts"`
@@ -220,7 +220,7 @@ func GetComments(ctx context.Context, postID string) ([]Comment, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("X-Reef-Token", authToken())
+	req.Header.Set("X-Hub-Token", authToken())
 	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
 	if err != nil {
 		return nil, err
@@ -228,7 +228,7 @@ func GetComments(ctx context.Context, postID string) ([]Comment, error) {
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		io.Copy(io.Discard, resp.Body)
-		return nil, fmt.Errorf("reef comments: status %d", resp.StatusCode)
+		return nil, fmt.Errorf("hub comments: status %d", resp.StatusCode)
 	}
 	var out struct {
 		Comments []Comment `json:"comments"`
@@ -259,7 +259,7 @@ func PostComment(ctx context.Context, postID, parentCommentID, text string) (str
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Reef-Token", authToken())
+	req.Header.Set("X-Hub-Token", authToken())
 	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
 	if err != nil {
 		return "", err
@@ -267,7 +267,7 @@ func PostComment(ctx context.Context, postID, parentCommentID, text string) (str
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		io.Copy(io.Discard, resp.Body)
-		return "", fmt.Errorf("reef comment: status %d", resp.StatusCode)
+		return "", fmt.Errorf("hub comment: status %d", resp.StatusCode)
 	}
 	var out struct {
 		Comment Comment `json:"comment"`
@@ -294,7 +294,7 @@ func LikePost(ctx context.Context, postID string) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Reef-Token", authToken())
+	req.Header.Set("X-Hub-Token", authToken())
 	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
 	if err != nil {
 		return err
@@ -302,7 +302,7 @@ func LikePost(ctx context.Context, postID string) error {
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("reef post like: status %d", resp.StatusCode)
+		return fmt.Errorf("hub post like: status %d", resp.StatusCode)
 	}
 	return nil
 }
@@ -321,7 +321,7 @@ func LikeComment(ctx context.Context, commentID string) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Reef-Token", authToken())
+	req.Header.Set("X-Hub-Token", authToken())
 	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
 	if err != nil {
 		return err
@@ -329,7 +329,7 @@ func LikeComment(ctx context.Context, commentID string) error {
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("reef comment like: status %d", resp.StatusCode)
+		return fmt.Errorf("hub comment like: status %d", resp.StatusCode)
 	}
 	return nil
 }
@@ -351,7 +351,7 @@ func Ack(ctx context.Context, ids []string) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Reef-Token", authToken())
+	req.Header.Set("X-Hub-Token", authToken())
 	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
 	if err != nil {
 		return err
@@ -359,7 +359,7 @@ func Ack(ctx context.Context, ids []string) error {
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("reef ack: status %d", resp.StatusCode)
+		return fmt.Errorf("hub ack: status %d", resp.StatusCode)
 	}
 	return nil
 }

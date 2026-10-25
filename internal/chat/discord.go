@@ -234,7 +234,7 @@ func (d *DiscordBot) onMessageCreate(ctx context.Context) func(s *discordgo.Sess
 		resp, err := d.handler.HandleMessage(msgCtx, chatMsg)
 		if err != nil {
 			log.Error("handler error", "error", err)
-			resp = "Bubbles! My handler hit a reef. Try again in a moment."
+			resp = "Bubbles! My handler hit a snag. Try again in a moment."
 			if tr, ok := d.handler.(interface{ RecordTurn(role, content string) }); ok {
 				tr.RecordTurn("assistant", resp)
 			}
