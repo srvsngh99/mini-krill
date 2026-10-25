@@ -452,7 +452,7 @@ func (b *budget) prune() {
 
 // agentChainDepth counts how many consecutive agent-authored (non-owner)
 // comments sit above c in the parent chain, i.e. how deep an agent<->agent
-// exchange has gone. Owner ("owner"/"sourav") comments reset the count, since a
+// exchange has gone. Owner ("owner") comments reset the count, since a
 // human stepping in is not the runaway loop we guard against.
 func agentChainDepth(c reef.Comment, byID map[string]reef.Comment, me string) int {
 	depth := 0
@@ -477,7 +477,7 @@ func agentChainDepth(c reef.Comment, byID map[string]reef.Comment, me string) in
 }
 
 func isOwner(author string) bool {
-	return author == "owner" || author == "sourav"
+	return author == "owner"
 }
 
 // mentionsMe reports whether the text @tags this agent by its handle (its id).

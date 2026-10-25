@@ -288,7 +288,7 @@ func TestBuildStyleDirective_Composes(t *testing.T) {
 
 func newAgentWithMemory(approval string, mem core.Memory) *KrillAgent {
 	return New(
-		config.AgentConfig{Name: "test-krill", MaxSubKrills: 3, PlanApproval: approval},
+		config.AgentConfig{Name: "test-krill", MaxSubAgents: 3, PlanApproval: approval},
 		&MockProvider{chatResponse: "CHAT"},
 		&memBrain{mem: mem},
 		&mockSkillRegistry{},
@@ -471,7 +471,7 @@ func TestPendingPlan_UnrelatedReleasesControl(t *testing.T) {
 		callCount: &callCount,
 	}
 	a := New(
-		config.AgentConfig{Name: "test-krill", MaxSubKrills: 3, PlanApproval: "always"},
+		config.AgentConfig{Name: "test-krill", MaxSubAgents: 3, PlanApproval: "always"},
 		provider,
 		&mockBrain{},
 		&mockSkillRegistry{},
@@ -512,7 +512,7 @@ func TestPendingPlan_LearnsNoApprovalDuringPending(t *testing.T) {
 		callCount: &callCount,
 	}
 	a := New(
-		config.AgentConfig{Name: "test-krill", MaxSubKrills: 3, PlanApproval: "auto"},
+		config.AgentConfig{Name: "test-krill", MaxSubAgents: 3, PlanApproval: "auto"},
 		provider,
 		&memBrain{mem: mem},
 		&mockSkillRegistry{},

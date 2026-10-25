@@ -39,7 +39,7 @@ func TestRouterDeterministicRememberStore(t *testing.T) {
 	r := newTestRouter("CHAT")
 	cases := []string{
 		"remember that I prefer Go",
-		"learn that my name is Sourav",
+		"learn that my name is Alex",
 		"memorize this: I like dark mode",
 		"note that I use vim",
 	}

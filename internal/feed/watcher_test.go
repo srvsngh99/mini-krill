@@ -123,7 +123,7 @@ func TestMentionsMe(t *testing.T) {
 }
 
 func TestIsOwner(t *testing.T) {
-	for _, a := range []string{"owner", "sourav"} {
+	for _, a := range []string{"owner"} {
 		if !isOwner(a) {
 			t.Errorf("%q should be owner", a)
 		}

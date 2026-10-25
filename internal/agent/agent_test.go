@@ -108,7 +108,7 @@ func (r *mockMCPReg) IsEnabled(_ string) bool                   { return true }
 
 func newTestAgent(response string) *KrillAgent {
 	return New(
-		config.AgentConfig{Name: "test-krill", MaxSubKrills: 3, PlanApproval: "always"},
+		config.AgentConfig{Name: "test-krill", MaxSubAgents: 3, PlanApproval: "always"},
 		&MockProvider{chatResponse: response},
 		&mockBrain{},
 		&mockSkillRegistry{},
@@ -181,7 +181,7 @@ func TestAgentPlanApprovalWithTaskClassification(t *testing.T) {
 	}
 
 	agent := New(
-		config.AgentConfig{Name: "test-krill", MaxSubKrills: 3, PlanApproval: "always"},
+		config.AgentConfig{Name: "test-krill", MaxSubAgents: 3, PlanApproval: "always"},
 		provider,
 		&mockBrain{},
 		&mockSkillRegistry{},
@@ -364,7 +364,7 @@ func newProviderControlTestAgent() *KrillAgent {
 		},
 	}
 	return New(
-		config.AgentConfig{Name: "test-krill", MaxSubKrills: 3, PlanApproval: "always"},
+		config.AgentConfig{Name: "test-krill", MaxSubAgents: 3, PlanApproval: "always"},
 		provider,
 		&mockBrain{},
 		&mockSkillRegistry{},
@@ -411,17 +411,17 @@ func (m *providerControlMock) ResolveTarget(input string) (provider, model strin
 }
 
 // ---------------------------------------------------------------------------
-// SubKrillManager tests
+// SubAgentManager tests
 // ---------------------------------------------------------------------------
 
-func TestSubKrillManagerSpawnAndWait(t *testing.T) {
-	provider := &MockProvider{chatResponse: "sub-krill result"}
+func TestSubAgentManagerSpawnAndWait(t *testing.T) {
+	provider := &MockProvider{chatResponse: "sub-agent result"}
 	cfg := config.AgentConfig{
 		Name:         "test-krill",
-		MaxSubKrills: 3,
+		MaxSubAgents: 3,
 	}
 
-	mgr := NewSubKrillManager(cfg, provider)
+	mgr := NewSubAgentManager(cfg, provider)
 
 	sub, err := mgr.Spawn(context.Background(), "analyze this data")
 	if err != nil {
@@ -431,10 +431,10 @@ func TestSubKrillManagerSpawnAndWait(t *testing.T) {
 		t.Fatal("Spawn() returned nil")
 	}
 	if sub.ID == "" {
-		t.Error("Spawn() returned SubKrill with empty ID")
+		t.Error("Spawn() returned SubAgent with empty ID")
 	}
 	if sub.Task != "analyze this data" {
-		t.Errorf("SubKrill.Task = %q, want %q", sub.Task, "analyze this data")
+		t.Errorf("SubAgent.Task = %q, want %q", sub.Task, "analyze this data")
 	}
 
 	// Wait for completion
@@ -443,21 +443,21 @@ func TestSubKrillManagerSpawnAndWait(t *testing.T) {
 		t.Fatalf("Wait() error: %v", err)
 	}
 	if result.Status != "done" {
-		t.Errorf("SubKrill.Status = %q, want %q", result.Status, "done")
+		t.Errorf("SubAgent.Status = %q, want %q", result.Status, "done")
 	}
 	if result.Output == "" {
-		t.Error("SubKrill.Output is empty after completion")
+		t.Error("SubAgent.Output is empty after completion")
 	}
 }
 
-func TestSubKrillManagerConcurrencyLimit(t *testing.T) {
+func TestSubAgentManagerConcurrencyLimit(t *testing.T) {
 	provider := &slowMockProvider{delay: 100 * time.Millisecond, response: "done"}
 	cfg := config.AgentConfig{
 		Name:         "test-krill",
-		MaxSubKrills: 2,
+		MaxSubAgents: 2,
 	}
 
-	mgr := NewSubKrillManager(cfg, provider)
+	mgr := NewSubAgentManager(cfg, provider)
 	ctx := context.Background()
 
 	// Spawn up to the limit
@@ -479,11 +479,11 @@ func TestSubKrillManagerConcurrencyLimit(t *testing.T) {
 		t.Errorf("error = %q, want to contain 'capacity'", err.Error())
 	}
 
-	// Wait for sub-krills to finish, then we should be able to spawn again
+	// Wait for sub-agents to finish, then we should be able to spawn again
 	_, _ = mgr.Wait(sub1.ID, 5*time.Second)
 	_, _ = mgr.Wait(sub2.ID, 5*time.Second)
 
-	// Cleanup completed sub-krills
+	// Cleanup completed sub-agents
 	mgr.Cleanup()
 
 	sub3, err := mgr.Spawn(ctx, "task 3 retry")
@@ -495,14 +495,14 @@ func TestSubKrillManagerConcurrencyLimit(t *testing.T) {
 	}
 }
 
-func TestSubKrillManagerList(t *testing.T) {
+func TestSubAgentManagerList(t *testing.T) {
 	provider := &MockProvider{chatResponse: "result"}
 	cfg := config.AgentConfig{
 		Name:         "test-krill",
-		MaxSubKrills: 5,
+		MaxSubAgents: 5,
 	}
 
-	mgr := NewSubKrillManager(cfg, provider)
+	mgr := NewSubAgentManager(cfg, provider)
 	ctx := context.Background()
 
 	_, _ = mgr.Spawn(ctx, "task a")
@@ -513,18 +513,18 @@ func TestSubKrillManagerList(t *testing.T) {
 
 	list := mgr.List()
 	if len(list) != 2 {
-		t.Errorf("List() returned %d sub-krills, want 2", len(list))
+		t.Errorf("List() returned %d sub-agents, want 2", len(list))
 	}
 }
 
-func TestSubKrillManagerWaitNotFound(t *testing.T) {
+func TestSubAgentManagerWaitNotFound(t *testing.T) {
 	provider := &MockProvider{chatResponse: "result"}
 	cfg := config.AgentConfig{
 		Name:         "test-krill",
-		MaxSubKrills: 3,
+		MaxSubAgents: 3,
 	}
 
-	mgr := NewSubKrillManager(cfg, provider)
+	mgr := NewSubAgentManager(cfg, provider)
 
 	_, err := mgr.Wait("nonexistent-id", 1*time.Second)
 	if err == nil {
@@ -532,14 +532,14 @@ func TestSubKrillManagerWaitNotFound(t *testing.T) {
 	}
 }
 
-func TestSubKrillManagerCleanup(t *testing.T) {
+func TestSubAgentManagerCleanup(t *testing.T) {
 	provider := &MockProvider{chatResponse: "done"}
 	cfg := config.AgentConfig{
 		Name:         "test-krill",
-		MaxSubKrills: 5,
+		MaxSubAgents: 5,
 	}
 
-	mgr := NewSubKrillManager(cfg, provider)
+	mgr := NewSubAgentManager(cfg, provider)
 	ctx := context.Background()
 
 	sub, err := mgr.Spawn(ctx, "cleanup task")

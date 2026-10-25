@@ -49,7 +49,7 @@ type SocialMemConfig struct {
 // FeedConfig tunes how the agent genuinely engages with the Reef social feed:
 // it observes every post but acts on few. Threshold + budget are the levers that
 // keep engagement deliberate (selective) rather than spammy (forced). Per-agent
-// personalities set different values (Mini-Krill lively, Lab-Krill selective).
+// personalities set different values (a lively default personality versus a more selective one).
 type FeedConfig struct {
 	Enabled         bool    `yaml:"enabled"`           // master switch
 	Threshold       float64 `yaml:"threshold"`         // min appraisal interest (0-1) to engage
@@ -70,7 +70,7 @@ type AgentConfig struct {
 	Name          string `yaml:"name"`
 	AgentName     string `yaml:"agent_name"`  // user-chosen name shown to user (default: personality name)
 	Personality   string `yaml:"personality"` // active personality profile (default: "krill")
-	MaxSubKrills  int    `yaml:"max_sub_krills"`
+	MaxSubAgents  int    `yaml:"max_sub_agents"`
 	PlanApproval  string `yaml:"-"` // legacy: "auto"|"always"|"never"; superseded by AutonomyFloor
 	AutonomyFloor string `yaml:"-"` // "observe"|"suggest"|"act"|"evolve"; default "act"
 	RecoveryTurns int    `yaml:"recovery_turns"`
@@ -82,7 +82,8 @@ type agentConfigRaw struct {
 	Name          string      `yaml:"name"`
 	AgentName     string      `yaml:"agent_name"`
 	Personality   string      `yaml:"personality"`
-	MaxSubKrills  int         `yaml:"max_sub_krills"`
+	MaxSubAgents  int         `yaml:"max_sub_agents"`
+	LegacyMaxSubs int         `yaml:"max_sub_krills"` // pre-rename key, still accepted on load
 	PlanApproval  interface{} `yaml:"plan_approval"`
 	AutonomyFloor string      `yaml:"autonomy_floor"`
 	RecoveryTurns int         `yaml:"recovery_turns"`
@@ -100,7 +101,10 @@ func (a *AgentConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	a.Name = raw.Name
 	a.AgentName = raw.AgentName
 	a.Personality = raw.Personality
-	a.MaxSubKrills = raw.MaxSubKrills
+	a.MaxSubAgents = raw.MaxSubAgents
+	if a.MaxSubAgents == 0 {
+		a.MaxSubAgents = raw.LegacyMaxSubs
+	}
 	a.RecoveryTurns = raw.RecoveryTurns
 	a.AutonomyFloor = raw.AutonomyFloor
 
@@ -133,14 +137,14 @@ func (a AgentConfig) MarshalYAML() (interface{}, error) {
 		// writing them makes the loss visible and round-trip-safe.
 		AgentName     string `yaml:"agent_name"`
 		Personality   string `yaml:"personality"`
-		MaxSubKrills  int    `yaml:"max_sub_krills"`
+		MaxSubAgents  int    `yaml:"max_sub_agents"`
 		AutonomyFloor string `yaml:"autonomy_floor"`
 		RecoveryTurns int    `yaml:"recovery_turns,omitempty"`
 	}{
 		Name:          a.Name,
 		AgentName:     a.AgentName,
 		Personality:   a.Personality,
-		MaxSubKrills:  a.MaxSubKrills,
+		MaxSubAgents:  a.MaxSubAgents,
 		AutonomyFloor: a.AutonomyFloor,
 		RecoveryTurns: a.RecoveryTurns,
 	}, nil
@@ -148,7 +152,7 @@ func (a AgentConfig) MarshalYAML() (interface{}, error) {
 
 // DefaultKrillLMModel is the primary model of the KrillLM provider. It must
 // match the model the Krill engine on :57456 is launched with
-// (com.sourav.deepkrill-llm: `krillm serve --model gemma-4-e2b`).
+// (`krillm serve --model gemma-4-e2b`).
 //
 // Naming a different model does NOT fail: krillm honours the model in each
 // request over the one on its command line, and it runs with
@@ -280,7 +284,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		Agent: AgentConfig{
 			Name:          "krill",
-			MaxSubKrills:  3,
+			MaxSubAgents:  3,
 			PlanApproval:  "auto",
 			AutonomyFloor: "act",
 		},
@@ -320,7 +324,7 @@ func DefaultConfig() *Config {
 			Theme: "ocean",
 		},
 		// Mini-Krill is the lively/playful participant: a low bar and a generous
-		// budget, so it comments and reacts more freely than Lab-Krill.
+		// budget, so it comments and reacts more freely than the selective personality.
 		Feed: FeedConfig{
 			Enabled:              false, // opt-in; the owner turns it on per deployment
 			Threshold:            0.55,
@@ -330,7 +334,7 @@ func DefaultConfig() *Config {
 			Channels:             "",
 			ProactiveEnabled:     true,
 			ProactiveIntervalSec: 1800, // ~every 30 min, considers an original post
-			ProactiveThreshold:   0.5,  // chattier than Lab-Krill
+			ProactiveThreshold:   0.5,  // chattier than the selective personality
 			PostChannel:          "builds",
 		},
 		SocialMem: SocialMemConfig{

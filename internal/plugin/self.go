@@ -307,7 +307,7 @@ func selfConfig(sc SelfContext) core.Skill {
 				sb.WriteString(fmt.Sprintf("Base URL:      %s\n", cfg.LLM.BaseURL))
 			}
 			sb.WriteString(fmt.Sprintf("Plan Approval: %v\n", cfg.Agent.PlanApproval))
-			sb.WriteString(fmt.Sprintf("Max Sub-Krills: %d\n", cfg.Agent.MaxSubKrills))
+			sb.WriteString(fmt.Sprintf("Max Sub-Agents: %d\n", cfg.Agent.MaxSubAgents))
 			sb.WriteString(fmt.Sprintf("Telegram:      %v\n", cfg.Telegram.Enabled))
 			sb.WriteString(fmt.Sprintf("Discord:       %v\n", cfg.Discord.Enabled))
 			sb.WriteString(fmt.Sprintf("Ollama Host:   %s\n", cfg.Ollama.Host))

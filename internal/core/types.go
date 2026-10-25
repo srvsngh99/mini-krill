@@ -262,8 +262,8 @@ type Plan struct {
 	Summary  string     `json:"summary"`
 }
 
-// SubKrill is a lightweight sub-agent spawned for a focused task.
-type SubKrill struct {
+// SubAgent is a lightweight sub-agent spawned for a focused task.
+type SubAgent struct {
 	ID     string `json:"id"`
 	Task   string `json:"task"`
 	Status string `json:"status"` // spawned, running, done, failed
@@ -275,7 +275,7 @@ type Agent interface {
 	Chat(ctx context.Context, input string) (string, error)
 	Plan(ctx context.Context, task string) (*Plan, error)
 	ExecutePlan(ctx context.Context, plan *Plan) (string, error)
-	SpawnKrill(ctx context.Context, task string) (*SubKrill, error)
+	SpawnSubAgent(ctx context.Context, task string) (*SubAgent, error)
 }
 
 // PlatformAwareAgent extends Agent with a platform-aware entry point.

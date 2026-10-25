@@ -138,7 +138,7 @@ Trust, autonomy, and identity. The agent now learns which task types you want pl
 - Quick health ping (minikrill sonar)
 - Ollama management commands (install, start, stop, pull, list, status)
 - Brain inspection commands (status, recall, forget, search)
-- Sub-krill spawning for focused subtasks
+- Sub-agent spawning for focused subtasks
 - Cross-platform support (Linux, macOS, Windows)
 - One-line installation script
 - Docker support with docker-compose

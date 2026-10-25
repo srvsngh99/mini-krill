@@ -55,7 +55,7 @@ type KrillAgent struct {
 	chatID            string // current chat ID for background task notifications
 	history           []core.Message
 	pendingPlan       *core.Plan
-	subMgr            *SubKrillManager
+	subMgr            *SubAgentManager
 	taskStore         *TaskStore
 	taskRunner        *TaskRunner
 	turnFetches       *turnFetchLog  // per-turn provenance ledger; reset on each ChatFromPlatform call
@@ -108,7 +108,7 @@ func New(cfg config.AgentConfig, llm core.LLMProvider, brain core.Brain, skills 
 		history: []core.Message{
 			{Role: "system", Content: sysPrompt},
 		},
-		subMgr: NewSubKrillManager(cfg, llm),
+		subMgr: NewSubAgentManager(cfg, llm),
 	}
 	if brain != nil {
 		a.affinity = NewAffinityStore(brain.Memory())
@@ -394,9 +394,9 @@ func (a *KrillAgent) ExecutePlan(ctx context.Context, plan *core.Plan) (string, 
 	return ExecutePlanSteps(ctx, plan, a.llm, a.brain, a.skills, a.mcp)
 }
 
-// SpawnKrill launches a focused sub-agent for a specific task.
+// SpawnSubAgent launches a focused sub-agent for a specific task.
 // Like a krill swarm splitting to cover more ocean territory.
-func (a *KrillAgent) SpawnKrill(ctx context.Context, task string) (*core.SubKrill, error) {
+func (a *KrillAgent) SpawnSubAgent(ctx context.Context, task string) (*core.SubAgent, error) {
 	return a.subMgr.Spawn(ctx, task)
 }
 
