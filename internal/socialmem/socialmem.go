@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"regexp"
@@ -33,8 +34,8 @@ import (
 type Config struct {
 	Enabled      bool   `yaml:"enabled"`
 	ChromaURL    string `yaml:"chroma_url"`    // default http://127.0.0.1:8001
-	EmbedURL     string `yaml:"embed_url"`     // default http://127.0.0.1:7997 (embed-service)
-	EmbedModel   string `yaml:"embed_model"`   // default bge-base-en
+	EmbedURL     string `yaml:"embed_url"`     // default http://127.0.0.1:57458 (Krill EG2)
+	EmbedModel   string `yaml:"embed_model"`   // default embeddinggemma-2-mlx-4bit-dyn-text
 	Collection   string `yaml:"collection"`    // default "<agent>_social"
 	RecallK      int    `yaml:"recall_k"`      // default 4
 	RetentionCap int    `yaml:"retention_cap"` // max rows kept; oldest trimmed (default 2000)
@@ -83,13 +84,17 @@ func New(agent string, cfg Config) *Store {
 		cfg.ChromaURL = envOr("COLONY_VECTOR_URL", "http://127.0.0.1:8004")
 	}
 	if cfg.EmbedURL == "" {
-		cfg.EmbedURL = envOr("COLONY_EMBED_URL", "http://127.0.0.1:7997")
+		cfg.EmbedURL = envOr("COLONY_EMBED_URL", "http://127.0.0.1:57458")
 	}
 	if cfg.EmbedModel == "" {
-		cfg.EmbedModel = "bge-base-en"
+		cfg.EmbedModel = envOr("COLONY_EMBED_MODEL", "embeddinggemma-2-mlx-4bit-dyn-text")
 	}
 	if cfg.Collection == "" {
 		cfg.Collection = agent + "_social"
+	}
+	// EG2 vectors live in <name>_eg2 tables; the legacy bge model keeps the old names.
+	if cfg.EmbedModel != legacyEmbedModel {
+		cfg.Collection += "_eg2"
 	}
 	if cfg.RecallK == 0 {
 		cfg.RecallK = 4
@@ -164,7 +169,7 @@ func (s *Store) Recall(ctx context.Context, query string, k int) []Hit {
 	if err != nil {
 		return nil
 	}
-	emb, err := s.embed(ctx, query)
+	emb, err := s.embed(ctx, query, "SearchQuery")
 	if err != nil {
 		return nil
 	}
@@ -295,9 +300,12 @@ func (s *Store) base() string {
 
 func (s *Store) collPath(id string) string { return s.base() + "/collections/" + id }
 
-// embed turns text into a vector via the shared krillm bge embedder.
-func (s *Store) embed(ctx context.Context, text string) ([]float32, error) {
-	body := map[string]any{"model": s.cfg.EmbedModel, "input": text}
+const legacyEmbedModel = "bge-base-en"
+
+// embed turns text into a unit vector. task is "Document" for stored text and
+// "SearchQuery" for lookups; the legacy bge server ignores it.
+func (s *Store) embed(ctx context.Context, text, task string) ([]float32, error) {
+	body := map[string]any{"model": s.cfg.EmbedModel, "input": []string{text}, "task": task, "dimensions": 768}
 	var out struct {
 		Data []struct {
 			Embedding []float32 `json:"embedding"`
@@ -309,7 +317,17 @@ func (s *Store) embed(ctx context.Context, text string) ([]float32, error) {
 	if len(out.Data) == 0 || len(out.Data[0].Embedding) == 0 {
 		return nil, fmt.Errorf("empty embedding")
 	}
-	return out.Data[0].Embedding, nil
+	v := out.Data[0].Embedding
+	var n float64
+	for _, x := range v {
+		n += float64(x) * float64(x)
+	}
+	if n = math.Sqrt(n); n > 0 {
+		for i := range v {
+			v[i] = float32(float64(v[i]) / n)
+		}
+	}
+	return v, nil
 }
 
 // get issues a GET and decodes the JSON response into out.

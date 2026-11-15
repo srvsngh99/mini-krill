@@ -336,8 +336,8 @@ func DefaultConfig() *Config {
 		SocialMem: SocialMemConfig{
 			Enabled:      true,
 			ChromaURL:    "http://127.0.0.1:8004",
-			EmbedURL:     "http://127.0.0.1:7997",
-			EmbedModel:   "bge-base-en",
+			EmbedURL:     "http://127.0.0.1:57458",
+			EmbedModel:   "embeddinggemma-2-mlx-4bit-dyn-text",
 			RecallK:      4,
 			RetentionCap: 2000,
 		},
