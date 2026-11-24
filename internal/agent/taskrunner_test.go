@@ -12,7 +12,7 @@ import (
 
 func newTaskTestAgent() *KrillAgent {
 	return New(
-		config.AgentConfig{Name: "task-test", PlanApproval: "never", MaxSubKrills: 1},
+		config.AgentConfig{Name: "task-test", PlanApproval: "never", MaxSubAgents: 1},
 		&MockProvider{chatResponse: "SUMMARY: test\nSTEP 1: do thing"},
 		&mockBrain{},
 		&mockSkillRegistry{},
@@ -72,7 +72,7 @@ func TestTaskRunnerSubmitAndComplete(t *testing.T) {
 
 func TestTaskRunnerConcurrencyLimit(t *testing.T) {
 	agent := New(
-		config.AgentConfig{Name: "task-test", PlanApproval: "never", MaxSubKrills: 1},
+		config.AgentConfig{Name: "task-test", PlanApproval: "never", MaxSubAgents: 1},
 		&slowMockProvider{delay: 200 * time.Millisecond, response: "SUMMARY: test\nSTEP 1: do thing"},
 		&mockBrain{},
 		&mockSkillRegistry{},

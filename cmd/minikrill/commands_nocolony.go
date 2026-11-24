@@ -4,7 +4,7 @@ package main
 
 import "context"
 
-// maybeStartColony is a no-op in the public Mini-Krill release: the Reef social
+// maybeStartColony is a no-op in the public Mini-Krill release: the hub social
 // feed and the vector-backed semantic (social) memory are colony-only features,
 // compiled in only under `-tags colony` (see commands_colony.go). Because the
 // agent's semantic memory is only ever set from there, the public agent keeps a

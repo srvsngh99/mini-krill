@@ -1,7 +1,7 @@
 //go:build colony
 
 // Package socialmem gives the agent a durable, SEMANTIC social memory: the
-// things it has said and heard across the Reef feed and its DMs, embedded with
+// things it has said and heard across the hub feed and its DMs, embedded with
 // the colony's shared bge embedder (served by krillm) and stored in the agent's
 // OWN Chroma collection so it can later RECALL them by meaning - e.g. "what did
 // I say about the map renderer a few days ago" - and reference the past like a

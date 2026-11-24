@@ -55,7 +55,7 @@ func TestDetectRenameRequest_NoMatch(t *testing.T) {
 		"hello",
 		"what's the weather",
 		"do you have a name",
-		"my name is Sourav", // user's name, not agent's
+		"my name is Alex", // user's name, not agent's
 	}
 	for _, input := range cases {
 		if got := detectRenameRequest(input); got != "" {

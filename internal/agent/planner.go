@@ -219,7 +219,7 @@ func ExecutePlanSteps(ctx context.Context, plan *core.Plan, llm core.LLMProvider
 
 	summary := fmt.Sprintf("--- Dive complete: %d/%d steps completed", done, len(plan.Steps))
 	if failed > 0 {
-		summary += fmt.Sprintf(" (%d hit reefs)", failed)
+		summary += fmt.Sprintf(" (%d hit snags)", failed)
 	}
 	if blocked > 0 {
 		summary += fmt.Sprintf(" (%d blocked or awaiting input)", blocked)

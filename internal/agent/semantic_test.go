@@ -67,7 +67,7 @@ func (c *capturingProvider) lastMessages() []core.Message {
 func newSemanticTestAgent(response string) (*KrillAgent, *capturingProvider) {
 	p := &capturingProvider{MockProvider: MockProvider{chatResponse: response}}
 	a := New(
-		config.AgentConfig{Name: "test-krill", MaxSubKrills: 3, PlanApproval: "always"},
+		config.AgentConfig{Name: "test-krill", MaxSubAgents: 3, PlanApproval: "always"},
 		p,
 		&mockBrain{},
 		&mockSkillRegistry{},
@@ -80,7 +80,7 @@ func newSemanticTestAgent(response string) (*KrillAgent, *capturingProvider) {
 // block, otherwise the agent has no meaning-based memory of DMs at all.
 func TestChatPromptCarriesSemanticRecall(t *testing.T) {
 	a, prov := newSemanticTestAgent("Sure thing.")
-	mem := &fakeSemantic{block: "YOUR RELEVANT MEMORY (things you said or heard before - reference them naturally if useful, don't repeat yourself):\n- yesterday - [dm_in] the owner asked about the map renderer\n"}
+	mem := &fakeSemantic{block: "YOUR RELEVANT MEMORY (things you said or heard before - reference them naturally if useful, don't repeat yourself):\n- yesterday - [dm_in] a teammate asked about the map renderer\n"}
 	a.SetSemanticMemory(mem)
 
 	if _, err := a.ChatFromPlatform(context.Background(), "telegram", "42", "how is the map renderer going?"); err != nil {

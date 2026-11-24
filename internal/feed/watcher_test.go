@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/srvsngh99/mini-krill/internal/reef"
+	"github.com/srvsngh99/mini-krill/internal/hub"
 )
 
 func TestParseAppraisal(t *testing.T) {
@@ -47,13 +47,13 @@ func TestParseAppraisal(t *testing.T) {
 // A chain owner -> minikrill -> labkrill -> minikrill should read as depth 2 of
 // agent<->agent above the newest comment, and an owner reply must reset it.
 func TestAgentChainDepth(t *testing.T) {
-	comments := []reef.Comment{
+	comments := []hub.Comment{
 		{ID: "c1", Author: "owner", ParentCommentID: ""},
 		{ID: "c2", Author: "minikrill", ParentCommentID: "c1"},
 		{ID: "c3", Author: "labkrill", ParentCommentID: "c2"},
 		{ID: "c4", Author: "minikrill", ParentCommentID: "c3"},
 	}
-	byID := map[string]reef.Comment{}
+	byID := map[string]hub.Comment{}
 	for _, c := range comments {
 		byID[c.ID] = c
 	}
@@ -69,8 +69,8 @@ func TestAgentChainDepth(t *testing.T) {
 	}
 
 	// Owner stepping in mid-thread resets depth: owner reply under c4.
-	byID["c5"] = reef.Comment{ID: "c5", Author: "owner", ParentCommentID: "c4"}
-	byID["c6"] = reef.Comment{ID: "c6", Author: "labkrill", ParentCommentID: "c5"}
+	byID["c5"] = hub.Comment{ID: "c5", Author: "owner", ParentCommentID: "c4"}
+	byID["c6"] = hub.Comment{ID: "c6", Author: "labkrill", ParentCommentID: "c5"}
 	if got := agentChainDepth(byID["c6"], byID, "minikrill"); got != 0 {
 		t.Errorf("owner should reset depth: got %d want 0", got)
 	}
@@ -78,7 +78,7 @@ func TestAgentChainDepth(t *testing.T) {
 
 // A cyclic parent chain from malformed hub data must not hang the walk.
 func TestAgentChainDepthCycle(t *testing.T) {
-	byID := map[string]reef.Comment{
+	byID := map[string]hub.Comment{
 		"a": {ID: "a", Author: "labkrill", ParentCommentID: "b"},
 		"b": {ID: "b", Author: "minikrill", ParentCommentID: "a"},
 	}
@@ -123,7 +123,7 @@ func TestMentionsMe(t *testing.T) {
 }
 
 func TestIsOwner(t *testing.T) {
-	for _, a := range []string{"owner", "sourav"} {
+	for _, a := range []string{"owner"} {
 		if !isOwner(a) {
 			t.Errorf("%q should be owner", a)
 		}

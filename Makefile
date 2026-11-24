@@ -1,4 +1,4 @@
-# NOTE: The public build (`make install`) intentionally EXCLUDES the Reef feed
+# NOTE: The public build (`make install`) intentionally EXCLUDES the hub feed
 # and the Chroma-backed social memory. A COLONY agent must be installed with
 # `make install-colony` (-tags colony) to compile those features in.
 VERSION := $(shell cat VERSION)

@@ -24,7 +24,7 @@ These behaviors came from real usage:
 
 - Ordinary questions like "why did I get this error?" triggered a full
   `DIVE PLAN` instead of a direct clarifying answer.
-- Requests like "check the Medha repo in playground" became plans and then
+- Requests like "check the example-project repo in playground" became plans and then
   failed with `context deadline exceeded`.
 - `/use codex` failed in Telegram even though the README documents `/use`.
 - Approved plans timed out after the user said "yes".
@@ -227,7 +227,7 @@ Scope:
 
 Acceptance criteria:
 
-- "Check the Medha repo in playground" can list the folder, read README/config,
+- "Check the example-project repo in playground" can list the folder, read README/config,
   identify stack, and summarize next steps.
 - "Go through code and README" performs actual file reads.
 - Task output references real files inspected.
@@ -252,7 +252,7 @@ Scope:
 
 Acceptance criteria:
 
-- "What do you remember about Medha?" returns project-specific facts from prior
+- "What do you remember about example-project?" returns project-specific facts from prior
   task output.
 - Repeated feedback changes future tone or behavior without manual
   `self:reflect`.
@@ -338,7 +338,7 @@ Manual checks:
 - Start Telegram bot in foreground with `minikrill dive --foreground`.
 - Send `/help`, `/use codex`, `/switch local`, `/model`.
 - Ask "why did I get this error?" and confirm no `DIVE PLAN`.
-- Ask "check the Medha repo in playground" and confirm it becomes a task or
+- Ask "check the example-project repo in playground" and confirm it becomes a task or
   a clear local-access response.
 - Ask "remember that I prefer direct answers" and confirm it is stored.
 - Restart Mini Krill and ask what it remembers.

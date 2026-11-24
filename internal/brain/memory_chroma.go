@@ -11,8 +11,8 @@ import (
 
 	"github.com/srvsngh99/mini-krill/internal/config"
 	"github.com/srvsngh99/mini-krill/internal/core"
+	"github.com/srvsngh99/mini-krill/internal/hub"
 	klog "github.com/srvsngh99/mini-krill/internal/log"
-	"github.com/srvsngh99/mini-krill/internal/reef"
 	"github.com/srvsngh99/mini-krill/internal/socialmem"
 )
 
@@ -166,7 +166,7 @@ func entryFrom(id, text string, meta map[string]any) core.MemoryEntry {
 // newDefaultMemory (colony) returns the Chroma-backed memory and migrates the
 // legacy FileMemory store into it exactly once.
 func newDefaultMemory(memDir string, cfg config.BrainConfig) (core.Memory, error) {
-	cm := NewChromaMemory(reef.AgentID(), cfg.MaxMemories)
+	cm := NewChromaMemory(hub.AgentID(), cfg.MaxMemories)
 	migrateFileMemoryOnce(memDir, cfg, cm)
 	return cm, nil
 }

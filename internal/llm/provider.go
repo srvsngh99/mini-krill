@@ -49,7 +49,7 @@ func NewProvider(cfg config.LLMConfig, ollamaCfg config.OllamaConfig) (core.LLMP
 		// Krill (the local engine on :57455) is primary; Ollama (a SMALL model,
 		// so it can coexist in RAM with Krill's 12B on a 16GB box) is the
 		// fallback. Krill endpoint/model are env-overridable (KRILLM_URL /
-		// KRILL_MODEL), matching how Reef locates the same server.
+		// KRILL_MODEL), matching how the hub locates the same server.
 		krillURL := envOr("KRILLM_URL", KrillDefaultURL)
 		krillModel := cfg.Model
 		if krillModel == "" || krillModel == "auto" {

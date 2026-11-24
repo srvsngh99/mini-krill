@@ -7,13 +7,13 @@ import (
 	"time"
 
 	"github.com/srvsngh99/mini-krill/internal/feed"
+	"github.com/srvsngh99/mini-krill/internal/hub"
 	klog "github.com/srvsngh99/mini-krill/internal/log"
-	"github.com/srvsngh99/mini-krill/internal/reef"
 	"github.com/srvsngh99/mini-krill/internal/socialmem"
 )
 
 // maybeStartColony wires the agent's semantic social memory (chat/DM recall AND
-// feed recall) and launches the Reef feed watcher. COLONY-ONLY: this file
+// feed recall) and launches the hub feed watcher. COLONY-ONLY: this file
 // compiles only under `-tags colony`, so the public Mini-Krill release never
 // carries the feed or the vector-store dependency.
 func maybeStartColony(ctx context.Context, stack *krillStack) {
@@ -26,9 +26,9 @@ func maybeStartColony(ctx context.Context, stack *krillStack) {
 	// no explicit collection is configured.
 	coll := stack.cfg.SocialMem.Collection
 	if coll == "" {
-		coll = reef.AgentID()
+		coll = hub.AgentID()
 	}
-	social := socialmem.New(reef.AgentID(), socialmem.Config{
+	social := socialmem.New(hub.AgentID(), socialmem.Config{
 		Enabled:      stack.cfg.SocialMem.Enabled,
 		ChromaURL:    stack.cfg.SocialMem.ChromaURL,
 		EmbedURL:     stack.cfg.SocialMem.EmbedURL,
@@ -39,7 +39,7 @@ func maybeStartColony(ctx context.Context, stack *krillStack) {
 	})
 
 	// Give the CHAT/DM path the same memory the feed watcher has. Without this
-	// the agent only ever recalled (and stored) its Reef feed engagements, so it
+	// the agent only ever recalled (and stored) its hub feed engagements, so it
 	// could not remember a conversation the owner had with it directly. Nil-safe
 	// and best-effort inside the agent, so an unreachable vector service just
 	// means no recall block.
@@ -50,9 +50,9 @@ func maybeStartColony(ctx context.Context, stack *krillStack) {
 		klog.Info("social memory enabled", "collection", coll)
 	}
 
-	// The feed watcher only makes sense on the Reef hub; keep it gated exactly as
-	// before so a non-Reef deployment never starts it.
-	if !stack.cfg.Feed.Enabled || !reef.IsConfigured() {
+	// The feed watcher only makes sense on the message hub; keep it gated exactly as
+	// before so a non-hub deployment never starts it.
+	if !stack.cfg.Feed.Enabled || !hub.IsConfigured() {
 		return
 	}
 	fw := feed.NewFeedWatcher(stack.llm, stack.brain, social, stack.cfg.Feed)
@@ -61,7 +61,7 @@ func maybeStartColony(ctx context.Context, stack *krillStack) {
 			klog.Error("feed watcher error", "error", err)
 		}
 	}()
-	klog.Info("feed watcher enabled", "agent", reef.AgentID())
+	klog.Info("feed watcher enabled", "agent", hub.AgentID())
 }
 
 // socialAdapter bridges *socialmem.Store to agent.SemanticMemory. The adapter

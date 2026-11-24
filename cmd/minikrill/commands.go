@@ -19,11 +19,11 @@ import (
 	"github.com/srvsngh99/mini-krill/internal/config"
 	"github.com/srvsngh99/mini-krill/internal/core"
 	"github.com/srvsngh99/mini-krill/internal/doctor"
+	"github.com/srvsngh99/mini-krill/internal/hub"
 	"github.com/srvsngh99/mini-krill/internal/llm"
 	klog "github.com/srvsngh99/mini-krill/internal/log"
 	"github.com/srvsngh99/mini-krill/internal/ollama"
 	"github.com/srvsngh99/mini-krill/internal/plugin"
-	"github.com/srvsngh99/mini-krill/internal/reef"
 	"github.com/srvsngh99/mini-krill/internal/reminder"
 	"github.com/srvsngh99/mini-krill/internal/tui"
 )
@@ -417,16 +417,16 @@ var diveCmd = &cobra.Command{
 
 		bs := startBots(ctx, stack)
 		if bs.WebOK {
-			fmt.Println("  " + cGreen + "Reef:     swimming" + cReset)
+			fmt.Println("  " + cGreen + "Hub:      connected" + cReset)
 		}
-		if stack.cfg.Telegram.Enabled && !reef.IsConfigured() {
+		if stack.cfg.Telegram.Enabled && !hub.IsConfigured() {
 			if bs.TelegramOK {
 				fmt.Println("  " + cGreen + "Telegram: swimming" + cReset)
 			} else {
 				fmt.Printf("  "+cRed+"Telegram: %s\n"+cReset, friendlyError(bs.TelegramErr))
 			}
 		}
-		if stack.cfg.Discord.Enabled && !reef.IsConfigured() {
+		if stack.cfg.Discord.Enabled && !hub.IsConfigured() {
 			if bs.DiscordOK {
 				fmt.Println("  " + cGreen + "Discord:  swimming" + cReset)
 			} else {
@@ -589,7 +589,7 @@ type botStatus struct {
 	DiscordErr  error
 	WebOK       bool
 	WebErr      error
-	web         *chat.WebBot // set in reef mode; drained on shutdown
+	web         *chat.WebBot // set in hub mode; drained on shutdown
 }
 
 // startBots launches Telegram and Discord bots in the background when enabled.
@@ -598,32 +598,32 @@ func startBots(ctx context.Context, stack *krillStack) botStatus {
 	var s botStatus
 	// Genuine feed presence + semantic social memory are COLONY-ONLY: they
 	// compile in only under `-tags colony`, so the public Mini-Krill release
-	// stays lean (no Reef feed, no vector-store dependency). maybeStartColony is
+	// stays lean (no hub feed, no vector-store dependency). maybeStartColony is
 	// a no-op in public builds. See commands_colony.go / commands_nocolony.go.
 	//
 	// It runs BEFORE the adapter split because semantic memory now also feeds the
-	// CHAT/DM prompt, so Telegram and Discord chats need it too, not just Reef.
-	// The feed watcher itself is still gated on Reef inside maybeStartColony.
+	// CHAT/DM prompt, so Telegram and Discord chats need it too, not just hub.
+	// The feed watcher itself is still gated on hub inside maybeStartColony.
 	maybeStartColony(ctx, stack)
 
-	// One adapter at a time: when Reef is configured, run only the web bot.
-	if reef.IsConfigured() {
+	// One adapter at a time: when hub is configured, run only the web bot.
+	if hub.IsConfigured() {
 		wbBot := chat.NewWebBot(stack.handler)
 		if runner := stack.agent.TaskRunnerRef(); runner != nil {
 			runner.RegisterNotifier("web", func(chatID, message string) {
-				if err := reef.PostIngest("chat", "chat", message); err != nil {
-					klog.Warn("reef notify failed", "error", err)
+				if err := hub.PostIngest("chat", "chat", message); err != nil {
+					klog.Warn("hub notify failed", "error", err)
 				}
 			})
 		}
 		go func() {
 			if err := wbBot.Start(ctx); err != nil {
-				klog.Error("web (reef) error", "error", err)
+				klog.Error("web (hub) error", "error", err)
 			}
 		}()
 		s.WebOK = true
 		s.web = wbBot
-		klog.Info("web (reef) bot started", "agent", reef.AgentID())
+		klog.Info("web (hub) bot started", "agent", hub.AgentID())
 		return s
 	}
 	if stack.cfg.Telegram.Enabled {

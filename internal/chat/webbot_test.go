@@ -46,7 +46,7 @@ func TestWebBotDispatchesRepliesAndAcks(t *testing.T) {
 		case "/api/ingest":
 			var p map[string]any
 			json.NewDecoder(r.Body).Decode(&p)
-			if c, _ := p["content"].(string); c != "" && c != "Mini-Krill online on Reef." {
+			if c, _ := p["content"].(string); c != "" && c != "Mini-Krill online on the hub." {
 				posted.Store(c)
 			}
 			io.WriteString(w, `{"ok":true,"id":"r"}`)
@@ -66,9 +66,9 @@ func TestWebBotDispatchesRepliesAndAcks(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	t.Setenv("REEF_INGEST_URL", srv.URL)
-	t.Setenv("REEF_AGENT_TOKEN", "tok")
-	t.Setenv("REEF_AGENT_ID", "minikrill")
+	t.Setenv("HUB_INGEST_URL", srv.URL)
+	t.Setenv("HUB_AGENT_TOKEN", "tok")
+	t.Setenv("HUB_AGENT_ID", "minikrill")
 
 	h := &stubHandler{reply: "pong"}
 	bot := NewWebBot(h)

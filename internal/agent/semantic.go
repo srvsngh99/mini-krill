@@ -11,7 +11,7 @@ import (
 )
 
 // SemanticMemory is the agent's vector-backed semantic memory: the same store
-// the Reef feed watcher writes its engagements into (internal/socialmem).
+// the hub feed watcher writes its engagements into (internal/socialmem).
 //
 // It is declared here as an INTERFACE, and never as the concrete
 // *socialmem.Store, on purpose: internal/socialmem is `//go:build colony`, so
@@ -48,7 +48,7 @@ func (a *KrillAgent) SetSemanticMemory(m SemanticMemory) {
 //
 // WHY THIS BELONGS IN THE CHAT PATH (do not "tidy" it out):
 // semantic recall used to be wired into the FEED WATCHER ONLY. The agent could
-// therefore remember what it had said in public Reef posts, but had literal
+// therefore remember what it had said in public hub posts, but had literal
 // amnesia about the conversation you had with it directly: the chat prompt
 // carried only raw scrollback (recall.go), which is keyword / `/recall` driven
 // and never searches by meaning. This call is what lets the agent say "you
