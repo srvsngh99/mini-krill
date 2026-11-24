@@ -18,7 +18,7 @@ import (
 // carries the feed or the vector-store dependency.
 func maybeStartColony(ctx context.Context, stack *krillStack) {
 	// Semantic social memory: Mini-Krill's OWN collection (isolated from the
-	// other agents), embedded with the shared colony bge embedder. No-ops unless
+	// other agents), embedded with the shared colony EG2 embedder. No-ops unless
 	// enabled and reachable.
 	// Unify storage: feed interactions and general memory share ONE collection
 	// per agent (the agent id) - its whole mind in one place - so feed recall can

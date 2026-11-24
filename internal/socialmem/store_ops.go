@@ -39,7 +39,7 @@ func (s *Store) Upsert(ctx context.Context, m Memory) error {
 	if err != nil {
 		return err
 	}
-	emb, err := s.embed(ctx, m.Text)
+	emb, err := s.embed(ctx, m.Text, "Document")
 	if err != nil {
 		return err
 	}
@@ -191,7 +191,7 @@ func (s *Store) RecallWhere(ctx context.Context, query string, k int, where map[
 	if err != nil {
 		return nil
 	}
-	emb, err := s.embed(ctx, query)
+	emb, err := s.embed(ctx, query, "SearchQuery")
 	if err != nil {
 		return nil
 	}

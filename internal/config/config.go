@@ -31,8 +31,8 @@ type Config struct {
 }
 
 // SocialMemConfig configures the agent's semantic social memory: its OWN Chroma
-// collection (isolated from other agents), embedded with the shared colony bge
-// embedder served by krillm. It remembers what the agent said/heard on the feed
+// collection (isolated from other agents), embedded with the shared colony EG2
+// embedder served by Krill. It remembers what the agent said/heard on the feed
 // and in DMs and recalls it by meaning. Best-effort: if Chroma/embedder are
 // unreachable it silently no-ops. Mirrors socialmem.Config so the config package
 // stays decoupled from internal/socialmem.
@@ -340,8 +340,8 @@ func DefaultConfig() *Config {
 		SocialMem: SocialMemConfig{
 			Enabled:      true,
 			ChromaURL:    "http://127.0.0.1:8004",
-			EmbedURL:     "http://127.0.0.1:7997",
-			EmbedModel:   "bge-base-en",
+			EmbedURL:     "http://127.0.0.1:57458",
+			EmbedModel:   "embeddinggemma-2-mlx-4bit-dyn-text",
 			RecallK:      4,
 			RetentionCap: 2000,
 		},

@@ -36,3 +36,9 @@ Memory belongs to Mini Krill, not to Ollama, Codex, or Claude. Switching provide
 ```
 
 When using Codex or Claude, prompts and injected memory context go through the selected provider CLI.
+
+## Semantic memory embedder
+
+Semantic social memory embeds with EmbeddingGemma 2 (`embed_url` `http://127.0.0.1:57458`, model `embeddinggemma-2-mlx-4bit-dyn-text`, 768-d, unit-normalised). Stored text is embedded with task `Document`, lookups with `SearchQuery`. Vectors live in `<collection>_eg2`; the old bge collections stay untouched.
+
+Roll back: set `social_memory.embed_url` to the old embedder, `embed_model: bge-base-en`, and for the brain path the env vars `COLONY_EMBED_URL` and `COLONY_EMBED_MODEL=bge-base-en`, then restart. The bge model name selects the old collection names.
