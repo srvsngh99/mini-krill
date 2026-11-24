@@ -17,7 +17,7 @@ import (
 )
 
 // ChromaMemory is the COLONY default memory backend: the agent's entire memory
-// lives in its OWN Chroma collection (embedded with the shared bge embedder),
+// lives in its OWN Chroma collection (embedded with the shared EG2 embedder),
 // so every recall is semantic - "what did I learn / say about X" returns by
 // meaning, not exact key. It satisfies core.Memory and is selected over
 // FileMemory only in colony builds (see memory_default.go for the public one).

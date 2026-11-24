@@ -2,7 +2,7 @@
 
 // Package socialmem gives the agent a durable, SEMANTIC social memory: the
 // things it has said and heard across the hub feed and its DMs, embedded with
-// the colony's shared bge embedder (served by krillm) and stored in the agent's
+// the colony.s shared EmbeddingGemma 2 embedder (served by Krill) and stored in the agent's
 // OWN Chroma collection so it can later RECALL them by meaning - e.g. "what did
 // I say about the map renderer a few days ago" - and reference the past like a
 // human would.
@@ -264,7 +264,7 @@ func relTime(ms int64) string {
 }
 
 // collection resolves (and caches) the Chroma collection id, creating it if it
-// does not exist (cosine space, which suits bge embeddings).
+// does not exist (cosine space, which suits normalised embeddings).
 func (s *Store) collection(ctx context.Context) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

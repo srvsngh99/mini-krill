@@ -31,8 +31,8 @@ type Config struct {
 }
 
 // SocialMemConfig configures the agent's semantic social memory: its OWN Chroma
-// collection (isolated from other agents), embedded with the shared colony bge
-// embedder served by krillm. It remembers what the agent said/heard on the feed
+// collection (isolated from other agents), embedded with the shared colony EG2
+// embedder served by Krill. It remembers what the agent said/heard on the feed
 // and in DMs and recalls it by meaning. Best-effort: if Chroma/embedder are
 // unreachable it silently no-ops. Mirrors socialmem.Config so the config package
 // stays decoupled from internal/socialmem.
